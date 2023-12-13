@@ -74,6 +74,7 @@ if(CMAKE_PROJECT_NAME STREQUAL io)
     option(BUILD_TESTING "Build tests. Enabled by default." ON)
     include(CTest)
     if(BUILD_TESTING)
+        set(ENV{PYTHONPATH} ${BRANCH_ROOT_DIR}/carbon/common/stdlib:${BRANCH_ROOT_DIR}/vendor/python/3.8.1+ccp-stackless/${CCP_VENDOR_BIN_PATH})
         execute_process(COMMAND ${PYTHON_EXECUTABLE} discover.py
                 OUTPUT_VARIABLE PYTHON_TESTS_STR
                 OUTPUT_STRIP_TRAILING_WHITESPACE
@@ -92,9 +93,13 @@ if(CMAKE_PROJECT_NAME STREQUAL io)
                     COMMAND ${PYTHON_EXECUTABLE} -m carboniotests -v ${PYTHON_TEST}
                     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/tests
             )
-            # On Windows we need to pass on BUILD_DIR for our binary modules so that the test runner can configure dll search paths accordingly.
-            # Otherwise the interpreter would pick up whatever existing version of _socket/_ssl/_select exist next to exefile.exe already
-            set_tests_properties(${PYTHON_TEST} PROPERTIES ENVIRONMENT "CARBONIO_BUILD_DIR=$<TARGET_FILE_DIR:_socket>;BUILDFLAVOR=$<LOWER_CASE:$<CONFIG>>")
+            if(WIN32)
+                set_tests_properties(${PYTHON_TEST} PROPERTIES ENVIRONMENT "PYTHONPATH=$<TARGET_FILE_DIR:_socket>\;${BRANCH_ROOT_DIR}/carbon/common/stdlib\;${BRANCH_ROOT_DIR}/vendor/python/3.8.1+ccp-stackless/${CCP_VENDOR_BIN_PATH};BUILDFLAVOR=$<LOWER_CASE:$<CONFIG>>")
+            elseif (APPLE)
+                set_tests_properties(${PYTHON_TEST} PROPERTIES ENVIRONMENT "PYTHONPATH=$<TARGET_FILE_DIR:_socket>:${BRANCH_ROOT_DIR}/carbon/common/stdlib:${BRANCH_ROOT_DIR}/vendor/python/3.8.1+ccp-stackless/${CCP_VENDOR_BIN_PATH};BUILDFLAVOR=$<LOWER_CASE:$<CONFIG>>")
+            else()
+                message(FATAL_ERROR "Unsupported platform")
+            endif ()
         endforeach()
     endif()
 
