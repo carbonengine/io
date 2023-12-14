@@ -4746,6 +4746,11 @@ def test_main(verbose=False):
         support.run_unittest(*tests)
     finally:
         support.threading_cleanup(*thread_info)
+    test_main.running = False
+
 
 if __name__ == "__main__":
-    test_main()
+    import stackless
+    stackless.tasklet(test_main)()
+    while getattr(test_main, "running", True):
+        stackless.run()

@@ -74,23 +74,12 @@ if(CMAKE_PROJECT_NAME STREQUAL io)
     option(BUILD_TESTING "Build tests. Enabled by default." ON)
     include(CTest)
     if(BUILD_TESTING)
-        set(ENV{PYTHONPATH} ${BRANCH_ROOT_DIR}/carbon/common/stdlib:${BRANCH_ROOT_DIR}/vendor/python/3.8.1+ccp-stackless/${CCP_VENDOR_BIN_PATH})
-        execute_process(COMMAND ${PYTHON_EXECUTABLE} discover.py
-                OUTPUT_VARIABLE PYTHON_TESTS_STR
-                OUTPUT_STRIP_TRAILING_WHITESPACE
-                ERROR_STRIP_TRAILING_WHITESPACE
-                RESULT_VARIABLE PYTHON_TEST_DISCOVERY_RETVAL
-                ERROR_VARIABLE PYTHON_TEST_DISCOVERY_ERRORS
-                WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/tests
-        )
-        if(${PYTHON_TEST_DISCOVERY_RETVAL})
-            message(FATAL_ERROR "Error encountered during test discovery:\n=== stderr: ===\n${PYTHON_TEST_DISCOVERY_ERRORS}\n=== stdout: ===\n${PYTHON_TESTS_STR}")
-        endif()
-        separate_arguments(PYTHON_TESTS UNIX_COMMAND ${PYTHON_TESTS_STR})
+        list(APPEND PYTHON_TESTS test_socket.py)
+        list(APPEND PYTHON_TESTS test_ssl.py)
+        list(APPEND PYTHON_TESTS test_select.py)
         foreach(PYTHON_TEST ${PYTHON_TESTS})
-            message(STATUS "Found test ${PYTHON_TEST}")
             add_test(NAME ${PYTHON_TEST}
-                    COMMAND ${PYTHON_EXECUTABLE} -m carboniotests -v ${PYTHON_TEST}
+                    COMMAND ${PYTHON_EXECUTABLE} ${PYTHON_TEST}
                     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/tests
             )
             if(WIN32)

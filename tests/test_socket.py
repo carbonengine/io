@@ -6275,6 +6275,11 @@ def test_main():
     thread_info = support.threading_setup()
     support.run_unittest(*tests)
     support.threading_cleanup(*thread_info)
+    test_main.running = False
+
 
 if __name__ == "__main__":
-    test_main()
+    import stackless
+    stackless.tasklet(test_main)()
+    while getattr(test_main, "running", True):
+        stackless.run()
