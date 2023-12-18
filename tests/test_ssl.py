@@ -2281,7 +2281,7 @@ def _test_get_server_certificate_fail(test, host, port):
         test.fail("Got server certificate %s for %s:%s!" % (pem, host, port))
 
 
-from test.ssl_servers import make_https_server
+from ssl_servers import make_https_server
 
 class ThreadedEchoServer(threading.Thread):
 
