@@ -24,16 +24,30 @@ find_package(libuv CONFIG REQUIRED)
 find_package(Python CONFIG REQUIRED)
 find_package(OpenSSL CONFIG REQUIRED)
 
+add_library(iobase STATIC
+    src/carbonio.cpp
+)
+target_link_libraries(iobase
+    PUBLIC
+        Python
+    PRIVATE
+        libuv::uv_a
+)
+target_include_directories(iobase
+    PUBLIC
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+    PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
+target_compile_definitions(iobase PUBLIC BLUEIMPORT=)
+
 # --- _socket ---
 ccp_add_library(_socket SHARED
     src/socketmodule.c
-    src/io.cpp
 )
 target_link_libraries(_socket
     PRIVATE
-        libuv::uv_a
-    PUBLIC
-        Python
+        iobase
 )
 
 get_target_property(_SOURCES _socket SOURCES)
@@ -53,7 +67,13 @@ source_group("_ssl" FILES
     src/_ssl/debughelpers.c
     src/clinic/_ssl.c.h
 )
-target_link_libraries(_ssl PUBLIC Python OpenSSL::Crypto OpenSSL::SSL)
+target_link_libraries(_ssl
+    PRIVATE
+        iobase
+    PUBLIC
+        OpenSSL::Crypto
+        OpenSSL::SSL
+)
 
 # --- _select ---
 ccp_add_library(_select SHARED
@@ -64,7 +84,10 @@ source_group("_select" FILES
     ${_SOURCES}
     src/clinic/selectmodule.c.h
 )
-target_link_libraries(_select PUBLIC Python)
+target_link_libraries(_select
+    PRIVATE
+        iobase
+)
 if(WIN32)
     target_link_libraries(_select PUBLIC ws2_32.lib)
 endif()
