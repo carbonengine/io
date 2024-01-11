@@ -3924,7 +3924,7 @@ struct sock_recvmsg
 static int
 	sock_recvmsg_impl( PySocketSockObject* s, void* data )
 {
-	struct sock_recvmsg* ctx = data;
+	struct sock_recvmsg* ctx = reinterpret_cast<struct sock_recvmsg*>( data );
 
 	ctx->result = recvmsg( s->sock_fd, ctx->msg, ctx->flags );
 	return ( ctx->result >= 0 );
@@ -4080,7 +4080,7 @@ err_closefds:
 static PyObject*
 	makeval_recvmsg( ssize_t received, void* data )
 {
-	PyObject** buf = data;
+	PyObject** buf = reinterpret_cast<PyObject**>( data );
 
 	if( received < PyBytes_GET_SIZE( *buf ) )
 		_PyBytes_Resize( buf, received );
@@ -4564,7 +4564,7 @@ finally:
 static int
 	sock_sendmsg_impl( PySocketSockObject* s, void* data )
 {
-	struct sock_sendmsg* ctx = data;
+	struct sock_sendmsg* ctx = reinterpret_cast<struct sock_sendmsg*>( data );
 
 	ctx->result = sendmsg( s->sock_fd, ctx->msg, ctx->flags );
 	return ( ctx->result >= 0 );
@@ -5721,7 +5721,7 @@ static PyObject*
 	res = PyObject_GetBuffer( hnobj, &buf, PyBUF_SIMPLE );
 	if( !res )
 	{
-		res = sethostname( buf.buf, buf.len );
+		res = sethostname( (const char*) buf.buf, buf.len );
 		PyBuffer_Release( &buf );
 	}
 	if( flag )
