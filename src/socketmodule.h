@@ -180,6 +180,9 @@ typedef int SOCKET_T;
 #define PyLong_AsSocket_t(fd) (SOCKET_T)PyLong_AsLongLong(fd)
 #endif
 
+#include <uv.h>
+static_assert( sizeof( SOCKET_T ) == sizeof( uv_os_fd_t ), "Mismatching size between SOCKET_T and uv_os_fd_t" );
+
 /* Socket address */
 typedef union sock_addr {
     struct sockaddr_in in;
