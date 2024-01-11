@@ -30,7 +30,6 @@ add_library(iobase STATIC
 target_link_libraries(iobase
     PUBLIC
         Python
-    PRIVATE
         libuv::uv_a
 )
 target_include_directories(iobase
@@ -43,11 +42,15 @@ target_compile_definitions(iobase PUBLIC BLUEIMPORT=)
 
 # --- _socket ---
 ccp_add_library(_socket SHARED
-    src/socketmodule.c
+    src/socketmodule.cpp
 )
 target_link_libraries(_socket
     PRIVATE
         iobase
+)
+set_target_properties(_socket
+        PROPERTIES
+        DEBUG_POSTFIX ""
 )
 
 get_target_property(_SOURCES _socket SOURCES)
