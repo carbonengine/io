@@ -692,12 +692,24 @@ static PyObject*
 	return NULL;
 }
 
+#include <thread>
 #include <unordered_map>
+#include <BluePyCpp.h>
 std::unordered_map<SOCKET_T, uv_handle_t*> g_uv_handle_lookup_map;
 
 static void PyErr_FromUvErr( int error )
 {
 	PyErr_SetString( PyExc_RuntimeError, uv_err_name( error ) );
+}
+
+bool is_managed_by_libuv( int sock_type )
+{
+	return ( sock_type == SOCK_DGRAM || sock_type == SOCK_STREAM );
+}
+
+bool is_managed_by_libuv( PySocketSockObject* s )
+{
+    return is_managed_by_libuv( s->sock_type );
 }
 
 /* Function to perform the setting of socket blocking mode
@@ -2781,50 +2793,96 @@ static PyObject*
 	PyObject* res = NULL;
 	struct sock_accept ctx;
 
-	if( !getsockaddrlen( s, &addrlen ) )
-		return NULL;
-	memset( &addrbuf, 0, addrlen );
+	if( is_managed_by_libuv( s ) ) {
+	    auto it = g_uv_handle_lookup_map.find(s->sock_fd);
+	    if( it == g_uv_handle_lookup_map.end() ) {
+            errno = EBADF;
+            PyErr_SetFromErrno(PyExc_OSError);
+            // TODO: Close the socket?
+            goto finally;
+        }
+	    else {
+	        auto handle = reinterpret_cast<uv_stream_t*>(it->second);
+			auto channel = reinterpret_cast<PyChannelObject*>(handle->data);
+            if( channel == nullptr ) {
+                errno = EBADF;
+                PyErr_SetFromErrno(PyExc_OSError);
+                // TODO: Close the socket?
+                goto finally;
+            }
+            PyObject* listen_status = PyChannel_Receive(channel);
+            if( listen_status == NULL ) {
+                goto finally;
+            }
+            if( !PyLong_Check( listen_status ) ) {
+                PyErr_BadInternalCall();
+                goto finally;
+            }
+            int status = PyLong_AsLong( listen_status );
+            if( status < 0 ) {
+                PyErr_FromUvErr(status);
+                goto finally;
+            }
+            auto *client = new uv_tcp_t;
+            uv_tcp_init(uv_default_loop(), client);
+            status = uv_accept(handle, reinterpret_cast<uv_stream_t*>(client));
+            if( status < 0 ) {
+                PyErr_FromUvErr(status);
+                goto finally;
+            }
+            status = uv_fileno( reinterpret_cast<const uv_handle_t*>( client ), reinterpret_cast<uv_os_fd_t*>( &newfd ) );
+            if( status < 0 )
+            {
+                delete handle;
+                PyErr_FromUvErr( status );
+                goto finally;
+            }
+            g_uv_handle_lookup_map[newfd] = reinterpret_cast<uv_handle_t*>( handle );
+        }
+    }
+	else {
+        if (!getsockaddrlen(s, &addrlen))
+            return NULL;
+        memset(&addrbuf, 0, addrlen);
 
-	if( !IS_SELECTABLE( s ) )
-		return select_error();
+        if (!IS_SELECTABLE(s))
+            return select_error();
 
-	ctx.addrlen = &addrlen;
-	ctx.addrbuf = &addrbuf;
-	if( sock_call( s, 0, sock_accept_impl, &ctx ) < 0 )
-		return NULL;
-	newfd = ctx.result;
+        ctx.addrlen = &addrlen;
+        ctx.addrbuf = &addrbuf;
+        if (sock_call(s, 0, sock_accept_impl, &ctx) < 0)
+            return NULL;
+        newfd = ctx.result;
 
 #ifdef MS_WINDOWS
-	if( !SetHandleInformation( (HANDLE)newfd, HANDLE_FLAG_INHERIT, 0 ) )
-	{
-		PyErr_SetFromWindowsErr( 0 );
-		SOCKETCLOSE( newfd );
-		goto finally;
-	}
+        if (!SetHandleInformation((HANDLE) newfd, HANDLE_FLAG_INHERIT, 0)) {
+            PyErr_SetFromWindowsErr(0);
+            SOCKETCLOSE(newfd);
+            goto finally;
+        }
 #else
 
 #if defined( HAVE_ACCEPT4 ) && defined( SOCK_CLOEXEC )
-	if( !accept4_works )
+        if( !accept4_works )
 #endif
-	{
-		if( _Py_set_inheritable( newfd, 0, NULL ) < 0 )
-		{
-			SOCKETCLOSE( newfd );
-			goto finally;
-		}
-	}
+        {
+            if( _Py_set_inheritable( newfd, 0, NULL ) < 0 )
+            {
+                SOCKETCLOSE( newfd );
+                goto finally;
+            }
+        }
 #endif
+    }
+    sock = PyLong_FromSocket_t(newfd);
+    if (sock == NULL) {
+        SOCKETCLOSE(newfd);
+        goto finally;
+    }
 
-	sock = PyLong_FromSocket_t( newfd );
-	if( sock == NULL )
-	{
-		SOCKETCLOSE( newfd );
-		goto finally;
-	}
-
-	addr = makesockaddr( s->sock_fd, SAS2SA( &addrbuf ), addrlen, s->sock_proto );
-	if( addr == NULL )
-		goto finally;
+    addr = makesockaddr(s->sock_fd, SAS2SA(&addrbuf), addrlen, s->sock_proto);
+    if (addr == NULL)
+        goto finally;
 
 	res = PyTuple_Pack( 2, sock, addr );
 
@@ -3195,9 +3253,29 @@ static PyObject*
 		return NULL;
 	}
 
-	Py_BEGIN_ALLOW_THREADS
-		res = bind( s->sock_fd, SAS2SA( &addrbuf ), addrlen );
-	Py_END_ALLOW_THREADS if( res < 0 ) return s->errorhandler();
+	if( is_managed_by_libuv(s) ) {
+        auto pair = g_uv_handle_lookup_map.find(s->sock_fd);
+        if( pair == g_uv_handle_lookup_map.end() ) {
+            errno = EBADF;
+            res = -1;
+        }
+        else {
+            auto handle = reinterpret_cast<uv_tcp_t *>(pair->second);
+            Py_BEGIN_ALLOW_THREADS
+                res = uv_tcp_bind(handle, SAS2SA(&addrbuf), 0);
+            Py_END_ALLOW_THREADS
+            if (res < 0) {
+                PyErr_FromUvErr(res);
+                return NULL;
+            }
+        }
+    }
+	else {
+        Py_BEGIN_ALLOW_THREADS
+            res = bind(s->sock_fd, SAS2SA(&addrbuf), addrlen);
+        Py_END_ALLOW_THREADS
+    }
+    if (res < 0) return s->errorhandler();
 	Py_RETURN_NONE;
 }
 
@@ -3211,17 +3289,97 @@ sockets the address is a tuple (ifname, proto [,pkttype [,hatype [,addr]]])" );
 
 void cleanup_uv_handle( uv_handle_t* uv_handle )
 {
+	{
+		Ccp::PyGilEnsure gil;
+		Py_XDECREF( uv_handle->data );
+	}
 	switch( uv_handle_get_type( uv_handle ) )
 	{
 	case UV_TCP:
-		delete uv_handle;
+		delete reinterpret_cast<uv_tcp_t*>(uv_handle);
 		break;
 	case UV_UDP:
-		delete uv_handle;
+		delete reinterpret_cast<uv_udp_t*>(uv_handle);
 		break;
 	default:
 		delete uv_handle;
 		break;
+	}
+}
+
+void PyWriteUnraisable( const char* msg )
+{
+	PyObject *exc, *val, *tb;
+	PyObject* msg_obj;
+	PyErr_Fetch( &exc, &val, &tb );
+	msg_obj = PyUnicode_FromString( msg ? msg : "" );
+	PyErr_Restore( exc, val, tb );
+	if( !msg_obj )
+	{
+		msg_obj = Py_None;
+		Py_INCREF( Py_None );
+	}
+	PyErr_WriteUnraisable( msg_obj );
+	Py_DECREF( msg_obj );
+}
+
+void on_accept(uv_stream_t *handle, int status)
+{
+    auto channel = reinterpret_cast<PyChannelObject*>(handle->data);
+	Ccp::PyGilEnsure gil;
+    if( !channel )
+	{
+		PyErr_BadInternalCall();
+		PyWriteUnraisable("on_accept received null channel pointer" );
+		return;
+    }
+	auto py_status = PyLong_FromLong(status);
+	if( py_status == nullptr )
+	{
+		PyObject *exc, *val, *tb;
+		PyErr_Fetch( &exc, &val, &tb );
+		auto ret = PyChannel_SendThrow(channel, exc, val, tb);
+		if( ret < 0 )
+		{
+			PyErr_Restore( exc, val, tb );
+			PyWriteUnraisable( "on_accept failed to send exception" );
+		}
+		return;
+	}
+	int ret = PyChannel_Send(channel, py_status);
+	if( ret < 0 )
+	{
+		PyWriteUnraisable( "on_accept failed to send status" );
+	}
+}
+
+void on_connect(uv_connect_t* connection, int status)
+{
+	auto channel = reinterpret_cast<PyChannelObject*>(connection->handle->data);
+	Ccp::PyGilEnsure gil;
+	if( !channel )
+	{
+		PyErr_BadInternalCall();
+		PyWriteUnraisable("on_accept received null channel pointer" );
+		return;
+	}
+	auto py_status = PyLong_FromLong(status);
+	if( py_status == nullptr )
+	{
+		PyObject *exc, *val, *tb;
+		PyErr_Fetch( &exc, &val, &tb );
+		auto ret = PyChannel_SendThrow(channel, exc, val, tb);
+		if( ret < 0 )
+		{
+			PyErr_Restore( exc, val, tb );
+			PyWriteUnraisable( "on_accept failed to send exception" );
+		}
+		return;
+	}
+	int ret = PyChannel_Send(channel, py_status);
+	if( ret < 0 )
+	{
+		PyWriteUnraisable( "on_accept failed to send status" );
 	}
 }
 
@@ -3245,8 +3403,7 @@ static PyObject*
            http://lwn.net/Articles/576478/ and
            http://linux.derkeiler.com/Mailing-Lists/Kernel/2005-09/3000.html
            for more details. */
-		Py_BEGIN_ALLOW_THREADS
-		if( s->sock_type == SOCK_DGRAM || s->sock_type == SOCK_STREAM )
+		if( is_managed_by_libuv( s ) )
 		{
 			auto it = g_uv_handle_lookup_map.find(fd);
 			if (it == g_uv_handle_lookup_map.end())
@@ -3254,16 +3411,19 @@ static PyObject*
 				errno = EBADF;
 				res = -1;
 			} else {
+                Py_BEGIN_ALLOW_THREADS
 				uv_close( it->second, cleanup_uv_handle );
+                Py_END_ALLOW_THREADS
 				g_uv_handle_lookup_map.erase(fd);
 				res = 0;
 			}
 		}
 		else
 		{
+            Py_BEGIN_ALLOW_THREADS
 			res = SOCKETCLOSE( fd );
+            Py_END_ALLOW_THREADS
 		}
-		Py_END_ALLOW_THREADS
 			/* bpo-30319: The peer can already have closed the connection.
            Python ignores ECONNRESET on close(). */
 			if( res < 0 && errno != ECONNRESET )
@@ -3406,9 +3566,54 @@ static PyObject*
 		return NULL;
 	}
 
-	res = internal_connect( s, SAS2SA( &addrbuf ), addrlen, 1 );
-	if( res < 0 )
-		return NULL;
+	if( is_managed_by_libuv( s ) )
+	{
+		if( s->sock_type != SOCK_STREAM )
+		{
+			PyErr_SetString(PyExc_NotImplementedError, "Unsupproted libuv connection type");
+			return nullptr;
+
+		}
+
+		auto it = g_uv_handle_lookup_map.find( s->sock_fd );
+		if( it == g_uv_handle_lookup_map.end() )
+		{
+			PyErr_BadInternalCall();
+			return nullptr;
+		}
+		uv_tcp_t* handle = reinterpret_cast<uv_tcp_t*>(it->second);
+
+		uv_connect_t* connect = new uv_connect_t;
+		Py_BEGIN_ALLOW_THREADS
+		uv_tcp_connect(connect, handle, SAS2SA( &addrbuf ), on_connect);
+		Py_END_ALLOW_THREADS
+		auto channel = reinterpret_cast<PyChannelObject*>(handle->data);
+		if( !channel )
+		{
+			PyErr_BadInternalCall();
+			return nullptr;
+		}
+		int balance = PyChannel_GetBalance(channel);
+		PyObject* connect_status = PyChannel_Receive(channel);
+		if( connect_status == nullptr ) {
+			return nullptr;
+		}
+		if( !PyLong_Check( connect_status ) ) {
+			PyErr_BadInternalCall();
+			return nullptr;
+		}
+		int status = PyLong_AsLong( connect_status );
+		if( status < 0 ) {
+			PyErr_FromUvErr(status);
+			return nullptr;
+		}
+	}
+	else
+	{
+		res = internal_connect( s, SAS2SA( &addrbuf ), addrlen, 1 );
+		if( res < 0 )
+			return NULL;
+	}
 
 	Py_RETURN_NONE;
 }
@@ -3533,13 +3738,30 @@ static PyObject*
 	if( !PyArg_ParseTuple( args, "|i:listen", &backlog ) )
 		return NULL;
 
-	Py_BEGIN_ALLOW_THREADS
-		/* To avoid problems on systems that don't allow a negative backlog
-     * (which doesn't make sense anyway) we force a minimum value of 0. */
-		if( backlog < 0 )
-			backlog = 0;
-	res = listen( s->sock_fd, backlog );
-	Py_END_ALLOW_THREADS if( res < 0 ) return s->errorhandler();
+    /* To avoid problems on systems that don't allow a negative backlog
+    * (which doesn't make sense anyway) we force a minimum value of 0. */
+    if (backlog < 0)
+        backlog = 0;
+
+	if( is_managed_by_libuv( s ) ) {
+	    auto it = g_uv_handle_lookup_map.find(s->sock_fd);
+	    if( it == g_uv_handle_lookup_map.end() ) {
+	        errno = EBADF;
+	        res = -1;
+        }
+	    else {
+	        auto handle = reinterpret_cast<uv_stream_t*>(it->second);
+            Py_BEGIN_ALLOW_THREADS
+            res = uv_listen( handle, backlog, on_accept );
+            Py_END_ALLOW_THREADS
+        }
+    }
+	else {
+        Py_BEGIN_ALLOW_THREADS
+            res = listen(s->sock_fd, backlog);
+        Py_END_ALLOW_THREADS
+        if (res < 0) return s->errorhandler();
+    }
 	Py_RETURN_NONE;
 }
 
@@ -5184,20 +5406,22 @@ static void
 		s->sock_fd = INVALID_SOCKET;
 
 		/* We do not want to retry upon EINTR: see sock_close() */
-		Py_BEGIN_ALLOW_THREADS
-		if (s->sock_type == SOCK_STREAM || s->sock_type == SOCK_DGRAM)
+		if ( is_managed_by_libuv( s ) )
 		{
 			auto it = g_uv_handle_lookup_map.find( fd );
 			if (it != g_uv_handle_lookup_map.end())
 			{
+                Py_BEGIN_ALLOW_THREADS
 				uv_close( it->second, cleanup_uv_handle );
+                Py_END_ALLOW_THREADS
 				g_uv_handle_lookup_map.erase(fd);
 			}
 		} else
 		{
+            Py_BEGIN_ALLOW_THREADS
 			(void)SOCKETCLOSE( fd );
+            Py_END_ALLOW_THREADS
 		}
-		Py_END_ALLOW_THREADS
 	}
 
 	/* Restore the saved exception. */
@@ -5269,6 +5493,68 @@ static PyObject*
  * than 2.6.27 if SOCK_CLOEXEC flag is set in the socket type. */
 static int sock_cloexec_works = -1;
 #endif
+
+uv_tcp_t* create_uv_tcp_handle( SOCKET_T* fd, int family )
+{
+	// create libuv tcp handle
+	auto handle = new uv_tcp_t;
+	int ret = uv_tcp_init_ex( uv_default_loop(), handle, family );
+	if( ret < 0 )
+	{
+		delete handle;
+		PyErr_FromUvErr( ret );
+		return nullptr;
+	}
+	ret = uv_fileno( reinterpret_cast<const uv_handle_t*>( handle ), reinterpret_cast<uv_os_fd_t*>( fd ) );
+	if( ret < 0 )
+	{
+		delete handle;
+		PyErr_FromUvErr( ret );
+		return nullptr;
+	}
+	auto channel = PyChannel_New( nullptr);
+	handle->data = reinterpret_cast<void*>(channel);
+	if( handle->data == nullptr )
+	{
+		delete handle;
+		// PyChannel_New should have set an error.
+		return nullptr;
+	}
+	PyChannel_SetPreference( channel, 1 );
+	g_uv_handle_lookup_map[*fd] = reinterpret_cast<uv_handle_t*>( handle );
+	return handle;
+}
+
+uv_udp_t* create_uv_udp_handle(SOCKET_T* fd, int family)
+{
+	// create libuv udp handle
+	auto handle = new uv_udp_t;
+	int ret = uv_udp_init_ex( uv_default_loop(), handle, family );
+	if( ret < 0 )
+	{
+		PyErr_FromUvErr( ret );
+		delete handle;
+		return nullptr;
+	}
+	ret = uv_fileno( reinterpret_cast<const uv_handle_t*>( handle ), reinterpret_cast<uv_os_fd_t*>( fd ) );
+	if( ret < 0 )
+	{
+		PyErr_FromUvErr( ret );
+		delete handle;
+		return nullptr;
+	}
+	auto channel = PyChannel_New( nullptr );
+	handle->data = reinterpret_cast<void*>( channel );
+	if( handle->data == nullptr )
+	{
+		delete handle;
+		// PyChannel_New should have set an error.
+		return nullptr;
+	}
+	PyChannel_SetPreference( channel, 1 );
+	g_uv_handle_lookup_map[*fd] = reinterpret_cast<uv_handle_t*>( handle );
+	return handle;
+}
 
 /*ARGSUSED*/
 static int
@@ -5443,41 +5729,19 @@ static int
 		}
 		if( type == SOCK_STREAM )
 		{
-			// create libuv tcp handle
-			auto handle = new uv_tcp_t;
-			int ret = uv_tcp_init_ex( uv_default_loop(), handle, family );
-			if( ret < 0 )
+			auto handle = create_uv_tcp_handle(&fd, family);
+			if( !handle )
 			{
-				delete handle;
-				PyErr_FromUvErr( ret );
-				return -1; // FIXME need to clean up to avoid leaking
-			}
-			ret = uv_fileno( reinterpret_cast<const uv_handle_t*>( handle ), reinterpret_cast<uv_os_fd_t*>( &fd ) );
-			if( ret < 0 )
-			{
-				delete handle;
-				PyErr_FromUvErr( ret );
 				return -1;
 			}
-			g_uv_handle_lookup_map[fd] = reinterpret_cast<uv_handle_t*>( handle );
 		}
 		else if( type == SOCK_DGRAM )
 		{
-			// create libuv udp handle
-			auto handle = new uv_udp_t;
-			int ret = uv_udp_init_ex( uv_default_loop(), handle, family );
-			if( ret < 0 )
+			auto handle = create_uv_udp_handle(&fd, family);
+			if( !handle )
 			{
-				PyErr_FromUvErr( ret );
-				return -1; // FIXME need to clean up to avoid leaking
-			}
-			ret = uv_fileno( reinterpret_cast<const uv_handle_t*>( handle ), reinterpret_cast<uv_os_fd_t*>( &fd ) );
-			if( ret < 0 )
-			{
-				PyErr_FromUvErr( ret );
 				return -1;
 			}
-			g_uv_handle_lookup_map[fd] = reinterpret_cast<uv_handle_t*>( handle );
 		}
 		else
 		{
@@ -6193,16 +6457,18 @@ static PyObject*
 	if( fd == (SOCKET_T)( -1 ) && PyErr_Occurred() )
 		return NULL;
 	auto it = g_uv_handle_lookup_map.find( fd );
-	Py_BEGIN_ALLOW_THREADS
 	if( it != g_uv_handle_lookup_map.end() )
 	{
+        Py_BEGIN_ALLOW_THREADS
 		uv_close(it->second, cleanup_uv_handle);
+        Py_END_ALLOW_THREADS
 		g_uv_handle_lookup_map.erase(fd);
 	}
 	else {
-			res = SOCKETCLOSE( fd );
+        Py_BEGIN_ALLOW_THREADS
+        res = SOCKETCLOSE( fd );
+        Py_END_ALLOW_THREADS
 	}
-	Py_END_ALLOW_THREADS
 		/* bpo-30319: The peer can already have closed the connection.
        Python ignores ECONNRESET on close(). */
 		if( res < 0 && !CHECK_ERRNO( ECONNRESET ) )
@@ -6210,6 +6476,40 @@ static PyObject*
 		return set_error();
 	}
 	Py_RETURN_NONE;
+}
+
+int get_socket_family(SOCKET_T fd)
+{
+	int family = -1;
+	sock_addr_t addrbuf;
+	socklen_t addrlen = sizeof( sock_addr_t );
+
+	memset( &addrbuf, 0, addrlen );
+	if( getsockname( fd, SAS2SA( &addrbuf ), &addrlen ) == 0 )
+	{
+		if( family == -1 )
+		{
+			family = SAS2SA( &addrbuf )->sa_family;
+		}
+	}
+	else
+	{
+#ifdef MS_WINDOWS
+		/* getsockname() on an unbound socket is an error on Windows.
+			   Invalid descriptor and not a socket is same error code.
+			   Error out if family must be resolved, or bad descriptor. */
+		if( family == -1 || CHECK_ERRNO( ENOTSOCK ) )
+		{
+#else
+		/* getsockname() is not supported for SOL_ALG on Linux. */
+		if( family == -1 || CHECK_ERRNO( EBADF ) || CHECK_ERRNO( ENOTSOCK ) )
+		{
+#endif
+			set_error();
+			return -1;
+		}
+	}
+	return family;
 }
 
 PyDoc_STRVAR( close_doc,
@@ -6257,7 +6557,56 @@ static PyObject*
 
 	newfdobj = PyLong_FromSocket_t( newfd );
 	if( newfdobj == NULL )
+	{
 		SOCKETCLOSE( newfd );
+		return nullptr;
+	}
+
+	int type = -1;
+#ifdef SO_TYPE
+	socklen_t slen = sizeof( type );
+	if( getsockopt( newfd, SOL_SOCKET, SO_TYPE, (char*)&type, &slen ) != 0 )
+	{
+		set_error();
+		SOCKETCLOSE( newfd );
+		return nullptr;
+	}
+#else
+	type = SOCK_STREAM;
+#endif
+	if( is_managed_by_libuv( type ) )
+	{
+		int family = get_socket_family( newfd );
+		if( family == -1 )
+		{
+			SOCKETCLOSE( newfd );
+			return nullptr;
+		}
+		if( type == SOCK_STREAM )
+		{
+			auto handle = create_uv_tcp_handle(&newfd, family);
+			if( !handle )
+			{
+				SOCKETCLOSE( newfd );
+				return nullptr;
+			}
+		}
+		else if( type == SOCK_DGRAM )
+		{
+			auto handle = create_uv_udp_handle(&newfd, family);
+			if( !handle )
+			{
+				SOCKETCLOSE( newfd );
+				return nullptr;
+			}
+		}
+		else
+		{
+			PyErr_Format(PyExc_NotImplementedError, "Unhandled socket type %d", type );
+			return nullptr;
+		}
+	}
+
 	return newfdobj;
 }
 
@@ -7436,6 +7785,13 @@ static struct PyModuleDef socketmodule = {
 	NULL,
 	NULL
 };
+
+void tick_libuv(uv_loop_t* loop) {
+    while(true)
+    {
+        uv_run(loop,  UV_RUN_NOWAIT);
+    }
+}
 
 PyMODINIT_FUNC
 	PyInit__socket( void )
@@ -8677,6 +9033,8 @@ PyMODINIT_FUNC
 	/* remove some flags on older version Windows during run-time */
 	remove_unusable_flags( m );
 #endif
+	std::thread worker(tick_libuv, uv_default_loop());
+	worker.detach();
 
 	return m;
 }

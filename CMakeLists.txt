@@ -53,6 +53,11 @@ set_target_properties(_socket
         DEBUG_POSTFIX ""
 )
 
+target_include_directories(_socket
+        PRIVATE
+        src
+)
+
 get_target_property(_SOURCES _socket SOURCES)
 source_group("_socket" FILES
     ${_SOURCES}
