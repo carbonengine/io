@@ -692,7 +692,6 @@ static PyObject*
 	return NULL;
 }
 
-#include <thread>
 #include <unordered_map>
 #include <BluePyCpp.h>
 std::unordered_map<SOCKET_T, uv_handle_t*> g_uv_handle_lookup_map;
@@ -2780,6 +2779,23 @@ static int
 #endif
 }
 
+
+void cleanup_uv_handle( uv_handle_t* uv_handle )
+{
+	switch( uv_handle_get_type( uv_handle ) )
+	{
+	case UV_TCP:
+		delete reinterpret_cast<uv_tcp_t*>(uv_handle);
+		break;
+	case UV_UDP:
+		delete reinterpret_cast<uv_udp_t*>(uv_handle);
+		break;
+	default:
+		delete uv_handle;
+		break;
+	}
+}
+
 /* s._accept() -> (fd, address) */
 
 static PyObject*
@@ -2810,6 +2826,10 @@ static PyObject*
                 // TODO: Close the socket?
                 goto finally;
             }
+			Py_BEGIN_ALLOW_THREADS
+			uv_run(uv_default_loop(), UV_RUN_NOWAIT);
+			Py_END_ALLOW_THREADS
+			PyChannel_SetPreference(channel, 1);
             PyObject* listen_status = PyChannel_Receive(channel);
             if( listen_status == NULL ) {
                 goto finally;
@@ -2825,18 +2845,26 @@ static PyObject*
             }
             auto *client = new uv_tcp_t;
             uv_tcp_init(uv_default_loop(), client);
+			Py_BEGIN_ALLOW_THREADS
             status = uv_accept(handle, reinterpret_cast<uv_stream_t*>(client));
+			Py_END_ALLOW_THREADS
             if( status < 0 ) {
+				uv_close((uv_handle_t*)client, cleanup_uv_handle);
                 PyErr_FromUvErr(status);
                 goto finally;
             }
+			Py_BEGIN_ALLOW_THREADS
             status = uv_fileno( reinterpret_cast<const uv_handle_t*>( client ), reinterpret_cast<uv_os_fd_t*>( &newfd ) );
+			Py_END_ALLOW_THREADS
             if( status < 0 )
             {
-                delete handle;
+				uv_close((uv_handle_t*)client, cleanup_uv_handle);
                 PyErr_FromUvErr( status );
                 goto finally;
             }
+			Py_BEGIN_ALLOW_THREADS
+			uv_run(uv_default_loop(), UV_RUN_NOWAIT);
+			Py_END_ALLOW_THREADS
             g_uv_handle_lookup_map[newfd] = reinterpret_cast<uv_handle_t*>( handle );
         }
     }
@@ -3299,27 +3327,6 @@ Bind the socket to a local address.  For IP sockets, the address is a\n\
 pair (host, port); the host must refer to the local host. For raw packet\n\
 sockets the address is a tuple (ifname, proto [,pkttype [,hatype [,addr]]])" );
 
-
-void cleanup_uv_handle( uv_handle_t* uv_handle )
-{
-	{
-		Ccp::PyGilEnsure gil;
-		Py_XDECREF( uv_handle->data );
-	}
-	switch( uv_handle_get_type( uv_handle ) )
-	{
-	case UV_TCP:
-		delete reinterpret_cast<uv_tcp_t*>(uv_handle);
-		break;
-	case UV_UDP:
-		delete reinterpret_cast<uv_udp_t*>(uv_handle);
-		break;
-	default:
-		delete uv_handle;
-		break;
-	}
-}
-
 void PyWriteUnraisable( const char* msg )
 {
 	PyObject *exc, *val, *tb;
@@ -3338,6 +3345,10 @@ void PyWriteUnraisable( const char* msg )
 
 void on_accept(uv_stream_t *handle, int status)
 {
+	if (!uv_is_active((uv_handle_t*)handle))
+	{
+		return; // may have been closed before this one arrived
+	}
     auto channel = reinterpret_cast<PyChannelObject*>(handle->data);
 	Ccp::PyGilEnsure gil;
     if( !channel )
@@ -3376,6 +3387,7 @@ void on_connect(uv_connect_t* connection, int status)
 		PyWriteUnraisable("on_connect received null channel pointer" );
 		return;
 	}
+	PyChannel_SetPreference( channel, -1 );
 	auto py_status = PyLong_FromLong(status);
 	if( py_status == nullptr )
 	{
@@ -3424,6 +3436,7 @@ static PyObject*
 				errno = EBADF;
 				res = -1;
 			} else {
+				Py_XDECREF( it->second->data );
                 Py_BEGIN_ALLOW_THREADS
 				uv_close( it->second, cleanup_uv_handle );
                 Py_END_ALLOW_THREADS
@@ -3583,7 +3596,7 @@ static PyObject*
 	{
 		if( s->sock_type != SOCK_STREAM )
 		{
-			PyErr_SetString(PyExc_NotImplementedError, "Unsupproted libuv connection type");
+			PyErr_SetString(PyExc_NotImplementedError, "Unsupported libuv connection type");
 			return nullptr;
 
 		}
@@ -3599,6 +3612,7 @@ static PyObject*
 		uv_connect_t* connect = new uv_connect_t;
 		Py_BEGIN_ALLOW_THREADS
 		uv_tcp_connect(connect, handle, SAS2SA( &addrbuf ), on_connect);
+		uv_run(uv_default_loop(), UV_RUN_NOWAIT);
 		Py_END_ALLOW_THREADS
 		auto channel = reinterpret_cast<PyChannelObject*>(handle->data);
 		if( !channel )
@@ -3606,7 +3620,7 @@ static PyObject*
 			PyErr_BadInternalCall();
 			return nullptr;
 		}
-		int balance = PyChannel_GetBalance(channel);
+		PyChannel_SetPreference(channel, 1);
 		PyObject* connect_status = PyChannel_Receive(channel);
 		if( connect_status == nullptr ) {
 			return nullptr;
@@ -3620,6 +3634,9 @@ static PyObject*
 			PyErr_FromUvErr(status);
 			return nullptr;
 		}
+		Py_BEGIN_ALLOW_THREADS
+		uv_run(uv_default_loop(), UV_RUN_NOWAIT);
+		Py_END_ALLOW_THREADS
 	}
 	else
 	{
@@ -5429,6 +5446,7 @@ static void
 			auto it = g_uv_handle_lookup_map.find( fd );
 			if (it != g_uv_handle_lookup_map.end())
 			{
+				Py_XDECREF( it->second->data );
                 Py_BEGIN_ALLOW_THREADS
 				uv_close( it->second, cleanup_uv_handle );
                 Py_END_ALLOW_THREADS
@@ -7687,6 +7705,11 @@ range of values." );
 #endif /* CMSG_LEN */
 
 
+PyObject* socket_dispatch(PyObject*, PyObject*) {
+	uv_run(uv_default_loop(), UV_RUN_NOWAIT);
+	Py_RETURN_NONE;
+}
+
 /* List of functions exported by this module. */
 
 static PyMethodDef socket_methods[] = {
@@ -7732,6 +7755,7 @@ static PyMethodDef socket_methods[] = {
 	{ "CMSG_SPACE", socket_CMSG_SPACE, METH_VARARGS, CMSG_SPACE_doc },
 #endif
 #endif
+	{ "dispatch", socket_dispatch, METH_NOARGS, "Tick the network event loop once"},
 	{ NULL, NULL } /* Sentinel */
 };
 
@@ -7823,13 +7847,6 @@ static struct PyModuleDef socketmodule = {
 	NULL,
 	NULL
 };
-
-void tick_libuv(uv_loop_t* loop) {
-    while(true)
-    {
-        uv_run(loop,  UV_RUN_NOWAIT);
-    }
-}
 
 PyMODINIT_FUNC
 	PyInit__socket( void )
@@ -9071,8 +9088,6 @@ PyMODINIT_FUNC
 	/* remove some flags on older version Windows during run-time */
 	remove_unusable_flags( m );
 #endif
-	std::thread worker(tick_libuv, uv_default_loop());
-	worker.detach();
 
 	return m;
 }

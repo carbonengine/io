@@ -335,6 +335,13 @@ class ThreadableTest:
             raise exc
 
     def clientRun(self, test_func):
+        import stackless
+        t = stackless.tasklet(self._clientRun)(test_func)
+        while t.alive:
+            stackless.run()
+            socket.dispatch()
+
+    def _clientRun(self, test_func):
         self.server_ready.wait()
         try:
             self.clientSetUp()
@@ -6283,3 +6290,4 @@ if __name__ == "__main__":
     stackless.tasklet(test_main)()
     while getattr(test_main, "running", True):
         stackless.run()
+        socket.dispatch()
