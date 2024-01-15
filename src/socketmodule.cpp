@@ -3373,7 +3373,7 @@ void on_connect(uv_connect_t* connection, int status)
 	if( !channel )
 	{
 		PyErr_BadInternalCall();
-		PyWriteUnraisable("on_accept received null channel pointer" );
+		PyWriteUnraisable("on_connect received null channel pointer" );
 		return;
 	}
 	auto py_status = PyLong_FromLong(status);
@@ -3385,14 +3385,14 @@ void on_connect(uv_connect_t* connection, int status)
 		if( ret < 0 )
 		{
 			PyErr_Restore( exc, val, tb );
-			PyWriteUnraisable( "on_accept failed to send exception" );
+			PyWriteUnraisable( "on_connect failed to send exception" );
 		}
 		return;
 	}
 	int ret = PyChannel_Send(channel, py_status);
 	if( ret < 0 )
 	{
-		PyWriteUnraisable( "on_accept failed to send status" );
+		PyWriteUnraisable( "on_connect failed to send status" );
 	}
 }
 
