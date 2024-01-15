@@ -5526,7 +5526,7 @@ uv_tcp_t* create_uv_tcp_handle( SOCKET_T* fd, int family )
 	ret = uv_fileno( reinterpret_cast<const uv_handle_t*>( handle ), reinterpret_cast<uv_os_fd_t*>( fd ) );
 	if( ret < 0 )
 	{
-		delete handle;
+		uv_close((uv_handle_t*)handle, cleanup_uv_handle);
 		PyErr_FromUvErr( ret );
 		return nullptr;
 	}
@@ -5534,7 +5534,7 @@ uv_tcp_t* create_uv_tcp_handle( SOCKET_T* fd, int family )
 	handle->data = reinterpret_cast<void*>(channel);
 	if( handle->data == nullptr )
 	{
-		delete handle;
+		uv_close((uv_handle_t*)handle, cleanup_uv_handle);
 		// PyChannel_New should have set an error.
 		return nullptr;
 	}
@@ -5558,14 +5558,14 @@ uv_udp_t* create_uv_udp_handle(SOCKET_T* fd, int family)
 	if( ret < 0 )
 	{
 		PyErr_FromUvErr( ret );
-		delete handle;
+		uv_close((uv_handle_t*)handle, cleanup_uv_handle);
 		return nullptr;
 	}
 	auto channel = PyChannel_New( nullptr );
 	handle->data = reinterpret_cast<void*>( channel );
 	if( handle->data == nullptr )
 	{
-		delete handle;
+		uv_close((uv_handle_t*)handle, cleanup_uv_handle);
 		// PyChannel_New should have set an error.
 		return nullptr;
 	}
