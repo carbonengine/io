@@ -3260,10 +3260,23 @@ static PyObject*
             res = -1;
         }
         else {
-            auto handle = reinterpret_cast<uv_tcp_t *>(pair->second);
-            Py_BEGIN_ALLOW_THREADS
-                res = uv_tcp_bind(handle, SAS2SA(&addrbuf), 0);
-            Py_END_ALLOW_THREADS
+			if ( s->sock_type == SOCK_STREAM )
+			{
+				auto handle = reinterpret_cast<uv_tcp_t *>(pair->second);
+				Py_BEGIN_ALLOW_THREADS
+				res = uv_tcp_bind(handle, SAS2SA(&addrbuf), 0);
+				Py_END_ALLOW_THREADS
+			} else if ( s->sock_type == SOCK_DGRAM )
+			{
+				auto handle = reinterpret_cast<uv_udp_t *>(pair->second);
+				Py_BEGIN_ALLOW_THREADS
+				res = uv_udp_bind(handle, SAS2SA(&addrbuf), 0);
+				Py_END_ALLOW_THREADS
+			} else
+			{
+				PyErr_Format( PyExc_NotImplementedError, "Unsupported UV socket type %d", s->sock_type );
+				return nullptr;
+			}
             if (res < 0) {
                 PyErr_FromUvErr(res);
                 return NULL;
