@@ -238,6 +238,7 @@ typedef struct {
                                         sets a Python exception */
     _PyTime_t sock_timeout;     /* Operation timeout in seconds;
                                         0.0 means non-blocking */
+    uv_handle_t* uv_handle;     /* the libuv handle associated with this socket object */
 } PySocketSockObject;
 
 /* --- C API ----------------------------------------------------*/
