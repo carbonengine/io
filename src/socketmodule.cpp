@@ -3897,8 +3897,15 @@ static PyObject*
 	if( buf == NULL )
 		return NULL;
 
-	/* Call the guts */
-	outlen = sock_recv_guts( s, PyBytes_AS_STRING( buf ), recvlen, flags );
+	if ( is_managed_by_libuv( s ))
+	{
+		PyErr_Format(PyExc_NotImplementedError, "No libuv implementation for socket of type %d", s->sock_type);
+		return nullptr;
+	}else
+	{
+		/* Call the guts */
+		outlen = sock_recv_guts( s, PyBytes_AS_STRING( buf ), recvlen, flags );
+	}
 	if( outlen < 0 )
 	{
 		/* An error occurred, release the string and return an
