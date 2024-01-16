@@ -692,6 +692,12 @@ static PyObject*
 	return NULL;
 }
 
+enum ChannelPreference : int {
+	PREFER_RECEIVER = -1,
+	PREFER_NONE,
+	PREFER_SENDER,
+};
+
 #include <unordered_map>
 #include <BluePyCpp.h>
 std::unordered_map<SOCKET_T, uv_handle_t*> g_uv_handle_lookup_map;
@@ -2829,7 +2835,7 @@ static PyObject*
 			Py_BEGIN_ALLOW_THREADS
 			uv_run(uv_default_loop(), UV_RUN_NOWAIT);
 			Py_END_ALLOW_THREADS
-			PyChannel_SetPreference(channel, 1);
+			PyChannel_SetPreference(channel, PREFER_SENDER);
             PyObject* listen_status = PyChannel_Receive(channel);
             if( listen_status == NULL ) {
                 goto finally;
@@ -3387,7 +3393,7 @@ void on_connect(uv_connect_t* connection, int status)
 		PyWriteUnraisable("on_connect received null channel pointer" );
 		return;
 	}
-	PyChannel_SetPreference( channel, -1 );
+	PyChannel_SetPreference( channel, PREFER_RECEIVER );
 	auto py_status = PyLong_FromLong(status);
 	if( py_status == nullptr )
 	{
@@ -3620,7 +3626,7 @@ static PyObject*
 			PyErr_BadInternalCall();
 			return nullptr;
 		}
-		PyChannel_SetPreference(channel, 1);
+		PyChannel_SetPreference(channel, PREFER_SENDER);
 		PyObject* connect_status = PyChannel_Receive(channel);
 		if( connect_status == nullptr ) {
 			return nullptr;
@@ -5556,7 +5562,7 @@ uv_tcp_t* create_uv_tcp_handle( SOCKET_T* fd, int family )
 		// PyChannel_New should have set an error.
 		return nullptr;
 	}
-	PyChannel_SetPreference( channel, 1 );
+	PyChannel_SetPreference( channel, PREFER_SENDER );
 	g_uv_handle_lookup_map[*fd] = reinterpret_cast<uv_handle_t*>( handle );
 	return handle;
 }
@@ -5587,7 +5593,7 @@ uv_udp_t* create_uv_udp_handle(SOCKET_T* fd, int family)
 		// PyChannel_New should have set an error.
 		return nullptr;
 	}
-	PyChannel_SetPreference( channel, 1 );
+	PyChannel_SetPreference( channel, PREFER_SENDER );
 	g_uv_handle_lookup_map[*fd] = reinterpret_cast<uv_handle_t*>( handle );
 	return handle;
 }
