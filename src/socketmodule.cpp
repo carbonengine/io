@@ -2783,9 +2783,34 @@ static int
 #endif
 }
 
+static Py_tss_t UV_LOOP_KEY = Py_tss_NEEDS_INIT;
+
+uv_loop_t * get_uv_loop() {
+    Ccp::PyGilEnsure gil;
+    uv_loop_t* ret = reinterpret_cast<uv_loop_t*>(PyThread_tss_get(&UV_LOOP_KEY));
+    if ( !ret ) {
+        ret = new uv_loop_t;
+        auto res = uv_loop_init( ret );
+        if ( res < 0 ) {
+            uv_loop_delete( ret );
+            PyErr_FromUvErr( res );
+            return nullptr;
+        }
+        if ( PyThread_tss_set( &UV_LOOP_KEY, reinterpret_cast<void *>( ret ) ) ) {
+            uv_loop_close( ret );
+			delete ret;
+            return nullptr;
+        }
+    }
+    return ret;
+}
 
 void cleanup_uv_handle( uv_handle_t* uv_handle )
 {
+    Ccp::PyGilEnsure gil;
+    Py_XDECREF( uv_handle->data );
+    uv_handle->data = nullptr;
+
 	switch( uv_handle_get_type( uv_handle ) )
 	{
 	case UV_TCP:
@@ -2800,12 +2825,12 @@ void cleanup_uv_handle( uv_handle_t* uv_handle )
 	}
 }
 
-/* s._accept() -> (fd, address) */
-
 bool is_valid_uv_handle( uv_handle_t* handle )
 {
 	return handle && !uv_is_closing(handle);
 }
+
+/* s._accept() -> (fd, address) */
 
 static PyObject*
 	sock_accept( PySocketSockObject* s, PyObject* Py_UNUSED( ignored ) )
@@ -2835,9 +2860,10 @@ static PyObject*
                 // TODO: Close the socket?
                 goto finally;
             }
-			Py_BEGIN_ALLOW_THREADS
-			uv_run(uv_default_loop(), UV_RUN_NOWAIT);
-			Py_END_ALLOW_THREADS
+            auto loop = get_uv_loop();
+            if ( !loop ) {
+                goto finally;
+            }
 			PyChannel_SetPreference(channel, PREFER_SENDER);
             PyObject* listen_status = PyChannel_Receive(channel);
             if( listen_status == NULL ) {
@@ -2852,28 +2878,22 @@ static PyObject*
                 PyErr_FromUvErr(status);
                 goto finally;
             }
+
             auto *client = new uv_tcp_t;
-            uv_tcp_init(uv_default_loop(), client);
-			Py_BEGIN_ALLOW_THREADS
+            uv_tcp_init(loop, client);
             status = uv_accept(handle, reinterpret_cast<uv_stream_t*>(client));
-			Py_END_ALLOW_THREADS
             if( status < 0 ) {
 				uv_close((uv_handle_t*)client, cleanup_uv_handle);
                 PyErr_FromUvErr(status);
                 goto finally;
             }
-			Py_BEGIN_ALLOW_THREADS
             status = uv_fileno( reinterpret_cast<const uv_handle_t*>( client ), reinterpret_cast<uv_os_fd_t*>( &newfd ) );
-			Py_END_ALLOW_THREADS
             if( status < 0 )
             {
 				uv_close((uv_handle_t*)client, cleanup_uv_handle);
                 PyErr_FromUvErr( status );
                 goto finally;
             }
-			Py_BEGIN_ALLOW_THREADS
-			uv_run(uv_default_loop(), UV_RUN_NOWAIT);
-			Py_END_ALLOW_THREADS
         }
     }
 	else {
@@ -3298,15 +3318,11 @@ static PyObject*
 			if ( s->sock_type == SOCK_STREAM )
 			{
 				auto handle = reinterpret_cast<uv_tcp_t *>(s->uv_handle);
-				Py_BEGIN_ALLOW_THREADS
 				res = uv_tcp_bind(handle, SAS2SA(&addrbuf), 0);
-				Py_END_ALLOW_THREADS
 			} else if ( s->sock_type == SOCK_DGRAM )
 			{
 				auto handle = reinterpret_cast<uv_udp_t *>(s->uv_handle);
-				Py_BEGIN_ALLOW_THREADS
 				res = uv_udp_bind(handle, SAS2SA(&addrbuf), 0);
-				Py_END_ALLOW_THREADS
 			} else
 			{
 				PyErr_Format( PyExc_NotImplementedError, "Unsupported UV socket type %d", s->sock_type );
@@ -3442,10 +3458,7 @@ static PyObject*
 				errno = EBADF;
 				res = -1;
 			} else {
-				Py_XDECREF( s->uv_handle->data );
-                Py_BEGIN_ALLOW_THREADS
 				uv_close( s->uv_handle, cleanup_uv_handle );
-                Py_END_ALLOW_THREADS
 				res = 0;
 			}
 		}
@@ -3612,13 +3625,16 @@ static PyObject*
 			PyErr_SetFromErrno(PyExc_OSError);
 			return nullptr;
 		}
+
+        auto loop = get_uv_loop();
+        if ( !loop ) {
+            return nullptr;
+        }
+
 		uv_tcp_t* handle = reinterpret_cast<uv_tcp_t*>(s->uv_handle);
 
 		uv_connect_t* connect = new uv_connect_t;
-		Py_BEGIN_ALLOW_THREADS
 		uv_tcp_connect(connect, handle, SAS2SA( &addrbuf ), on_connect);
-		uv_run(uv_default_loop(), UV_RUN_NOWAIT);
-		Py_END_ALLOW_THREADS
 		auto channel = reinterpret_cast<PyChannelObject*>(handle->data);
 		if( !channel )
 		{
@@ -3639,9 +3655,6 @@ static PyObject*
 			PyErr_FromUvErr(status);
 			return nullptr;
 		}
-		Py_BEGIN_ALLOW_THREADS
-		uv_run(uv_default_loop(), UV_RUN_NOWAIT);
-		Py_END_ALLOW_THREADS
 	}
 	else
 	{
@@ -3785,10 +3798,12 @@ static PyObject*
 	        return s->errorhandler();
         }
 	    else {
+			if ( backlog == 0 )
+			{
+				backlog = 1;
+			}
 	        auto handle = reinterpret_cast<uv_stream_t*>(s->uv_handle);
-            Py_BEGIN_ALLOW_THREADS
             res = uv_listen( handle, backlog, on_accept );
-            Py_END_ALLOW_THREADS
 			if ( res < 0 )
 			{
 				PyErr_FromUvErr( res );
@@ -4092,22 +4107,26 @@ static PyObject*
 	if( buf == NULL )
 		return NULL;
 
-	outlen = sock_recvfrom_guts( s, PyBytes_AS_STRING( buf ), recvlen, flags, &addr );
-	if( outlen < 0 )
-	{
-		goto finally;
-	}
+    if (is_managed_by_libuv(s)) {
+        PyErr_Format(PyExc_NotImplementedError, "RecvFrom not implemented for socket of type %d", s->sock_type);
+        ret = nullptr;
+    } else {
 
-	if( outlen != recvlen )
-	{
-		/* We did not read as many bytes as we anticipated, resize the
-           string if possible and be successful. */
-		if( _PyBytes_Resize( &buf, outlen ) < 0 )
-			/* Oopsy, not so successful after all. */
-			goto finally;
-	}
+        outlen = sock_recvfrom_guts(s, PyBytes_AS_STRING(buf), recvlen, flags, &addr);
+        if (outlen < 0) {
+            goto finally;
+        }
 
-	ret = PyTuple_Pack( 2, buf, addr );
+        if (outlen != recvlen) {
+            /* We did not read as many bytes as we anticipated, resize the
+               string if possible and be successful. */
+            if (_PyBytes_Resize(&buf, outlen) < 0)
+                /* Oopsy, not so successful after all. */
+                goto finally;
+        }
+
+        ret = PyTuple_Pack(2, buf, addr);
+    }
 
 finally:
 	Py_XDECREF( buf );
@@ -5457,10 +5476,7 @@ static void
 		{
 			if ( is_valid_uv_handle( s->uv_handle ) )
 			{
-				Py_XDECREF( s->uv_handle->data );
-                Py_BEGIN_ALLOW_THREADS
 				uv_close( s->uv_handle, cleanup_uv_handle );
-                Py_END_ALLOW_THREADS
 			}
 		} else
 		{
@@ -5543,8 +5559,12 @@ static int sock_cloexec_works = -1;
 uv_tcp_t* create_uv_tcp_handle( SOCKET_T* fd, int family )
 {
 	// create libuv tcp handle
+    auto loop = get_uv_loop();
+    if(!loop) {
+        return nullptr;
+    }
 	auto handle = new uv_tcp_t;
-	int ret = uv_tcp_init_ex( uv_default_loop(), handle, family );
+	int ret = uv_tcp_init_ex( loop, handle, family );
 	if( ret < 0 )
 	{
 		delete handle;
@@ -5558,7 +5578,7 @@ uv_tcp_t* create_uv_tcp_handle( SOCKET_T* fd, int family )
 		PyErr_FromUvErr( ret );
 		return nullptr;
 	}
-	auto channel = PyChannel_New( nullptr);
+	auto channel = PyChannel_New( nullptr );
 	handle->data = reinterpret_cast<void*>(channel);
 	if( handle->data == nullptr )
 	{
@@ -5573,8 +5593,14 @@ uv_tcp_t* create_uv_tcp_handle( SOCKET_T* fd, int family )
 uv_udp_t* create_uv_udp_handle(SOCKET_T* fd, int family)
 {
 	// create libuv udp handle
-	auto handle = new uv_udp_t;
-	int ret = uv_udp_init_ex( uv_default_loop(), handle, family );
+    auto loop = get_uv_loop();
+    if (!loop)
+    {
+        return nullptr;
+    }
+
+    auto handle = new uv_udp_t;
+	int ret = uv_udp_init_ex( loop, handle, family );
 	if( ret < 0 )
 	{
 		PyErr_FromUvErr( ret );
@@ -5700,7 +5726,7 @@ static int
 				return -1;
 			}
 			s->sock_fd = fd;
-			uv_walk( uv_default_loop(), uv_walk_callback, (void*)s );
+			uv_walk( get_uv_loop(), uv_walk_callback, (void*)s );
 
 			/* validate that passed file descriptor is valid and a socket. */
 			sock_addr_t addrbuf;
@@ -6516,38 +6542,36 @@ static PyObject*
 	fd = PyLong_AsSocket_t( fdobj );
 	if( fd == (SOCKET_T)( -1 ) && PyErr_Occurred() )
 		return NULL;
-//#ifdef SO_TYPE
-//	socklen_t slen = sizeof( type );
-//	if( getsockopt( fd, SOL_SOCKET, SO_TYPE, (char*)&type, &slen ) != 0 )
-//	{
-//		set_error();
-//		SOCKETCLOSE( fd );
-//		return nullptr;
-//	}
-//#else
-//	type = SOCK_STREAM;
-//#endif
-//	if( is_managed_by_libuv( type ) )
-//	{
-//		auto it = g_uv_handle_lookup_map.find( fd );
-//		if( it != g_uv_handle_lookup_map.end() )
-//		{
-//			Py_BEGIN_ALLOW_THREADS
-//			uv_close( it->second, cleanup_uv_handle );
-//			Py_END_ALLOW_THREADS
-//			g_uv_handle_lookup_map.erase( fd );
-//			res = 0;
-//		} else
-//		{
-//			errno = EBADF;
-//			res = -1;
-//		}
-//	}
-//	else {
+#ifdef SO_TYPE
+	socklen_t slen = sizeof( type );
+	if( getsockopt( fd, SOL_SOCKET, SO_TYPE, (char*)&type, &slen ) != 0 )
+	{
+		set_error();
+		SOCKETCLOSE( fd );
+		return nullptr;
+	}
+#else
+	type = SOCK_STREAM;
+#endif
+	if( is_managed_by_libuv( type ) )
+	{
+        PySocketSockObject s;
+        s.sock_fd = fd;
+        s.uv_handle = nullptr;
+        uv_walk(get_uv_loop(), uv_walk_callback, &s);
+        if ( s.uv_handle && !uv_is_closing( s.uv_handle ) )
+        {
+			uv_close( s.uv_handle, cleanup_uv_handle );
+            res = 0;
+		} else {
+			errno = EBADF;
+			res = -1;
+		}
+	} else {
         Py_BEGIN_ALLOW_THREADS
         res = SOCKETCLOSE( fd );
         Py_END_ALLOW_THREADS
-//	}
+	}
 		/* bpo-30319: The peer can already have closed the connection.
        Python ignores ECONNRESET on close(). */
 		if( res < 0 && !CHECK_ERRNO( ECONNRESET ) )
@@ -7728,7 +7752,7 @@ range of values." );
 
 
 PyObject* socket_dispatch(PyObject*, PyObject*) {
-	uv_run(uv_default_loop(), UV_RUN_NOWAIT);
+	uv_run(get_uv_loop(), UV_RUN_ONCE);
 	Py_RETURN_NONE;
 }
 
@@ -9110,6 +9134,12 @@ PyMODINIT_FUNC
 	/* remove some flags on older version Windows during run-time */
 	remove_unusable_flags( m );
 #endif
+
+    // uv_loop instances aren't thread-safe, thus we keep a loop instance per thread
+    if ( PyThread_tss_create( &UV_LOOP_KEY ) )
+    {
+        return nullptr;
+    }
 
 	return m;
 }
