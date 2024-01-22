@@ -699,11 +699,7 @@ enum ChannelPreference : int {
 };
 
 #include <BluePyCpp.h>
-
-static void PyErr_FromUvErr( int error )
-{
-	PyErr_SetString( PyExc_OSError, uv_err_name( error ) );
-}
+#include <carbonio.h>
 
 bool is_managed_by_libuv( int sock_type )
 {
@@ -2805,26 +2801,6 @@ uv_loop_t * get_uv_loop() {
     return ret;
 }
 
-void cleanup_uv_handle( uv_handle_t* uv_handle )
-{
-    Ccp::PyGilEnsure gil;
-    Py_XDECREF( uv_handle->data );
-    uv_handle->data = nullptr;
-
-	switch( uv_handle_get_type( uv_handle ) )
-	{
-	case UV_TCP:
-		delete reinterpret_cast<uv_tcp_t*>(uv_handle);
-		break;
-	case UV_UDP:
-		delete reinterpret_cast<uv_udp_t*>(uv_handle);
-		break;
-	default:
-		delete uv_handle;
-		break;
-	}
-}
-
 bool is_valid_uv_handle( uv_handle_t* handle )
 {
 	return handle && !uv_is_closing(handle);
@@ -3350,21 +3326,7 @@ Bind the socket to a local address.  For IP sockets, the address is a\n\
 pair (host, port); the host must refer to the local host. For raw packet\n\
 sockets the address is a tuple (ifname, proto [,pkttype [,hatype [,addr]]])" );
 
-void PyWriteUnraisable( const char* msg )
-{
-	PyObject *exc, *val, *tb;
-	PyObject* msg_obj;
-	PyErr_Fetch( &exc, &val, &tb );
-	msg_obj = PyUnicode_FromString( msg ? msg : "" );
-	PyErr_Restore( exc, val, tb );
-	if( !msg_obj )
-	{
-		msg_obj = Py_None;
-		Py_INCREF( Py_None );
-	}
-	PyErr_WriteUnraisable( msg_obj );
-	Py_DECREF( msg_obj );
-}
+
 
 void on_accept(uv_stream_t *handle, int status)
 {
@@ -3906,33 +3868,42 @@ static PyObject*
 		return NULL;
 	}
 
-	/* Allocate a new string. */
-	buf = PyBytes_FromStringAndSize( (char*)0, recvlen );
-	if( buf == NULL )
-		return NULL;
-
 	if ( is_managed_by_libuv( s ))
 	{
-		PyErr_Format(PyExc_NotImplementedError, "No libuv implementation for socket of type %d", s->sock_type);
-		return nullptr;
+		if ( s->sock_fd != INVALID_SOCKET )
+		{
+			StreamRecvRequest req( reinterpret_cast<uv_stream_t*>( s->uv_handle ), recvlen, flags );
+			buf = req.execute();
+		} else
+		{
+			errno = EBADF;
+			PyErr_SetFromErrno(PyExc_OSError);
+			return nullptr;
+		}
 	}else
 	{
+		/* Allocate a new string. */
+		buf = PyBytes_FromStringAndSize( (char*)0, recvlen );
+		if( buf == NULL )
+			return NULL;
+
 		/* Call the guts */
 		outlen = sock_recv_guts( s, PyBytes_AS_STRING( buf ), recvlen, flags );
-	}
-	if( outlen < 0 )
-	{
-		/* An error occurred, release the string and return an
+		if( outlen < 0 )
+		{
+			/* An error occurred, release the string and return an
            error. */
-		Py_DECREF( buf );
-		return NULL;
-	}
-	if( outlen != recvlen )
-	{
-		/* We did not read as many bytes as we anticipated, resize the
+			Py_DECREF( buf );
+			return NULL;
+		}
+		if( outlen != recvlen )
+		{
+			/* We did not read as many bytes as we anticipated, resize the
            string if possible and be successful. */
-		_PyBytes_Resize( &buf, outlen );
+			_PyBytes_Resize( &buf, outlen );
+		}
 	}
+
 
 	return buf;
 }

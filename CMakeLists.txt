@@ -38,7 +38,6 @@ target_include_directories(iobase
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
-target_compile_definitions(iobase PUBLIC BLUEIMPORT=)
 
 # --- _socket ---
 ccp_add_library(_socket SHARED
