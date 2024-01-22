@@ -702,7 +702,7 @@ enum ChannelPreference : int {
 
 static void PyErr_FromUvErr( int error )
 {
-	PyErr_SetString( PyExc_RuntimeError, uv_err_name( error ) );
+	PyErr_SetString( PyExc_OSError, uv_err_name( error ) );
 }
 
 bool is_managed_by_libuv( int sock_type )
