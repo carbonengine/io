@@ -7752,7 +7752,7 @@ range of values." );
 
 
 PyObject* socket_dispatch(PyObject*, PyObject*) {
-	uv_run(get_uv_loop(), UV_RUN_ONCE);
+	uv_run(get_uv_loop(), UV_RUN_NOWAIT);
 	Py_RETURN_NONE;
 }
 
