@@ -5697,7 +5697,6 @@ static int
 				return -1;
 			}
 			s->sock_fd = fd;
-			uv_walk( get_uv_loop(), uv_walk_callback, (void*)s );
 
 			/* validate that passed file descriptor is valid and a socket. */
 			sock_addr_t addrbuf;
@@ -5764,6 +5763,34 @@ static int
 #else
 			proto = 0;
 #endif
+			s->read_request = nullptr;
+			s->uv_handle = nullptr;
+			if( is_managed_by_libuv( type ) )
+			{
+				uv_walk( get_uv_loop(), uv_walk_callback, (void*)s );
+				if( s->uv_handle == nullptr )
+				{
+					// No handle found for re-use, must create one.
+					if( type == SOCK_STREAM )
+					{
+						auto handle = create_uv_tcp_handle( &fd, family );
+						if( !handle )
+						{
+							return -1;
+						}
+						s->uv_handle = reinterpret_cast<uv_handle_t*>( handle );
+					}
+					else if( type == SOCK_DGRAM )
+					{
+						auto handle = create_uv_udp_handle( &fd, family );
+						if( !handle )
+						{
+							return -1;
+						}
+						s->uv_handle = reinterpret_cast<uv_handle_t*>( handle );
+					}
+				}
+			}
 		}
 	}
 	else
