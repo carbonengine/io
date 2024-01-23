@@ -2870,6 +2870,14 @@ static PyObject*
                 PyErr_FromUvErr( status );
                 goto finally;
             }
+			auto* client_channel = PyChannel_New(nullptr);
+			if( !client_channel )
+			{
+				uv_close((uv_handle_t*)client, cleanup_uv_handle);
+				goto finally;
+			}
+			PyChannel_SetPreference(client_channel, PREFER_SENDER);
+			client->data = client_channel;
         }
     }
 	else {
