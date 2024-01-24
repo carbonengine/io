@@ -3851,6 +3851,23 @@ static Py_ssize_t
 }
 
 
+static PyObject* uv_recv_impl( PySocketSockObject* s, Py_ssize_t recvlen, int flags ) noexcept
+{
+	PyObject* buf{nullptr};
+	if ( s->sock_fd != INVALID_SOCKET && is_valid_uv_handle( s->uv_handle ) )
+	{
+		if(!s->request)
+		{
+			s->request = reinterpret_cast<void*>( new StreamRecvRequest( reinterpret_cast<uv_stream_t*>( s->uv_handle ) ) );
+		}
+		buf = reinterpret_cast<StreamRecvRequest*>(s->request)->receive(recvlen, flags);
+	} else
+	{
+		errno = EBADF;
+		PyErr_SetFromErrno(PyExc_OSError);
+	}
+	return buf;
+}
 /* s.recv(nbytes [,flags]) method */
 
 static PyObject*
@@ -3872,19 +3889,7 @@ static PyObject*
 
 	if ( is_managed_by_libuv( s ))
 	{
-		if ( s->sock_fd != INVALID_SOCKET && is_valid_uv_handle( s->uv_handle ) )
-		{
-			if(!s->request)
-			{
-				s->request = reinterpret_cast<void*>( new StreamRecvRequest( reinterpret_cast<uv_stream_t*>( s->uv_handle ) ) );
-			}
-			buf = reinterpret_cast<StreamRecvRequest*>(s->request)->receive(recvlen, flags);
-		} else
-		{
-			errno = EBADF;
-			PyErr_SetFromErrno(PyExc_OSError);
-			return nullptr;
-		}
+		return uv_recv_impl( s, recvlen, flags );
 	}else
 	{
 		/* Allocate a new string. */
@@ -4083,10 +4088,34 @@ static PyObject*
 	if( buf == NULL )
 		return NULL;
 
-    if (is_managed_by_libuv(s)) {
-        PyErr_Format(PyExc_NotImplementedError, "RecvFrom not implemented for socket of type %d", s->sock_type);
-        ret = nullptr;
-    } else {
+	if( is_managed_by_libuv( s ) )
+	{
+		if( s->sock_type != SOCK_STREAM )
+		{
+			PyErr_Format( PyExc_NotImplementedError, "RecvFrom not implemented for socket of type %d", s->sock_type );
+			return nullptr;
+		}
+		sockaddr_storage name;
+		int namelen = sizeof( sockaddr_storage );
+		int status = uv_tcp_getpeername( reinterpret_cast<uv_tcp_t*>( s->uv_handle ), reinterpret_cast<sockaddr*>( &name ), &namelen );
+		if( status < 0 )
+		{
+			PyErr_FromUvErr( status );
+			return nullptr;
+		}
+		auto addr = makesockaddr( s->sock_fd, reinterpret_cast<sockaddr*>( &name ), namelen, s->sock_proto );
+		if( !addr )
+		{
+			return nullptr;
+		}
+		auto buf = uv_recv_impl( s, recvlen, flags );
+		if( !buf )
+		{
+			Py_DecRef(addr);
+			return nullptr;
+		}
+		ret = PyTuple_Pack( 2, buf, addr );
+	} else {
 
         outlen = sock_recvfrom_guts(s, PyBytes_AS_STRING(buf), recvlen, flags, &addr);
         if (outlen < 0) {
