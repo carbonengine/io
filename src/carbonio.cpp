@@ -126,3 +126,39 @@ void StreamRecvRequest::readCallback( uv_stream_t* client, ssize_t nread, const 
 	auto _this = reinterpret_cast<StreamRecvRequest*>( client->data );
 	_this->onReceive( nread, buf );
 }
+
+PyObject* StreamSendRequest::send()
+{
+	uv_write_t* request = new uv_write_t ;
+	auto bufferarray = new std::array<uv_buf_t, 1> {{ULONG(m_len), m_buf}};
+	int status = uv_write(request, handle(), bufferarray->data(), bufferarray->size(), StreamSendRequest::sendCallback );
+	if( status < 0 ){
+		delete bufferarray;
+		delete request;
+		return PyLong_FromLong(status);
+	}
+	PyChannel_SetPreference(channel(), PREFER_SENDER);
+	auto ret = PyChannel_Receive(channel() );
+	delete bufferarray;
+	delete request;
+	return ret;
+}
+
+void StreamSendRequest::sendCallback( uv_write_t* request, int status )
+{
+	auto _this = reinterpret_cast<StreamSendRequest*>( request->handle->data );
+	_this->onSend( status );
+}
+
+void StreamSendRequest::onSend( int status )
+{
+	auto py_status = PyLong_FromLong(status);
+	if( !py_status ){
+		sendError("StreamSendRequest::send Failed to convert status to python int");
+		return;
+	}
+	if( PyChannel_Send( channel(), py_status ) < 0 )
+	{
+		PyWriteUnraisable("StreamSendRequest::send Failed to send status over channel");
+	}
+}

@@ -1,6 +1,8 @@
 #ifndef CARBONIO_H
 #define CARBONIO_H
 
+#include <array>
+
 #include <Python.h>
 #include <stackless_api.h>
 
@@ -47,10 +49,17 @@ protected:
 	uv_handle_t* m_handle{nullptr};
 };
 
-class StreamRecvRequest : public IRequest
+class IStreamRequest : public IRequest
 {
 public:
-	StreamRecvRequest( uv_stream_t* handle ) : IRequest( reinterpret_cast<uv_handle_t*>( handle ) ){}
+	IStreamRequest( uv_stream_t* handle ) : IRequest( reinterpret_cast<uv_handle_t*>( handle ) ){}
+	uv_stream_t* handle() { return reinterpret_cast<uv_stream_t*>( m_handle ); }
+};
+
+class StreamRecvRequest : public IStreamRequest
+{
+public:
+	StreamRecvRequest( uv_stream_t* handle ) : IStreamRequest( handle ){}
 	~StreamRecvRequest(){ Py_XDECREF(m_data);}
 	PyObject* receive(Py_ssize_t length, int flags);
 	uv_stream_t* handle() { return reinterpret_cast<uv_stream_t*>( m_handle ); }
@@ -66,6 +75,21 @@ private:
 	int m_flags{0};
 	PyObject* m_data{nullptr};
 	Py_ssize_t m_pos{0};
+};
+
+class StreamSendRequest : public IStreamRequest
+{
+	public:
+		StreamSendRequest( uv_stream_t* handle, char* buf, Py_ssize_t len, int flags ) :
+			IStreamRequest( handle ), m_buf(buf), m_len(len), m_flags(flags) {}
+		PyObject* send();
+		static void sendCallback(uv_write_t* request, int status);
+	private:
+		void onSend( int status );
+
+		char* m_buf;
+		Py_ssize_t m_len;
+		int m_flags;
 };
 
 #endif // CARBONIO_H

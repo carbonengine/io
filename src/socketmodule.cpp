@@ -4598,6 +4598,15 @@ argument, see the Unix manual.  Return the number of bytes\n\
 sent; this may be less than len(data) if the network is busy." );
 
 
+PyObject* uv_sendall_impl(PySocketSockObject* s, char* buf, Py_ssize_t len, int flags)
+{
+	auto* request = new StreamSendRequest(reinterpret_cast<uv_stream_t*>(s->uv_handle), buf, len, flags);
+	auto status = request->send();
+	delete request;
+	return status;
+}
+
+
 /* s.sendall(data [,flags]) method */
 
 static PyObject*
@@ -4619,52 +4628,72 @@ static PyObject*
 	buf = reinterpret_cast<char*>( pbuf.buf );
 	len = pbuf.len;
 
-	if( !IS_SELECTABLE( s ) )
+	if( is_managed_by_libuv( s ) )
 	{
-		PyBuffer_Release( &pbuf );
-		return select_error();
-	}
-
-	do
-	{
-		if( has_timeout )
+		auto py_status = uv_sendall_impl(s, buf, len, flags);
+		auto status = PyLong_AsLong( py_status );
+		if( status == -1 && PyErr_Occurred() )
 		{
-			if( deadline_initialized )
-			{
-				/* recompute the timeout */
-				interval = deadline - _PyTime_GetMonotonicClock();
-			}
-			else
-			{
-				deadline_initialized = 1;
-				deadline = _PyTime_GetMonotonicClock() + s->sock_timeout;
-			}
+			PyErr_BadInternalCall();
+			PyWriteUnraisable("StreamSendRequest::send failed to convert Python status");
+		}
+		if( status < 0 )
+		{
+			PyErr_FromUvErr( status );
+			PyBuffer_Release( &pbuf );
+			return nullptr;
+		}
+	}
+	else
+	{
 
-			if( interval <= 0 )
-			{
-				PyErr_SetString( socket_timeout, "timed out" );
-				goto done;
-			}
+		if( !IS_SELECTABLE( s ) )
+		{
+			PyBuffer_Release( &pbuf );
+			return select_error();
 		}
 
-		ctx.buf = buf;
-		ctx.len = len;
-		ctx.flags = flags;
-		if( sock_call_ex( s, 1, sock_send_impl, &ctx, 0, NULL, interval ) < 0 )
-			goto done;
-		n = ctx.result;
-		assert( n >= 0 );
+		do
+		{
+			if( has_timeout )
+			{
+				if( deadline_initialized )
+				{
+					/* recompute the timeout */
+					interval = deadline - _PyTime_GetMonotonicClock();
+				}
+				else
+				{
+					deadline_initialized = 1;
+					deadline = _PyTime_GetMonotonicClock() + s->sock_timeout;
+				}
 
-		buf += n;
-		len -= n;
+				if( interval <= 0 )
+				{
+					PyErr_SetString( socket_timeout, "timed out" );
+					goto done;
+				}
+			}
 
-		/* We must run our signal handlers before looping again.
+			ctx.buf = buf;
+			ctx.len = len;
+			ctx.flags = flags;
+			if( sock_call_ex( s, 1, sock_send_impl, &ctx, 0, NULL, interval ) < 0 )
+				goto done;
+			n = ctx.result;
+			assert( n >= 0 );
+
+			buf += n;
+			len -= n;
+
+			/* We must run our signal handlers before looping again.
            send() can return a successful partial write when it is
            interrupted, so we can't restrict ourselves to EINTR. */
-		if( PyErr_CheckSignals() )
-			goto done;
-	} while( len > 0 );
-	PyBuffer_Release( &pbuf );
+			if( PyErr_CheckSignals() )
+				goto done;
+		} while( len > 0 );
+		PyBuffer_Release( &pbuf );
+	}
 
 	Py_INCREF( Py_None );
 	res = Py_None;
