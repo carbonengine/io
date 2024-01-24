@@ -65,16 +65,15 @@ PyObject* StreamRecvRequest::receive( Py_ssize_t length, int flags )
 			PyErr_FromUvErr( ret );
 			return nullptr;
 		}
+		PyChannel_SetPreference( channel(), PREFER_SENDER );
+		auto sentinel = PyChannel_Receive( channel() );
+		if( !sentinel )
+		{
+			return nullptr;
+		}
+		Py_DecRef( sentinel );
+		PyChannel_SetPreference( channel(), PREFER_RECEIVER );
 	}
-	PyChannel_SetPreference( channel(), PREFER_SENDER );
-	auto sentinel = PyChannel_Receive( channel() );
-	if( !sentinel )
-	{
-		return nullptr;
-	}
-	Py_DecRef( sentinel );
-	PyChannel_SetPreference( channel(), PREFER_RECEIVER );
-
 	auto remaining_data_length = PyBytes_GET_SIZE(m_data) - m_pos;
 	auto chunk_size = remaining_data_length < m_requested_len ? remaining_data_length : m_requested_len;
 	auto chunk = PyBytes_FromStringAndSize( PyBytes_AS_STRING(m_data) + m_pos, chunk_size);
@@ -111,12 +110,6 @@ void StreamRecvRequest::onReceive( ssize_t nread, const uv_buf_t* buf )
 		m_received_len += nread;
 		if ( ! m_data ) {
 			sendError("OnReceive failed to construct PyBytes object.");
-		}
-		if(m_received_len >= m_requested_len)
-		{
-			if ( PyChannel_Send( channel(), Py_None ) < 0 ) {
-				PyWriteUnraisable( "StreamRecvRequest::onReceive failed to signal sentinel" );
-			}
 		}
 	}
 }
