@@ -692,12 +692,6 @@ static PyObject*
 	return NULL;
 }
 
-enum ChannelPreference : int {
-	PREFER_RECEIVER = -1,
-	PREFER_NONE,
-	PREFER_SENDER,
-};
-
 #include <BluePyCpp.h>
 #include <carbonio.h>
 
@@ -3878,10 +3872,13 @@ static PyObject*
 
 	if ( is_managed_by_libuv( s ))
 	{
-		if ( s->sock_fd != INVALID_SOCKET )
+		if ( s->sock_fd != INVALID_SOCKET && is_valid_uv_handle( s->uv_handle ) )
 		{
-			StreamRecvRequest req( reinterpret_cast<uv_stream_t*>( s->uv_handle ), recvlen, flags );
-			buf = req.execute();
+			if(!s->request)
+			{
+				s->request = reinterpret_cast<void*>( new StreamRecvRequest( reinterpret_cast<uv_stream_t*>( s->uv_handle ) ) );
+			}
+			buf = reinterpret_cast<StreamRecvRequest*>(s->request)->receive(recvlen, flags);
 		} else
 		{
 			errno = EBADF;
@@ -5771,7 +5768,7 @@ static int
 #else
 			proto = 0;
 #endif
-			s->read_request = nullptr;
+			s->request = nullptr;
 			s->uv_handle = nullptr;
 			if( is_managed_by_libuv( type ) )
 			{

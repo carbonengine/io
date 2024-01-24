@@ -239,6 +239,7 @@ typedef struct {
     _PyTime_t sock_timeout;     /* Operation timeout in seconds;
                                         0.0 means non-blocking */
     uv_handle_t* uv_handle;     /* the libuv handle associated with this socket object */
+	void* request; /* Any currently active IRequest */
 } PySocketSockObject;
 
 /* --- C API ----------------------------------------------------*/

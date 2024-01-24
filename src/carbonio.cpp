@@ -41,45 +41,83 @@ void PyWriteUnraisable( const char* msg )
 	Py_DECREF( msg_obj );
 }
 
-PyObject* StreamRecvRequest::execute()
+void IRequest::sendError(std::string_view msg)
 {
-	auto ret = uv_read_start( handle(), StreamRecvRequest::alloc, StreamRecvRequest::readCallback );
-	if ( ret < 0 ) {
-		PyErr_FromUvErr( ret );
-		return nullptr;
+	PyObject *exc, *val, *tb;
+	PyErr_Fetch( &exc, &val, &tb );
+	auto ret = PyChannel_SendThrow( channel(), exc, val, tb);
+	if( ret < 0 )
+	{
+		PyErr_Restore( exc, val, tb );
+		PyWriteUnraisable( msg.data() );
 	}
-	auto sentinel = PyChannel_Receive( m_channel );
-	if ( ! sentinel ) {
+}
+
+PyObject* StreamRecvRequest::receive( Py_ssize_t length, int flags )
+{
+	m_requested_len = length;
+	m_flags = flags;
+	if( !m_data )
+	{
+		auto ret = uv_read_start( handle(), StreamRecvRequest::alloc, StreamRecvRequest::readCallback );
+		if( ret < 0 )
+		{
+			PyErr_FromUvErr( ret );
+			return nullptr;
+		}
+	}
+	PyChannel_SetPreference( channel(), PREFER_SENDER );
+	auto sentinel = PyChannel_Receive( channel() );
+	if( !sentinel )
+	{
 		return nullptr;
 	}
 	Py_DecRef( sentinel );
+	PyChannel_SetPreference( channel(), PREFER_RECEIVER );
 
-	return m_data;
+	auto remaining_data_length = PyBytes_GET_SIZE(m_data) - m_pos;
+	auto chunk_size = remaining_data_length < m_requested_len ? remaining_data_length : m_requested_len;
+	auto chunk = PyBytes_FromStringAndSize( PyBytes_AS_STRING(m_data) + m_pos, chunk_size);
+	m_pos += chunk_size;
+
+	return chunk;
 }
 
 void StreamRecvRequest::onReceive( ssize_t nread, const uv_buf_t* buf )
 {
+	Ccp::PyGilEnsure gil;
+	if( nread == 0 ) {
+		return;
+	}
 	if ( nread < 0 ) {
 		if (nread != UV_EOF) {
 			PyErr_FromUvErr( int( nread ) );
+			sendError("OnReceive failed to read data.");
 		}
-//		uv_close((uv_handle_t*) m_handle, on_close);
+		else {
+			if ( PyChannel_Send( channel(), Py_None ) < 0 ) {
+				PyWriteUnraisable( "StreamRecvRequest::onReceive failed to signal sentinel" );
+			}
+		}
+		delete[] buf->base;
+		//uv_close((uv_handle_t*) m_handle, cleanup_uv_handle);
 	}
 	if ( nread > 0 ) {
 		if ( ! m_data ) {
-			m_data = PyBytes_FromStringAndSize( buf->base, buf->len );
+			m_data = PyBytes_FromStringAndSize( buf->base, nread );
 		} else {
-			PyBytes_ConcatAndDel(&m_data, PyBytes_FromStringAndSize( buf->base, buf->len ) );
-			if ( ! m_data ) {
-				// concatenation failed
+			PyBytes_ConcatAndDel(&m_data, PyBytes_FromStringAndSize( buf->base, nread ) );
+		}
+		m_received_len += nread;
+		if ( ! m_data ) {
+			sendError("OnReceive failed to construct PyBytes object.");
+		}
+		if(m_received_len >= m_requested_len)
+		{
+			if ( PyChannel_Send( channel(), Py_None ) < 0 ) {
+				PyWriteUnraisable( "StreamRecvRequest::onReceive failed to signal sentinel" );
 			}
 		}
-		delete[] buf;
-	}
-
-	Py_INCREF( Py_None );
-	if ( PyChannel_Send( m_channel, Py_None ) < 0 ) {
-		PyWriteUnraisable( "StreamRecvRequest::onReceive failed to signal sentinel" );
 	}
 }
 
