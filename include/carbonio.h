@@ -8,6 +8,7 @@
 
 #include <uv.h>
 
+#include <CcpScopeGuard.h>
 #include <BluePyCpp.h>
 
 void cleanup_uv_handle( uv_handle_t* uv_handle );
@@ -21,6 +22,9 @@ enum ChannelPreference : int {
 	PREFER_NONE,
 	PREFER_SENDER,
 };
+
+extern void SendError(PyChannelObject* channel, std::string_view msg);
+
 
 
 struct IRequest

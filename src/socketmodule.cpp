@@ -2824,7 +2824,7 @@ static PyObject*
 	    else {
 	        auto handle = reinterpret_cast<uv_stream_t*>(s->uv_handle);
 			auto channel = reinterpret_cast<PyChannelObject*>(handle->data);
-            if( channel == nullptr ) {
+            if( !channel ) {
                 errno = EBADF;
                 PyErr_SetFromErrno(PyExc_OSError);
                 // TODO: Close the socket?
@@ -2832,46 +2832,35 @@ static PyObject*
             }
             auto loop = get_uv_loop();
             if ( !loop ) {
-                goto finally;
+				goto finally;
             }
 			PyChannel_SetPreference(channel, PREFER_SENDER);
-            PyObject* listen_status = PyChannel_Receive(channel);
-            if( listen_status == NULL ) {
-                goto finally;
-            }
-            if( !PyLong_Check( listen_status ) ) {
-                PyErr_BadInternalCall();
-                goto finally;
-            }
-            int status = PyLong_AsLong( listen_status );
-            if( status < 0 ) {
-                PyErr_FromUvErr(status);
-                goto finally;
-            }
-
-            auto *client = new uv_tcp_t;
-            uv_tcp_init(loop, client);
-            status = uv_accept(handle, reinterpret_cast<uv_stream_t*>(client));
-            if( status < 0 ) {
-				uv_close((uv_handle_t*)client, cleanup_uv_handle);
-                PyErr_FromUvErr(status);
-                goto finally;
-            }
-            status = uv_fileno( reinterpret_cast<const uv_handle_t*>( client ), reinterpret_cast<uv_os_fd_t*>( &newfd ) );
-            if( status < 0 )
-            {
-				uv_close((uv_handle_t*)client, cleanup_uv_handle);
-                PyErr_FromUvErr( status );
-                goto finally;
-            }
-			auto* client_channel = PyChannel_New(nullptr);
-			if( !client_channel )
-			{
-				uv_close((uv_handle_t*)client, cleanup_uv_handle);
+            auto result = PyChannel_Receive(channel);
+			if( !result ) {
 				goto finally;
 			}
-			PyChannel_SetPreference(client_channel, PREFER_SENDER);
-			client->data = client_channel;
+			ON_BLOCK_EXIT( [&] { Py_XDECREF( result ); } );
+			auto listen_status = PyTuple_GetItem(result, 0);
+			if( !PyLong_Check( listen_status ) ) {
+				PyErr_BadInternalCall();
+				goto finally;
+			}
+			ON_BLOCK_EXIT( [&] { Py_XDECREF( listen_status ); } );
+
+            auto status = PyLong_AsLong( listen_status );
+            if( status < 0 ) {
+				if( !PyErr_Occurred() )
+				{
+					PyErr_FromUvErr( status );
+				}
+                goto finally;
+            }
+			sock = PyTuple_GetItem(result, 1);
+			if( !PyLong_Check( sock ) ) {
+				PyErr_BadInternalCall();
+				goto finally;
+			}
+			ON_BLOCK_EXIT( [&] { Py_XDECREF( sock ); } );
         }
     }
 	else {
@@ -2907,11 +2896,11 @@ static PyObject*
             }
         }
 #endif
-    }
-    sock = PyLong_FromSocket_t(newfd);
-    if (sock == NULL) {
-        SOCKETCLOSE(newfd);
-        goto finally;
+		sock = PyLong_FromSocket_t(newfd);
+		if (sock == NULL) {
+			SOCKETCLOSE(newfd);
+			goto finally;
+		}
     }
 
     addr = makesockaddr(s->sock_fd, SAS2SA(&addrbuf), addrlen, s->sock_proto);
@@ -3344,20 +3333,60 @@ void on_accept(uv_stream_t *handle, int status)
 		PyWriteUnraisable("on_accept received null channel pointer" );
 		return;
     }
-	auto py_status = PyLong_FromLong(status);
-	if( py_status == nullptr )
-	{
-		PyObject *exc, *val, *tb;
-		PyErr_Fetch( &exc, &val, &tb );
-		auto ret = PyChannel_SendThrow(channel, exc, val, tb);
-		if( ret < 0 )
-		{
-			PyErr_Restore( exc, val, tb );
-			PyWriteUnraisable( "on_accept failed to send exception" );
-		}
+	auto *client = new uv_tcp_t;
+	uv_tcp_init(handle->loop, client);
+	status = uv_accept(handle, reinterpret_cast<uv_stream_t*>(client));
+	if( status < 0 ) {
+		uv_close((uv_handle_t*)client, cleanup_uv_handle);
+		PyErr_FromUvErr(status);
+		SendError(channel, "on_accept: uv_accept failed");
 		return;
 	}
-	int ret = PyChannel_Send(channel, py_status);
+	SOCKET_T newfd;
+	status = uv_fileno( reinterpret_cast<const uv_handle_t*>( client ), reinterpret_cast<uv_os_fd_t*>( &newfd ) );
+	if( status < 0 )
+	{
+		uv_close((uv_handle_t*)client, cleanup_uv_handle);
+		PyErr_FromUvErr( status );
+		SendError(channel, "on_accept: uv_fileno failed");
+		return;
+	}
+	auto* client_channel = PyChannel_New(nullptr);
+	if( !client_channel )
+	{
+		uv_close((uv_handle_t*)client, cleanup_uv_handle);
+		SendError(channel, "on_accept: Failed to create client channel");
+		return;
+	}
+	PyChannel_SetPreference(client_channel, PREFER_SENDER);
+	client->data = client_channel;
+
+	auto py_fd = PyLong_FromSocket_t( newfd );
+	if( !py_fd )
+	{
+		SendError(channel, "Failed to convert status to python long");
+		return;
+	}
+	auto py_status = PyLong_FromLong(status);
+	if( !py_status )
+	{
+		Py_DecRef(py_fd);
+		SendError(channel, "Failed to convert status to python long");
+		return;
+	}
+
+	auto tuple = PyTuple_Pack(2, py_status, py_fd);
+	if( !tuple )
+	{
+		uv_close((uv_handle_t*)client, cleanup_uv_handle);
+		Py_DecRef(py_fd);
+		Py_DecRef(py_status);
+		Py_DecRef(reinterpret_cast<PyObject*>(client_channel));
+		SendError(channel, "on_acept: Failed to pack tuple");
+		return;
+	}
+
+	int ret = PyChannel_Send(channel, tuple);
 	if( ret < 0 )
 	{
 		PyWriteUnraisable( "on_accept failed to send status" );
@@ -5660,7 +5689,7 @@ uv_udp_t* create_uv_udp_handle(SOCKET_T* fd, int family)
 	return handle;
 }
 
-void uv_walk_callback(uv_handle_t* handle, void* arg)
+void find_handle_for_fd(uv_handle_t* handle, void* arg)
 {
 	auto s = reinterpret_cast<PySocketSockObject *>(arg);
 	uv_os_fd_t fd;
@@ -5830,7 +5859,7 @@ static int
 			s->uv_handle = nullptr;
 			if( is_managed_by_libuv( type ) )
 			{
-				uv_walk( get_uv_loop(), uv_walk_callback, (void*)s );
+				uv_walk( get_uv_loop(), find_handle_for_fd, (void*)s );
 				if( s->uv_handle == nullptr )
 				{
 					// No handle found for re-use, must create one.
@@ -5968,6 +5997,30 @@ static int
 				return -1;
 			}
 #endif
+			s->sock_fd = fd;
+			s->uv_handle = nullptr;
+			uv_walk( get_uv_loop(), find_handle_for_fd, (void*)s );
+			if ( ! s->uv_handle )
+			{
+				if( type == SOCK_STREAM )
+				{
+					auto handle = create_uv_tcp_handle(&fd, family);
+					if( !handle )
+					{
+						return -1;
+					}
+					s->uv_handle = reinterpret_cast<uv_handle_t*>(handle);
+				}
+				else if( type == SOCK_DGRAM )
+				{
+					auto handle = create_uv_udp_handle(&fd, family);
+					if( !handle )
+					{
+						return -1;
+					}
+					s->uv_handle = reinterpret_cast<uv_handle_t*>(handle);
+				}
+			}
 		}
 	}
 	if( init_sockobject( s, fd, family, type, proto ) == -1 )
@@ -6616,26 +6669,37 @@ static PyObject*
 #endif
 	if( is_managed_by_libuv( type ) )
 	{
-        PySocketSockObject s;
-        s.sock_fd = fd;
-        s.uv_handle = nullptr;
-        uv_walk(get_uv_loop(), uv_walk_callback, &s);
-        if ( s.uv_handle && !uv_is_closing( s.uv_handle ) )
-        {
-			uv_close( s.uv_handle, cleanup_uv_handle );
-            res = 0;
-		} else {
+		if ( fd == INVALID_SOCKET )
+		{
 			errno = EBADF;
 			res = -1;
+		}
+		else
+		{
+			PySocketSockObject s;
+			s.sock_fd = fd;
+			s.uv_handle = nullptr;
+			uv_walk( get_uv_loop(), find_handle_for_fd, &s );
+			if( s.uv_handle && !uv_is_closing( s.uv_handle ) )
+			{
+				uv_close( s.uv_handle, cleanup_uv_handle );
+				res = 0;
+			}
+			else
+			{
+				errno = EBADF;
+				res = -1;
+			}
 		}
 	} else {
         Py_BEGIN_ALLOW_THREADS
         res = SOCKETCLOSE( fd );
         Py_END_ALLOW_THREADS
 	}
-		/* bpo-30319: The peer can already have closed the connection.
-       Python ignores ECONNRESET on close(). */
-		if( res < 0 && !CHECK_ERRNO( ECONNRESET ) )
+
+	/* bpo-30319: The peer can already have closed the connection.
+   Python ignores ECONNRESET on close(). */
+	if( res < 0 && !CHECK_ERRNO( ECONNRESET ) )
 	{
 		return set_error();
 	}

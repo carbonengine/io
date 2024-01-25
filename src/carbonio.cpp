@@ -162,3 +162,15 @@ void StreamSendRequest::onSend( int status )
 		PyWriteUnraisable("StreamSendRequest::send Failed to send status over channel");
 	}
 }
+
+void SendError(PyChannelObject* channel, std::string_view msg)
+{
+	PyObject *exc, *val, *tb;
+	PyErr_Fetch( &exc, &val, &tb );
+	auto ret = PyChannel_SendThrow( channel, exc, val, tb);
+	if( ret < 0 )
+	{
+		PyErr_Restore( exc, val, tb );
+		PyWriteUnraisable( msg.data() );
+	}
+}

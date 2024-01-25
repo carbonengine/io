@@ -23,6 +23,7 @@ include(CcpPackageConfigHelpers)
 find_package(libuv CONFIG REQUIRED)
 find_package(Python CONFIG REQUIRED)
 find_package(OpenSSL CONFIG REQUIRED)
+find_package(CcpCore CONFIG REQUIRED)
 
 add_library(iobase STATIC
     src/carbonio.cpp
@@ -31,6 +32,7 @@ target_link_libraries(iobase
     PUBLIC
         Python
         libuv::uv_a
+        CcpCore
 )
 target_include_directories(iobase
     PUBLIC
