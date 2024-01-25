@@ -4589,6 +4589,14 @@ static int
 	return ( ctx->result >= 0 );
 }
 
+PyObject* uv_sendall_impl(PySocketSockObject* s, char* buf, Py_ssize_t len, int flags)
+{
+	auto* request = new StreamSendRequest(reinterpret_cast<uv_stream_t*>(s->uv_handle), buf, len, flags);
+	auto status = request->send();
+	delete request;
+	return status;
+}
+
 /* s.send(data [,flags]) method */
 
 static PyObject*
@@ -4600,6 +4608,24 @@ static PyObject*
 
 	if( !PyArg_ParseTuple( args, "y*|i:send", &pbuf, &flags ) )
 		return NULL;
+
+	if( is_managed_by_libuv( s ) )
+	{
+		auto py_status = uv_sendall_impl(s, reinterpret_cast<char*>(pbuf.buf), pbuf.len, flags);
+		auto status = PyLong_AsLong( py_status );
+		if( status == -1 && PyErr_Occurred() )
+		{
+			PyErr_BadInternalCall();
+			PyWriteUnraisable("StreamSendRequest::send failed to convert Python status");
+		}
+		if( status < 0 )
+		{
+			PyErr_FromUvErr( status );
+			PyBuffer_Release( &pbuf );
+			return nullptr;
+		}
+		return PyLong_FromSsize_t( pbuf.len );
+	}
 
 	if( !IS_SELECTABLE( s ) )
 	{
@@ -4625,15 +4651,6 @@ PyDoc_STRVAR( send_doc,
 Send a data string to the socket.  For the optional flags\n\
 argument, see the Unix manual.  Return the number of bytes\n\
 sent; this may be less than len(data) if the network is busy." );
-
-
-PyObject* uv_sendall_impl(PySocketSockObject* s, char* buf, Py_ssize_t len, int flags)
-{
-	auto* request = new StreamSendRequest(reinterpret_cast<uv_stream_t*>(s->uv_handle), buf, len, flags);
-	auto status = request->send();
-	delete request;
-	return status;
-}
 
 
 /* s.sendall(data [,flags]) method */
