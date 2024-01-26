@@ -25,7 +25,7 @@ enum ChannelPreference : int {
 
 extern void SendError(PyChannelObject* channel, std::string_view msg);
 
-
+extern void alloc(uv_handle_t* handle, size_t size, uv_buf_t* buf);
 
 struct IRequest
 {
@@ -68,7 +68,6 @@ public:
 	PyObject* receive(Py_ssize_t length, int flags);
 	uv_stream_t* handle() { return reinterpret_cast<uv_stream_t*>( m_handle ); }
 
-	static void alloc(uv_handle_t* handle, size_t size, uv_buf_t* buf);
 	static void readCallback( uv_stream_t* client, ssize_t nread, const uv_buf_t* buf );
 
 private:
@@ -94,6 +93,28 @@ class StreamSendRequest : public IStreamRequest
 		char* m_buf;
 		Py_ssize_t m_len;
 		int m_flags;
+};
+
+class UdpRecvRequest : public IRequest
+{
+public:
+	UdpRecvRequest( uv_udp_t* handle, Py_ssize_t len, int flags ) :
+		IRequest( reinterpret_cast<uv_handle_t*>( handle ) ), m_len( len ), m_flags( flags )
+	{
+	}
+
+	PyObject* receive();
+	static void receiveCallback( uv_udp_t* handle, ssize_t nread, const uv_buf_t* buf, const struct sockaddr* addr, unsigned flags );
+
+	uv_udp_t* handle() { return reinterpret_cast<uv_udp_t*>( m_handle ); }
+
+private:
+	void onRead( uv_udp_t* handle, ssize_t nread, const uv_buf_t* buf, const struct sockaddr* addr, unsigned flags );
+
+	Py_ssize_t m_len;
+	int m_flags;
+	PyObject* m_buf{nullptr};
+	PyObject* m_addr{nullptr};
 };
 
 #endif // CARBONIO_H

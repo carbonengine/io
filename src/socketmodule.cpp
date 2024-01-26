@@ -3897,23 +3897,40 @@ static Py_ssize_t
 }
 
 
-static PyObject* uv_recv_impl( PySocketSockObject* s, Py_ssize_t recvlen, int flags ) noexcept
+static PyObject* uv_tcp_recv_impl( PySocketSockObject* s, Py_ssize_t recvlen, int flags ) noexcept
 {
-	PyObject* buf{nullptr};
-	if ( s->sock_fd != INVALID_SOCKET && is_valid_uv_handle( s->uv_handle ) )
+	PyObject* buf{ nullptr };
+	if( s->sock_fd != INVALID_SOCKET && is_valid_uv_handle( s->uv_handle ) )
 	{
-		if(!s->request)
+		if( !s->request )
 		{
 			s->request = reinterpret_cast<void*>( new StreamRecvRequest( reinterpret_cast<uv_stream_t*>( s->uv_handle ) ) );
 		}
-		buf = reinterpret_cast<StreamRecvRequest*>(s->request)->receive(recvlen, flags);
-	} else
+		buf = reinterpret_cast<StreamRecvRequest*>( s->request )->receive( recvlen, flags );
+	}
+	else
 	{
 		errno = EBADF;
-		PyErr_SetFromErrno(PyExc_OSError);
+		PyErr_SetFromErrno( PyExc_OSError );
 	}
 	return buf;
 }
+
+static PyObject* uv_udp_recv_impl( PySocketSockObject* s, Py_ssize_t recvlen, int flags )
+{
+	PyObject* tup{nullptr};
+	if ( s->sock_fd != INVALID_SOCKET && is_valid_uv_handle( s->uv_handle ) )
+	{
+		auto request = new UdpRecvRequest( reinterpret_cast<uv_udp_t*>( s->uv_handle ), recvlen, flags );
+		tup = request->receive();
+	} else
+	{
+		errno = EBADF;
+		PyErr_SetFromErrno( PyExc_OSError );
+	}
+	return tup;
+}
+
 /* s.recv(nbytes [,flags]) method */
 
 static PyObject*
@@ -3935,7 +3952,20 @@ static PyObject*
 
 	if ( is_managed_by_libuv( s ))
 	{
-		return uv_recv_impl( s, recvlen, flags );
+		if( s->sock_type == SOCK_STREAM )
+		{
+			return uv_tcp_recv_impl( s, recvlen, flags );
+		}
+		else if( s->sock_type == SOCK_DGRAM )
+		{
+			auto tup = uv_udp_recv_impl( s, recvlen, flags );
+			return PyTuple_GetItem( tup, 0 );
+		}
+		else
+		{
+			PyErr_Format( PyExc_NotImplementedError, "sock.recv() not implemented for socket of type %d", s->sock_type );
+			return nullptr;
+		}
 	}else
 	{
 		/* Allocate a new string. */
@@ -4136,31 +4166,38 @@ static PyObject*
 
 	if( is_managed_by_libuv( s ) )
 	{
-		if( s->sock_type != SOCK_STREAM )
+		if( s->sock_type == SOCK_STREAM )
+		{
+			sockaddr_storage name;
+			int namelen = sizeof( sockaddr_storage );
+			int status = uv_tcp_getpeername( reinterpret_cast<uv_tcp_t*>( s->uv_handle ), reinterpret_cast<sockaddr*>( &name ), &namelen );
+			if( status < 0 )
+			{
+				PyErr_FromUvErr( status );
+				return nullptr;
+			}
+			auto addr = makesockaddr( s->sock_fd, reinterpret_cast<sockaddr*>( &name ), namelen, s->sock_proto );
+			if( !addr )
+			{
+				return nullptr;
+			}
+			auto buf = uv_tcp_recv_impl( s, recvlen, flags );
+			if( !buf )
+			{
+				Py_DecRef( addr );
+				return nullptr;
+			}
+			ret = PyTuple_Pack( 2, buf, addr );
+		}
+		else if ( s->sock_type == SOCK_DGRAM )
+		{
+			ret = uv_udp_recv_impl( s, recvlen, flags );
+		}
+		else
 		{
 			PyErr_Format( PyExc_NotImplementedError, "RecvFrom not implemented for socket of type %d", s->sock_type );
 			return nullptr;
 		}
-		sockaddr_storage name;
-		int namelen = sizeof( sockaddr_storage );
-		int status = uv_tcp_getpeername( reinterpret_cast<uv_tcp_t*>( s->uv_handle ), reinterpret_cast<sockaddr*>( &name ), &namelen );
-		if( status < 0 )
-		{
-			PyErr_FromUvErr( status );
-			return nullptr;
-		}
-		auto addr = makesockaddr( s->sock_fd, reinterpret_cast<sockaddr*>( &name ), namelen, s->sock_proto );
-		if( !addr )
-		{
-			return nullptr;
-		}
-		auto buf = uv_recv_impl( s, recvlen, flags );
-		if( !buf )
-		{
-			Py_DecRef(addr);
-			return nullptr;
-		}
-		ret = PyTuple_Pack( 2, buf, addr );
 	} else {
 
         outlen = sock_recvfrom_guts(s, PyBytes_AS_STRING(buf), recvlen, flags, &addr);
