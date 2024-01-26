@@ -130,8 +130,9 @@ void StreamRecvRequest::readCallback( uv_stream_t* client, ssize_t nread, const 
 PyObject* StreamSendRequest::send()
 {
 	uv_write_t* request = new uv_write_t;
-	auto bufferarray = new std::array<uv_buf_t, 1> {{ULONG(m_len), m_buf}};
-	int status = uv_write(request, handle(), bufferarray->data(), bufferarray->size(), StreamSendRequest::sendCallback );
+	constexpr int NUM_BUFFERS = 1;
+	auto bufferarray = new std::array<uv_buf_t, NUM_BUFFERS> {{ULONG(m_len), m_buf}};
+	int status = uv_write(request, handle(), bufferarray->data(), NUM_BUFFERS, StreamSendRequest::sendCallback );
 	if( status < 0 ){
 		delete bufferarray;
 		delete request;
