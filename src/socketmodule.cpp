@@ -6764,6 +6764,69 @@ Close an integer socket file descriptor.  This is like os.close(), but for\n\
 sockets; on some platforms os.close() won't work for socket file descriptors." );
 
 #ifndef NO_DUP
+bool dup_uv_tcp_handle( SOCKET_T newfd )
+{
+	auto handle = new uv_tcp_t;
+	ScopeGuard handle_guard = MakeGuard([&]{ delete handle; });
+	auto status = uv_tcp_init( get_uv_loop(), handle );
+	if( status < 0 )
+	{
+		PyErr_FromUvErr( status );
+		return false;
+	}
+	status = uv_tcp_open( handle, uv_os_sock_t( newfd ) );
+	if( status < 0 )
+	{
+		PyErr_FromUvErr( status );
+		return false;
+	}
+
+	// at this point we need to delegate cleaning up the libuv handle to libuv
+	handle_guard.Dismiss();
+
+	auto channel = PyChannel_New( nullptr );
+	handle->data = reinterpret_cast<void*>( channel );
+	if( handle->data == nullptr )
+	{
+		uv_close( (uv_handle_t*)handle, cleanup_uv_handle );
+		// PyChannel_New should have set an error.
+		return false;
+	}
+	PyChannel_SetPreference( channel, PREFER_SENDER );
+	return true;
+}
+
+bool dup_uv_udp_handle( SOCKET_T newfd )
+{
+	auto handle = new uv_udp_t;
+	ScopeGuard handle_guard = MakeGuard([&]{ delete handle; });
+	auto status = uv_udp_init( get_uv_loop(), handle );
+	if( status < 0 )
+	{
+		PyErr_FromUvErr( status );
+		return false;
+	}
+	status = uv_udp_open( handle, uv_os_sock_t( newfd ) );
+	if( status < 0 )
+	{
+		PyErr_FromUvErr( status );
+		return false;
+	}
+
+	// at this point we need to delegate cleaning up the libuv handle to libuv
+	handle_guard.Dismiss();
+
+	auto channel = PyChannel_New( nullptr );
+	handle->data = reinterpret_cast<void*>( channel );
+	if( handle->data == nullptr )
+	{
+		uv_close( (uv_handle_t*)handle, cleanup_uv_handle );
+		// PyChannel_New should have set an error.
+		return false;
+	}
+	PyChannel_SetPreference( channel, PREFER_SENDER );
+	return true;
+}
 /* dup() function for socket fds */
 
 static PyObject*
@@ -6779,6 +6842,27 @@ static PyObject*
 	if( fd == (SOCKET_T)( -1 ) && PyErr_Occurred() )
 		return NULL;
 
+#ifdef MS_WINDOWS
+	if( WSADuplicateSocketW( fd, GetCurrentProcessId(), &info ) )
+		return set_error();
+
+	newfd = WSASocketW( FROM_PROTOCOL_INFO, FROM_PROTOCOL_INFO, FROM_PROTOCOL_INFO, &info, 0, WSA_FLAG_OVERLAPPED );
+	if( newfd == INVALID_SOCKET )
+		return set_error();
+
+	if( !SetHandleInformation( (HANDLE)newfd, HANDLE_FLAG_INHERIT, 0 ) )
+	{
+		closesocket( newfd );
+		PyErr_SetFromWindowsErr( 0 );
+		return NULL;
+	}
+#else
+	/* On UNIX, dup can be used to duplicate the file descriptor of a socket */
+	newfd = _Py_dup( fd );
+	if( newfd == INVALID_SOCKET )
+		return NULL;
+#endif
+
 	int type = -1;
 #ifdef SO_TYPE
 	socklen_t slen = sizeof( type );
@@ -6793,55 +6877,27 @@ static PyObject*
 
 	if( is_managed_by_libuv( type ) )
 	{
-		int family = get_socket_family( fd );
-		if( family == -1 )
-		{
-			return nullptr;
-		}
 		if( type == SOCK_STREAM )
 		{
-			auto handle = create_uv_tcp_handle(&newfd, family);
-			if( !handle )
+			if (!dup_uv_tcp_handle( newfd ) )
 			{
+				SOCKETCLOSE( newfd );
 				return nullptr;
 			}
 		}
 		else if( type == SOCK_DGRAM )
 		{
-			auto handle = create_uv_udp_handle(&newfd, family);
-			if( !handle )
+			if ( !dup_uv_udp_handle( newfd ) )
 			{
+				SOCKETCLOSE( newfd );
 				return nullptr;
 			}
 		}
 		else
 		{
-			PyErr_Format(PyExc_NotImplementedError, "Unhandled socket type %d", type );
+			PyErr_Format( PyExc_NotImplementedError, "Unhandled socket type %d", type );
 			return nullptr;
 		}
-	}
-	else
-	{
-#ifdef MS_WINDOWS
-		if( WSADuplicateSocketW( fd, GetCurrentProcessId(), &info ) )
-			return set_error();
-
-		newfd = WSASocketW( FROM_PROTOCOL_INFO, FROM_PROTOCOL_INFO, FROM_PROTOCOL_INFO, &info, 0, WSA_FLAG_OVERLAPPED );
-		if( newfd == INVALID_SOCKET )
-			return set_error();
-
-		if( !SetHandleInformation( (HANDLE)newfd, HANDLE_FLAG_INHERIT, 0 ) )
-		{
-			closesocket( newfd );
-			PyErr_SetFromWindowsErr( 0 );
-			return NULL;
-		}
-#else
-		/* On UNIX, dup can be used to duplicate the file descriptor of a socket */
-		newfd = _Py_dup( fd );
-		if( newfd == INVALID_SOCKET )
-			return NULL;
-#endif
 	}
 
 	newfdobj = PyLong_FromSocket_t( newfd );
