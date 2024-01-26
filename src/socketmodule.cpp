@@ -3282,14 +3282,31 @@ static PyObject*
             res = -1;
         }
         else {
+			int flags = 0;
+			int flag = 0;
+			int flagsize = sizeof flag;
+			res = getsockopt( s->sock_fd, IPPROTO_IPV6, IPV6_V6ONLY, (char*)&flag, &flagsize );
+			if (res < 0)
+			{
+				return s->errorhandler();
+			}
+
 			if ( s->sock_type == SOCK_STREAM )
 			{
 				auto handle = reinterpret_cast<uv_tcp_t *>(s->uv_handle);
-				res = uv_tcp_bind(handle, SAS2SA(&addrbuf), 0);
+				if ( flag )
+				{
+					flags = UV_TCP_IPV6ONLY;
+				}
+				res = uv_tcp_bind(handle, SAS2SA(&addrbuf), flags);
 			} else if ( s->sock_type == SOCK_DGRAM )
 			{
 				auto handle = reinterpret_cast<uv_udp_t *>(s->uv_handle);
-				res = uv_udp_bind(handle, SAS2SA(&addrbuf), 0);
+				if ( flag )
+				{
+					flags = UV_UDP_IPV6ONLY;
+				}
+				res = uv_udp_bind(handle, SAS2SA(&addrbuf), flags);
 			} else
 			{
 				PyErr_Format( PyExc_NotImplementedError, "Unsupported UV socket type %d", s->sock_type );
