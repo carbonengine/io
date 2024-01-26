@@ -4837,6 +4837,12 @@ static int
 	return ( ctx->result >= 0 );
 }
 
+PyObject* uv_udp_sendto_impl( uv_udp_t* handle, struct sock_sendto* ctx )
+{
+	auto request = new UdpSendRequest( handle, ctx->buf, ctx->len, SAS2SA( ctx->addrbuf ), ctx->addrlen, ctx->flags );
+	return request->send();
+}
+
 /* s.sendto(data, [flags,] sockaddr) method */
 
 static PyObject*
@@ -4894,10 +4900,36 @@ static PyObject*
 	ctx.flags = flags;
 	ctx.addrlen = addrlen;
 	ctx.addrbuf = &addrbuf;
-	if( sock_call( s, 1, sock_sendto_impl, &ctx ) < 0 )
+
+	if ( is_managed_by_libuv( s ) )
 	{
-		PyBuffer_Release( &pbuf );
-		return NULL;
+		if ( s->sock_type == SOCK_DGRAM )
+		{
+			auto ret = uv_udp_sendto_impl( reinterpret_cast<uv_udp_t*>( s->uv_handle ), &ctx );
+			if( !ret )
+			{
+				PyBuffer_Release( &pbuf );
+				return nullptr;
+			}
+			ctx.result = PyLong_AsSsize_t( ret );
+			if ( ctx.result == -1 && PyErr_Occurred() )
+			{
+				PyBuffer_Release( &pbuf );
+				return nullptr;
+			}
+		} else
+		{
+			PyBuffer_Release( &pbuf );
+			PyErr_Format( PyExc_NotImplementedError, "sock.sendto() not implement for socket of type %d", s->sock_type );
+			return nullptr;
+		}
+	} else
+	{
+		if( sock_call( s, 1, sock_sendto_impl, &ctx ) < 0 )
+		{
+			PyBuffer_Release( &pbuf );
+			return NULL;
+		}
 	}
 	PyBuffer_Release( &pbuf );
 

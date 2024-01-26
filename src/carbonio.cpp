@@ -302,3 +302,50 @@ void UdpRecvRequest::onRead( uv_udp_t* handle, ssize_t nread, const uv_buf_t* bu
 		bufferGuard.Dismiss();
 	}
 }
+
+PyObject* UdpSendRequest::send()
+{
+	auto* request = new uv_udp_send_t;
+	ON_BLOCK_EXIT( [&] { delete request; } );
+
+	constexpr int NUM_BUFFERS = 1;
+	auto bufferarray = new std::array<uv_buf_t, NUM_BUFFERS>{ { ULONG( m_len ), m_buf } };
+	ON_BLOCK_EXIT( [&] { delete bufferarray; } );
+
+	int status = uv_udp_send( request, handle(), bufferarray->data(), NUM_BUFFERS, m_addr, UdpSendRequest::sendCallback );
+	if( status < 0 )
+	{
+		return PyLong_FromLong( status );
+	}
+	PyChannel_SetPreference( channel(), PREFER_SENDER );
+	auto ret = PyChannel_Receive( channel() );
+	status = PyLong_AsLong( ret );
+	if ( status < 0 ) {
+		if( !( status == -1 && PyErr_Occurred() ) )
+		{
+			PyErr_FromUvErr( status );
+		}
+		return nullptr;
+	}
+	ret = PyLong_FromSsize_t(m_len);
+	return ret;
+}
+
+void UdpSendRequest::sendCallback( uv_udp_send_t* request, int status )
+{
+	auto _this = reinterpret_cast<UdpSendRequest*>( request->handle->data );
+	_this->onSend( status );
+}
+
+void UdpSendRequest::onSend( int status )
+{
+	auto py_status = PyLong_FromLong(status);
+	if( !py_status ){
+		sendError("StreamSendRequest::send Failed to convert status to python int");
+		return;
+	}
+	if( PyChannel_Send( channel(), py_status ) < 0 )
+	{
+		PyWriteUnraisable("StreamSendRequest::send Failed to send status over channel");
+	}
+}

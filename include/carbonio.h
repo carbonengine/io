@@ -95,18 +95,23 @@ class StreamSendRequest : public IStreamRequest
 		int m_flags;
 };
 
-class UdpRecvRequest : public IRequest
+class IUdpRequest : public IRequest
+{
+public:
+	IUdpRequest( uv_udp_t* handle ) : IRequest( reinterpret_cast<uv_handle_t*>( handle ) ){}
+	uv_udp_t* handle() { return reinterpret_cast<uv_udp_t*>( m_handle ); }
+};
+
+class UdpRecvRequest : public IUdpRequest
 {
 public:
 	UdpRecvRequest( uv_udp_t* handle, Py_ssize_t len, int flags ) :
-		IRequest( reinterpret_cast<uv_handle_t*>( handle ) ), m_len( len ), m_flags( flags )
+		IUdpRequest( handle ), m_len( len ), m_flags( flags )
 	{
 	}
 
 	PyObject* receive();
 	static void receiveCallback( uv_udp_t* handle, ssize_t nread, const uv_buf_t* buf, const struct sockaddr* addr, unsigned flags );
-
-	uv_udp_t* handle() { return reinterpret_cast<uv_udp_t*>( m_handle ); }
 
 private:
 	void onRead( uv_udp_t* handle, ssize_t nread, const uv_buf_t* buf, const struct sockaddr* addr, unsigned flags );
@@ -115,6 +120,27 @@ private:
 	int m_flags;
 	PyObject* m_buf{nullptr};
 	PyObject* m_addr{nullptr};
+};
+
+class UdpSendRequest : public IUdpRequest
+{
+public:
+	UdpSendRequest( uv_udp_t* handle, char* buf, ssize_t len, const struct sockaddr* addr, int addrlen , int flags )
+	: IUdpRequest( handle ), m_buf( buf ), m_len( len ), m_addr( addr ), m_addrLen( addrlen ) , m_flags( flags )
+	{
+	}
+
+	PyObject* send();
+	static void sendCallback(uv_udp_send_t* request, int status);
+
+private:
+	void onSend( int status );
+
+	char* m_buf;
+	ssize_t m_len;
+	const struct sockaddr* m_addr;
+	int m_addrLen;
+	int m_flags;
 };
 
 #endif // CARBONIO_H
