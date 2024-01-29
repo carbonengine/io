@@ -26,15 +26,19 @@ enum ChannelPreference : int {
 extern void SendError(PyChannelObject* channel, std::string_view msg);
 
 extern void alloc(uv_handle_t* handle, size_t size, uv_buf_t* buf);
+static Py_tss_t UV_LOOP_KEY = Py_tss_NEEDS_INIT;
+
+extern void SetTimeoutErrorType(PyObject* error_type);
+
+
+extern uv_loop_t * get_uv_loop();
+
+extern "C" typedef struct PySocketSockObject_t PySocketSockObject;
 
 struct IRequest
 {
 public:
-	IRequest( uv_handle_t* handle ) : m_handle( handle )
-	{
-		m_channel = reinterpret_cast<PyChannelObject*>( m_handle->data );
-		m_handle->data = this;
-	}
+	IRequest( PySocketSockObject* socket );
 
 	~IRequest()
 	{
@@ -46,24 +50,52 @@ public:
 		return m_channel;
 	}
 
+	int startTimeout();
+
+	static void timeoutCallback(uv_timer_t* result);
+
+	virtual void onTimeout();
+
+	// The libuv handle has a single data member on which the user can store application specific data.
+	// We use this data member to serve two purposes:
+	// 1. When the handle is created we store the stackless channel for the request
+	//    in there. The channel continues to live there except during the execution of use case 2.
+	// 2. When we register for callbacks from libuv, we store the request itself in the data attribute. Once
+	//    the callback is finished, we set the attribute back to the channel.
+	//
+	// These use-cases conflict when we receive uv callbacks from outside the context of a request
+	// For example on_accept and cleanup_uv_handle need access to the channel, but at any given time may either
+	// be holding a pointer to a request class or to a stackless channel.
+	//
+	// Here we use the "tagged pointer" pattern to solve this problem.
+	// https://en.wikipedia.org/wiki/Tagged_pointer
+
+	static void* untag( void* tagged_pointer );
+	static bool isTagged( void* tagged_pointer );
+	static PyChannelObject* ChannelPtr( void* tagged_pointer );
+
+	static constexpr uint64_t TAG = 0x1000000000000000L;
+
 protected:
 	void sendError(std::string_view msg);
 
 	PyChannelObject* m_channel{nullptr};
 	uv_handle_t* m_handle{nullptr};
+	uv_timer_t* m_timeout{nullptr};
+	_PyTime_t m_timeout_nanoseconds{-1};
 };
 
 class IStreamRequest : public IRequest
 {
 public:
-	IStreamRequest( uv_stream_t* handle ) : IRequest( reinterpret_cast<uv_handle_t*>( handle ) ){}
+	IStreamRequest( PySocketSockObject* socket ) : IRequest( socket ){}
 	uv_stream_t* handle() { return reinterpret_cast<uv_stream_t*>( m_handle ); }
 };
 
 class StreamRecvRequest : public IStreamRequest
 {
 public:
-	StreamRecvRequest( uv_stream_t* handle ) : IStreamRequest( handle ){}
+	StreamRecvRequest( PySocketSockObject* socket ) : IStreamRequest( socket ){}
 	~StreamRecvRequest(){ Py_XDECREF(m_data);}
 	PyObject* receive(Py_ssize_t length, int flags);
 	uv_stream_t* handle() { return reinterpret_cast<uv_stream_t*>( m_handle ); }
@@ -83,8 +115,8 @@ private:
 class StreamSendRequest : public IStreamRequest
 {
 	public:
-		StreamSendRequest( uv_stream_t* handle, char* buf, Py_ssize_t len, int flags ) :
-			IStreamRequest( handle ), m_buf(buf), m_len(len), m_flags(flags) {}
+		StreamSendRequest( PySocketSockObject* socket, char* buf, Py_ssize_t len, int flags ) :
+			IStreamRequest( socket ), m_buf(buf), m_len(len), m_flags(flags) {}
 		PyObject* send();
 		static void sendCallback(uv_write_t* request, int status);
 	private:
@@ -98,15 +130,15 @@ class StreamSendRequest : public IStreamRequest
 class IUdpRequest : public IRequest
 {
 public:
-	IUdpRequest( uv_udp_t* handle ) : IRequest( reinterpret_cast<uv_handle_t*>( handle ) ){}
+	IUdpRequest( PySocketSockObject* socket ) : IRequest( socket ){}
 	uv_udp_t* handle() { return reinterpret_cast<uv_udp_t*>( m_handle ); }
 };
 
 class UdpRecvRequest : public IUdpRequest
 {
 public:
-	UdpRecvRequest( uv_udp_t* handle, Py_ssize_t len, int flags ) :
-		IUdpRequest( handle ), m_len( len ), m_flags( flags )
+	UdpRecvRequest( PySocketSockObject* socket, Py_ssize_t len, int flags ) :
+		IUdpRequest( socket ), m_len( len ), m_flags( flags )
 	{
 	}
 
@@ -125,8 +157,8 @@ private:
 class UdpSendRequest : public IUdpRequest
 {
 public:
-	UdpSendRequest( uv_udp_t* handle, char* buf, ssize_t len, const struct sockaddr* addr, int addrlen , int flags )
-	: IUdpRequest( handle ), m_buf( buf ), m_len( len ), m_addr( addr ), m_addrLen( addrlen ) , m_flags( flags )
+	UdpSendRequest( PySocketSockObject* socket, char* buf, ssize_t len, const struct sockaddr* addr, int addrlen , int flags )
+	: IUdpRequest( socket ), m_buf( buf ), m_len( len ), m_addr( addr ), m_addrLen( addrlen ) , m_flags( flags )
 	{
 	}
 
@@ -142,5 +174,18 @@ private:
 	int m_addrLen;
 	int m_flags;
 };
+
+
+class StreamAcceptRequest : IStreamRequest
+{
+public:
+	StreamAcceptRequest( PySocketSockObject* socket ) :
+		IStreamRequest( socket )
+	{
+	}
+
+	PyObject* accept();
+};
+
 
 #endif // CARBONIO_H

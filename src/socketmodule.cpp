@@ -2773,27 +2773,6 @@ static int
 #endif
 }
 
-static Py_tss_t UV_LOOP_KEY = Py_tss_NEEDS_INIT;
-
-uv_loop_t * get_uv_loop() {
-    Ccp::PyGilEnsure gil;
-    uv_loop_t* ret = reinterpret_cast<uv_loop_t*>(PyThread_tss_get(&UV_LOOP_KEY));
-    if ( !ret ) {
-        ret = new uv_loop_t;
-        auto res = uv_loop_init( ret );
-        if ( res < 0 ) {
-            uv_loop_delete( ret );
-            PyErr_FromUvErr( res );
-            return nullptr;
-        }
-        if ( PyThread_tss_set( &UV_LOOP_KEY, reinterpret_cast<void *>( ret ) ) ) {
-            uv_loop_close( ret );
-			delete ret;
-            return nullptr;
-        }
-    }
-    return ret;
-}
 
 bool is_valid_uv_handle( uv_handle_t* handle )
 {
@@ -2814,6 +2793,7 @@ static PyObject*
 	struct sock_accept ctx;
 
 	if( is_managed_by_libuv( s ) ) {
+
 		if ( !is_valid_uv_handle( s->uv_handle ) )
 		{
             errno = EBADF;
@@ -2822,45 +2802,13 @@ static PyObject*
             goto finally;
         }
 	    else {
-	        auto handle = reinterpret_cast<uv_stream_t*>(s->uv_handle);
-			auto channel = reinterpret_cast<PyChannelObject*>(handle->data);
-            if( !channel ) {
-                errno = EBADF;
-                PyErr_SetFromErrno(PyExc_OSError);
-                // TODO: Close the socket?
-                goto finally;
-            }
-            auto loop = get_uv_loop();
-            if ( !loop ) {
-				goto finally;
-            }
-			PyChannel_SetPreference(channel, PREFER_SENDER);
-            auto result = PyChannel_Receive(channel);
-			if( !result ) {
+			auto* request = new StreamAcceptRequest( s );
+			ON_BLOCK_EXIT( [&] { delete request; } );
+			sock = request->accept();
+			if( !sock )
+			{
 				goto finally;
 			}
-			ON_BLOCK_EXIT( [&] { Py_XDECREF( result ); } );
-			auto listen_status = PyTuple_GetItem(result, 0);
-			if( !PyLong_Check( listen_status ) ) {
-				PyErr_BadInternalCall();
-				goto finally;
-			}
-			ON_BLOCK_EXIT( [&] { Py_XDECREF( listen_status ); } );
-
-            auto status = PyLong_AsLong( listen_status );
-            if( status < 0 ) {
-				if( !PyErr_Occurred() )
-				{
-					PyErr_FromUvErr( status );
-				}
-                goto finally;
-            }
-			sock = PyTuple_GetItem(result, 1);
-			if( !PyLong_Check( sock ) ) {
-				PyErr_BadInternalCall();
-				goto finally;
-			}
-			ON_BLOCK_EXIT( [&] { Py_XDECREF( sock ); } );
         }
     }
 	else {
@@ -3342,7 +3290,8 @@ void on_accept(uv_stream_t *handle, int status)
 	{
 		return; // may have been closed before this one arrived
 	}
-    auto channel = reinterpret_cast<PyChannelObject*>(handle->data);
+
+    auto channel = IRequest::ChannelPtr( handle->data );
 	Ccp::PyGilEnsure gil;
     if( !channel )
 	{
@@ -3399,7 +3348,7 @@ void on_accept(uv_stream_t *handle, int status)
 		Py_DecRef(py_fd);
 		Py_DecRef(py_status);
 		Py_DecRef(reinterpret_cast<PyObject*>(client_channel));
-		SendError(channel, "on_acept: Failed to pack tuple");
+		SendError(channel, "on_accept: Failed to pack tuple");
 		return;
 	}
 
@@ -3904,7 +3853,7 @@ static PyObject* uv_tcp_recv_impl( PySocketSockObject* s, Py_ssize_t recvlen, in
 	{
 		if( !s->request )
 		{
-			s->request = reinterpret_cast<void*>( new StreamRecvRequest( reinterpret_cast<uv_stream_t*>( s->uv_handle ) ) );
+			s->request = reinterpret_cast<void*>( new StreamRecvRequest( s ) );
 		}
 		buf = reinterpret_cast<StreamRecvRequest*>( s->request )->receive( recvlen, flags );
 	}
@@ -3921,7 +3870,7 @@ static PyObject* uv_udp_recv_impl( PySocketSockObject* s, Py_ssize_t recvlen, in
 	PyObject* tup{nullptr};
 	if ( s->sock_fd != INVALID_SOCKET && is_valid_uv_handle( s->uv_handle ) )
 	{
-		auto request = new UdpRecvRequest( reinterpret_cast<uv_udp_t*>( s->uv_handle ), recvlen, flags );
+		auto request = new UdpRecvRequest( s, recvlen, flags );
 		tup = request->receive();
 	} else
 	{
@@ -4645,7 +4594,7 @@ static int
 
 PyObject* uv_sendall_impl(PySocketSockObject* s, char* buf, Py_ssize_t len, int flags)
 {
-	auto* request = new StreamSendRequest(reinterpret_cast<uv_stream_t*>(s->uv_handle), buf, len, flags);
+	auto* request = new StreamSendRequest(s, buf, len, flags);
 	auto status = request->send();
 	delete request;
 	return status;
@@ -4837,9 +4786,9 @@ static int
 	return ( ctx->result >= 0 );
 }
 
-PyObject* uv_udp_sendto_impl( uv_udp_t* handle, struct sock_sendto* ctx )
+PyObject* uv_udp_sendto_impl( PySocketSockObject* socket, struct sock_sendto* ctx )
 {
-	auto request = new UdpSendRequest( handle, ctx->buf, ctx->len, SAS2SA( ctx->addrbuf ), ctx->addrlen, ctx->flags );
+	auto request = new UdpSendRequest( socket, ctx->buf, ctx->len, SAS2SA( ctx->addrbuf ), ctx->addrlen, ctx->flags );
 	return request->send();
 }
 
@@ -4905,7 +4854,7 @@ static PyObject*
 	{
 		if ( s->sock_type == SOCK_DGRAM )
 		{
-			auto ret = uv_udp_sendto_impl( reinterpret_cast<uv_udp_t*>( s->uv_handle ), &ctx );
+			auto ret = uv_udp_sendto_impl( s, &ctx );
 			if( !ret )
 			{
 				PyBuffer_Release( &pbuf );
@@ -9418,6 +9367,8 @@ PyMODINIT_FUNC
 	/* remove some flags on older version Windows during run-time */
 	remove_unusable_flags( m );
 #endif
+
+	SetTimeoutErrorType(socket_timeout);
 
     // uv_loop instances aren't thread-safe, thus we keep a loop instance per thread
     if ( PyThread_tss_create( &UV_LOOP_KEY ) )

@@ -227,7 +227,7 @@ typedef union sock_addr {
    like the address family, which is used to decode socket address
    arguments properly. */
 
-typedef struct {
+typedef struct PySocketSockObject_t {
     PyObject_HEAD
     SOCKET_T sock_fd;           /* Socket file descriptor */
     int sock_family;            /* Address family, e.g., AF_INET */
