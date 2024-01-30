@@ -180,14 +180,12 @@ PyObject* StreamRecvRequest::receive( Py_ssize_t length, int flags )
 			PyErr_FromUvErr( ret );
 			return nullptr;
 		}
-		PyChannel_SetPreference( channel(), PREFER_SENDER );
 		auto sentinel = PyChannel_Receive( channel() );
 		if( !sentinel )
 		{
 			return nullptr;
 		}
 		Py_DecRef( sentinel );
-		PyChannel_SetPreference( channel(), PREFER_RECEIVER );
 	}
 	auto remaining_data_length = PyBytes_GET_SIZE(m_data) - m_pos;
 	auto chunk_size = remaining_data_length < m_requested_len ? remaining_data_length : m_requested_len;
@@ -262,7 +260,6 @@ PyObject* StreamSendRequest::send()
 		delete request;
 		return PyLong_FromLong(status);
 	}
-	PyChannel_SetPreference(channel(), PREFER_SENDER);
 	auto ret = PyChannel_Receive(channel() );
 	delete bufferarray;
 	delete request;
@@ -319,7 +316,6 @@ PyObject* UdpRecvRequest::receive()
 		PyErr_FromUvErr( status );
 		return nullptr;
 	}
-	PyChannel_SetPreference( channel(), PREFER_SENDER );
 	auto sentinel = PyChannel_Receive( channel() );
 	if( !sentinel )
 	{
@@ -459,7 +455,6 @@ PyObject* UdpSendRequest::send()
 	{
 		return PyLong_FromLong( status );
 	}
-	PyChannel_SetPreference( channel(), PREFER_SENDER );
 	auto ret = PyChannel_Receive( channel() );
 	status = PyLong_AsLong( ret );
 	if ( status < 0 ) {
@@ -498,7 +493,6 @@ void UdpSendRequest::onSend( int status )
 PyObject* StreamAcceptRequest::accept()
 {
 	startTimeout();
-	PyChannel_SetPreference(channel(), PREFER_SENDER);
 	auto result = PyChannel_Receive(channel());
 	if( !result ) {
 		return nullptr;

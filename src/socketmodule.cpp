@@ -3324,7 +3324,6 @@ void on_accept(uv_stream_t *handle, int status)
 		SendError(channel, "on_accept: Failed to create client channel");
 		return;
 	}
-	PyChannel_SetPreference(client_channel, PREFER_SENDER);
 	client->data = client_channel;
 
 	auto py_fd = PyLong_FromSocket_t( newfd );
@@ -3369,7 +3368,6 @@ void on_connect(uv_connect_t* connection, int status)
 		PyWriteUnraisable("on_connect received null channel pointer" );
 		return;
 	}
-	PyChannel_SetPreference( channel, PREFER_RECEIVER );
 	auto py_status = PyLong_FromLong(status);
 	if( py_status == nullptr )
 	{
@@ -3600,7 +3598,6 @@ static PyObject*
 			PyErr_BadInternalCall();
 			return nullptr;
 		}
-		PyChannel_SetPreference(channel, PREFER_SENDER);
 		PyObject* connect_status = PyChannel_Receive(channel);
 		if( connect_status == nullptr ) {
 			return nullptr;
@@ -5705,7 +5702,6 @@ uv_tcp_t* create_uv_tcp_handle( SOCKET_T* fd, int family )
 		// PyChannel_New should have set an error.
 		return nullptr;
 	}
-	PyChannel_SetPreference( channel, PREFER_SENDER );
 	return handle;
 }
 
@@ -5741,7 +5737,6 @@ uv_udp_t* create_uv_udp_handle(SOCKET_T* fd, int family)
 		// PyChannel_New should have set an error.
 		return nullptr;
 	}
-	PyChannel_SetPreference( channel, PREFER_SENDER );
 	return handle;
 }
 
@@ -6831,7 +6826,6 @@ bool dup_uv_tcp_handle( SOCKET_T newfd )
 		// PyChannel_New should have set an error.
 		return false;
 	}
-	PyChannel_SetPreference( channel, PREFER_SENDER );
 	return true;
 }
 
@@ -6863,7 +6857,6 @@ bool dup_uv_udp_handle( SOCKET_T newfd )
 		// PyChannel_New should have set an error.
 		return false;
 	}
-	PyChannel_SetPreference( channel, PREFER_SENDER );
 	return true;
 }
 /* dup() function for socket fds */
