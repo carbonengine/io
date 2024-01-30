@@ -90,7 +90,8 @@ void IRequest::sendError(std::string_view msg)
 
 void IRequest::timeoutCallback( uv_timer_t* result )
 {
-	auto _this = reinterpret_cast<StreamRecvRequest*>( untag( result->data ) );
+	// The timer always holds a pointer to the request
+	auto _this = reinterpret_cast<IRequest*>( result->data );
 	_this->onTimeout();
 }
 
@@ -153,6 +154,10 @@ PyChannelObject* IRequest::ChannelPtr( void* tagged_pointer )
 bool IRequest::isTagged( void* tagged_pointer )
 {
 	return uint64_t( tagged_pointer ) & TAG;
+}
+bool IRequest::timedOut( void* maybe_request )
+{
+	return !isTagged(maybe_request);
 }
 
 
@@ -224,6 +229,12 @@ void StreamRecvRequest::onReceive( ssize_t nread, const uv_buf_t* buf )
 	}
 }
 
+void StreamRecvRequest::onTimeout()
+{
+	uv_read_stop(handle());
+	IRequest::onTimeout();
+}
+
 void alloc(uv_handle_t* handle, size_t size, uv_buf_t* buf)
 {
 	// TODO what if allocation fails?!
@@ -233,8 +244,11 @@ void alloc(uv_handle_t* handle, size_t size, uv_buf_t* buf)
 
 void StreamRecvRequest::readCallback( uv_stream_t* client, ssize_t nread, const uv_buf_t* buf )
 {
-	auto _this = reinterpret_cast<StreamRecvRequest*>( untag( client->data ) );
-	_this->onReceive( nread, buf );
+	if( !timedOut( client->data ) )
+	{
+		auto _this = reinterpret_cast<StreamRecvRequest*>( untag( client->data ) );
+		_this->onReceive( nread, buf );
+	}
 }
 
 PyObject* StreamSendRequest::send()
@@ -257,8 +271,11 @@ PyObject* StreamSendRequest::send()
 
 void StreamSendRequest::sendCallback( uv_write_t* request, int status )
 {
-	auto _this = reinterpret_cast<StreamSendRequest*>( untag( request->handle->data ) );
-	_this->onSend( status );
+	if( !timedOut( request->handle->data ) )
+	{
+		auto _this = reinterpret_cast<StreamSendRequest*>( untag( request->handle->data ) );
+		_this->onSend( status );
+	}
 }
 
 void StreamSendRequest::onSend( int status )
@@ -295,6 +312,13 @@ PyObject* UdpRecvRequest::receive()
 		return nullptr;
 	}
 
+	status = startTimeout();
+	if( status < 0 )
+	{
+		uv_udp_recv_stop(handle());
+		PyErr_FromUvErr( status );
+		return nullptr;
+	}
 	PyChannel_SetPreference( channel(), PREFER_SENDER );
 	auto sentinel = PyChannel_Receive( channel() );
 	if( !sentinel )
@@ -307,8 +331,11 @@ PyObject* UdpRecvRequest::receive()
 
 void UdpRecvRequest::receiveCallback( uv_udp_t* handle, ssize_t nread, const uv_buf_t* buf, const struct sockaddr* addr, unsigned int flags )
 {
-	auto _this = reinterpret_cast<UdpRecvRequest*>( untag( handle->data ) );
-	_this->onRead( handle, nread, buf, addr, flags );
+	if( !timedOut( handle->data ) )
+	{
+		auto _this = reinterpret_cast<UdpRecvRequest*>( untag( handle->data ) );
+		_this->onRead( handle, nread, buf, addr, flags );
+	}
 }
 
 /* Convert IPv4 sockaddr to a Python str. */
@@ -412,6 +439,12 @@ void UdpRecvRequest::onRead( uv_udp_t* handle, ssize_t nread, const uv_buf_t* bu
 	}
 }
 
+void UdpRecvRequest::onTimeout()
+{
+	uv_udp_recv_stop(handle());
+	IRequest::onTimeout();
+}
+
 PyObject* UdpSendRequest::send()
 {
 	auto* request = new uv_udp_send_t;
@@ -442,8 +475,11 @@ PyObject* UdpSendRequest::send()
 
 void UdpSendRequest::sendCallback( uv_udp_send_t* request, int status )
 {
-	auto _this = reinterpret_cast<UdpSendRequest*>( untag( request->handle->data ) );
-	_this->onSend( status );
+	if( !timedOut( request->handle->data ) )
+	{
+		auto _this = reinterpret_cast<UdpSendRequest*>( untag( request->handle->data ) );
+		_this->onSend( status );
+	}
 }
 
 void UdpSendRequest::onSend( int status )

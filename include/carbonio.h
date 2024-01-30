@@ -56,6 +56,12 @@ public:
 
 	virtual void onTimeout();
 
+	// A libuv callback may fire after a timeout has occurred. At this point,
+	// the data member on the request may no longer point to a request, but to
+	// a stackless channel instead. Check the tag on the pointer to see if the
+	// data still points to a valid request.
+	static bool timedOut( void* maybe_request );
+
 	// The libuv handle has a single data member on which the user can store application specific data.
 	// We use this data member to serve two purposes:
 	// 1. When the handle is created we store the stackless channel for the request
@@ -99,7 +105,7 @@ public:
 	~StreamRecvRequest(){ Py_XDECREF(m_data);}
 	PyObject* receive(Py_ssize_t length, int flags);
 	uv_stream_t* handle() { return reinterpret_cast<uv_stream_t*>( m_handle ); }
-
+	void onTimeout() override;
 	static void readCallback( uv_stream_t* client, ssize_t nread, const uv_buf_t* buf );
 
 private:
@@ -147,6 +153,7 @@ public:
 
 private:
 	void onRead( uv_udp_t* handle, ssize_t nread, const uv_buf_t* buf, const struct sockaddr* addr, unsigned flags );
+	void onTimeout() override;
 
 	Py_ssize_t m_len;
 	int m_flags;

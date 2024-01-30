@@ -3361,7 +3361,7 @@ void on_accept(uv_stream_t *handle, int status)
 
 void on_connect(uv_connect_t* connection, int status)
 {
-	auto channel = reinterpret_cast<PyChannelObject*>(connection->handle->data);
+	auto channel = IRequest::ChannelPtr(connection->handle->data);
 	Ccp::PyGilEnsure gil;
 	if( !channel )
 	{
@@ -3594,7 +3594,7 @@ static PyObject*
 
 		uv_connect_t* connect = new uv_connect_t;
 		uv_tcp_connect(connect, handle, SAS2SA( &addrbuf ), on_connect);
-		auto channel = reinterpret_cast<PyChannelObject*>(handle->data);
+		auto channel = IRequest::ChannelPtr(handle->data);
 		if( !channel )
 		{
 			PyErr_BadInternalCall();
@@ -3908,6 +3908,10 @@ static PyObject*
 		else if( s->sock_type == SOCK_DGRAM )
 		{
 			auto tup = uv_udp_recv_impl( s, recvlen, flags );
+			if( !tup )
+			{
+				return nullptr;
+			}
 			return PyTuple_GetItem( tup, 0 );
 		}
 		else
