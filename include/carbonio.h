@@ -40,7 +40,7 @@ struct IRequest
 public:
 	IRequest( PySocketSockObject* socket );
 
-	~IRequest()
+	virtual ~IRequest()
 	{
 		m_handle->data = m_channel;
 		Py_DECREF(m_channel);

@@ -3415,6 +3415,11 @@ static PyObject*
 				errno = EBADF;
 				res = -1;
 			} else {
+				if ( s->request )
+				{
+					delete reinterpret_cast<IRequest*>( s->request );
+					s->request = nullptr;
+				}
 				uv_close( s->uv_handle, cleanup_uv_handle );
 				res = 0;
 			}
