@@ -179,6 +179,11 @@ PyObject* StreamRecvRequest::receive( Py_ssize_t length, int flags )
 	m_flags = flags;
 	if( !m_data )
 	{
+		PyErr_BadInternalCall();
+		return nullptr;
+	}
+	if ( PyBytes_Size( m_data ) == 0 )
+	{
 		auto ret = uv_read_start( handle(), alloc, StreamRecvRequest::readCallback );
 		if( ret < 0 )
 		{
@@ -197,7 +202,6 @@ PyObject* StreamRecvRequest::receive( Py_ssize_t length, int flags )
 		{
 			return nullptr;
 		}
-		Py_DecRef( sentinel );
 	}
 	auto remaining_data_length = PyBytes_GET_SIZE(m_data) - m_pos;
 	auto chunk_size = remaining_data_length < m_requested_len ? remaining_data_length : m_requested_len;
@@ -227,14 +231,16 @@ void StreamRecvRequest::onReceive( ssize_t nread, const uv_buf_t* buf )
 		//uv_close((uv_handle_t*) m_handle, cleanup_uv_handle);
 	}
 	if ( nread > 0 ) {
-		if ( ! m_data ) {
-			m_data = PyBytes_FromStringAndSize( buf->base, nread );
-		} else {
-			PyBytes_ConcatAndDel(&m_data, PyBytes_FromStringAndSize( buf->base, nread ) );
-		}
+		PyBytes_ConcatAndDel(&m_data, PyBytes_FromStringAndSize( buf->base, nread ) );
 		m_received_len += nread;
 		if ( ! m_data ) {
 			sendError("OnReceive failed to construct PyBytes object.");
+		}
+		if (m_received_len >= m_requested_len) {
+			uv_read_stop( handle() );
+			if ( PyChannel_Send( channel(), Py_None ) < 0 ) {
+				PyWriteUnraisable( "StreamRecvRequest::onReceive failed to signal sentinel" );
+			}
 		}
 	}
 }
@@ -263,19 +269,20 @@ void StreamRecvRequest::readCallback( uv_stream_t* client, ssize_t nread, const 
 void StreamRecvRequest::cancel()
 {
 	uv_read_stop( handle() );
-	// There is a chance that a request gets cancelled before it received any data and is thus
-	// still waiting for its channel to be woken up.
-	// When waking up the channel, it will expect that m_data is valid, so this provides an
-	// empty bytes object.
-	if ( !m_data )
-	{
-		m_data = PyBytes_FromStringAndSize( "", 0 );
-	}
 	if( PyChannel_Send( channel(), Py_None ) < 0 )
 	{
 		PyWriteUnraisable( "StreamRecvRequest::cancel failed to signal sentinel" );
 	}
 	IRequest::cancel();
+}
+
+StreamRecvRequest::StreamRecvRequest( PySocketSockObject* socket ) :
+	IStreamRequest( socket )
+{
+	m_data = PyBytes_FromStringAndSize( "", 0 );
+	if ( !m_data ) {
+		PyWriteUnraisable("StreamRecvRequest::StreamRecvRequest failed to allocate m_data");
+	}
 }
 
 PyObject* StreamSendRequest::send()

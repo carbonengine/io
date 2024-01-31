@@ -104,7 +104,7 @@ public:
 class StreamRecvRequest : public IStreamRequest
 {
 public:
-	StreamRecvRequest( PySocketSockObject* socket ) : IStreamRequest( socket ){}
+	StreamRecvRequest( PySocketSockObject* socket );
 	~StreamRecvRequest(){ Py_XDECREF(m_data);}
 	PyObject* receive(Py_ssize_t length, int flags);
 	uv_stream_t* handle() { return reinterpret_cast<uv_stream_t*>( m_handle ); }

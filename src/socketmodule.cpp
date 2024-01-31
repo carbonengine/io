@@ -3415,11 +3415,6 @@ static PyObject*
 				errno = EBADF;
 				res = -1;
 			} else {
-				if ( s->request )
-				{
-					delete reinterpret_cast<IRequest*>( s->request );
-					s->request = nullptr;
-				}
 				uv_close( s->uv_handle, cleanup_uv_handle );
 				res = 0;
 			}
@@ -3853,11 +3848,9 @@ static PyObject* uv_tcp_recv_impl( PySocketSockObject* s, Py_ssize_t recvlen, in
 	PyObject* buf{ nullptr };
 	if( s->sock_fd != INVALID_SOCKET && is_valid_uv_handle( s->uv_handle ) )
 	{
-		if( !s->request )
-		{
-			s->request = reinterpret_cast<void*>( new StreamRecvRequest( s ) );
-		}
-		buf = reinterpret_cast<StreamRecvRequest*>( s->request )->receive( recvlen, flags );
+		auto request = new StreamRecvRequest( s );
+		buf = reinterpret_cast<StreamRecvRequest*>( request )->receive( recvlen, flags );
+		delete request;
 	}
 	else
 	{
