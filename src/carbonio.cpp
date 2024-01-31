@@ -4,6 +4,10 @@
 void cleanup_uv_handle( uv_handle_t* uv_handle )
 {
 	Ccp::PyGilEnsure gil;
+	if ( IRequest::isTagged( uv_handle->data ) ) {
+		reinterpret_cast<IRequest*>(IRequest::untag( uv_handle->data ) )->cancel();
+	}
+
 	Py_XDECREF( IRequest::ChannelPtr( uv_handle->data ) );
 	uv_handle->data = nullptr;
 
@@ -72,6 +76,7 @@ void SetTimeoutErrorType(PyObject* value)
 IRequest::IRequest( PySocketSockObject* socket ) : m_handle( socket->uv_handle ), m_timeout_nanoseconds(socket->sock_timeout)
 {
 	m_channel = reinterpret_cast<PyChannelObject*>( m_handle->data );
+	Py_IncRef( reinterpret_cast<PyObject*>( m_channel ) );
 	m_handle->data = this;
 	m_handle->data = reinterpret_cast<void*>(uint64_t(m_handle->data) | TAG);
 }
@@ -158,6 +163,13 @@ bool IRequest::isTagged( void* tagged_pointer )
 bool IRequest::timedOut( void* maybe_request )
 {
 	return !isTagged(maybe_request);
+}
+void IRequest::cancel()
+{
+	if( m_timeout )
+	{
+		uv_timer_stop( m_timeout );
+	}
 }
 
 
@@ -247,6 +259,23 @@ void StreamRecvRequest::readCallback( uv_stream_t* client, ssize_t nread, const 
 		auto _this = reinterpret_cast<StreamRecvRequest*>( untag( client->data ) );
 		_this->onReceive( nread, buf );
 	}
+}
+void StreamRecvRequest::cancel()
+{
+	uv_read_stop( handle() );
+	// There is a chance that a request gets cancelled before it received any data and is thus
+	// still waiting for its channel to be woken up.
+	// When waking up the channel, it will expect that m_data is valid, so this provides an
+	// empty bytes object.
+	if ( !m_data )
+	{
+		m_data = PyBytes_FromStringAndSize( "", 0 );
+	}
+	if( PyChannel_Send( channel(), Py_None ) < 0 )
+	{
+		PyWriteUnraisable( "StreamRecvRequest::cancel failed to signal sentinel" );
+	}
+	IRequest::cancel();
 }
 
 PyObject* StreamSendRequest::send()
@@ -441,6 +470,16 @@ void UdpRecvRequest::onTimeout()
 	IRequest::onTimeout();
 }
 
+void UdpRecvRequest::cancel()
+{
+	uv_udp_recv_stop( handle() );
+	if( PyChannel_Send( channel(), Py_None ) < 0 )
+	{
+		PyWriteUnraisable( "UdpRecvRequest::cancel failed sending sentinel value on channel" );
+	}
+	IRequest::cancel();
+}
+
 PyObject* UdpSendRequest::send()
 {
 	auto* request = new uv_udp_send_t;
@@ -479,14 +518,15 @@ void UdpSendRequest::sendCallback( uv_udp_send_t* request, int status )
 
 void UdpSendRequest::onSend( int status )
 {
-	auto py_status = PyLong_FromLong(status);
-	if( !py_status ){
-		sendError("StreamSendRequest::send Failed to convert status to python int");
+	auto py_status = PyLong_FromLong( status );
+	if( !py_status )
+	{
+		sendError( "UdpSendRequest::send Failed to convert status to python int" );
 		return;
 	}
 	if( PyChannel_Send( channel(), py_status ) < 0 )
 	{
-		PyWriteUnraisable("StreamSendRequest::send Failed to send status over channel");
+		PyWriteUnraisable( "UdpSendRequest::send Failed to send status over channel" );
 	}
 }
 

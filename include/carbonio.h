@@ -43,12 +43,15 @@ public:
 	~IRequest()
 	{
 		m_handle->data = m_channel;
+		Py_DECREF(m_channel);
 	}
 
 	PyChannelObject* channel() const
 	{
 		return m_channel;
 	}
+
+	virtual void cancel();
 
 	int startTimeout();
 
@@ -106,6 +109,7 @@ public:
 	PyObject* receive(Py_ssize_t length, int flags);
 	uv_stream_t* handle() { return reinterpret_cast<uv_stream_t*>( m_handle ); }
 	void onTimeout() override;
+	void cancel() override;
 	static void readCallback( uv_stream_t* client, ssize_t nread, const uv_buf_t* buf );
 
 private:
@@ -120,12 +124,15 @@ private:
 
 class StreamSendRequest : public IStreamRequest
 {
-	public:
-		StreamSendRequest( PySocketSockObject* socket, char* buf, Py_ssize_t len, int flags ) :
-			IStreamRequest( socket ), m_buf(buf), m_len(len), m_flags(flags) {}
-		PyObject* send();
-		static void sendCallback(uv_write_t* request, int status);
-	private:
+public:
+	StreamSendRequest( PySocketSockObject* socket, char* buf, Py_ssize_t len, int flags ) :
+		IStreamRequest( socket ), m_buf( buf ), m_len( len ), m_flags( flags )
+	{
+	}
+	PyObject* send();
+	static void sendCallback( uv_write_t* request, int status );
+
+private:
 		void onSend( int status );
 
 		char* m_buf;
@@ -149,6 +156,7 @@ public:
 	}
 
 	PyObject* receive();
+	void cancel() override;
 	static void receiveCallback( uv_udp_t* handle, ssize_t nread, const uv_buf_t* buf, const struct sockaddr* addr, unsigned flags );
 
 private:
