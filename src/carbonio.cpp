@@ -313,7 +313,9 @@ PyObject* StreamSendRequest::send()
 {
 	uv_write_t* request = new uv_write_t;
 	constexpr int NUM_BUFFERS = 1;
-	auto bufferarray = new std::array<uv_buf_t, NUM_BUFFERS> {{ULONG(m_len), m_buf}};
+	auto* bufferarray = new std::array<uv_buf_t, NUM_BUFFERS>;
+	bufferarray->data()->len = ULONG( m_len );
+	bufferarray->data()->base = m_buf;
 	int status = uv_write(request, handle(), bufferarray->data(), NUM_BUFFERS, StreamSendRequest::sendCallback );
 	if( status < 0 ){
 		delete bufferarray;
