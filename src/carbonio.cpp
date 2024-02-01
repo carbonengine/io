@@ -4,11 +4,12 @@
 void cleanup_uv_handle( uv_handle_t* uv_handle )
 {
 	Ccp::PyGilEnsure gil;
-	if ( IRequest::isTagged( uv_handle->data ) ) {
-		reinterpret_cast<IRequest*>(IRequest::untag( uv_handle->data ) )->cancel();
+	auto data = reinterpret_cast<HandleData*>( uv_handle->data );
+	if ( data->request ) {
+		data->request->cancel();
 	}
 
-	Py_XDECREF( IRequest::ChannelPtr( uv_handle->data ) );
+	delete data;
 	uv_handle->data = nullptr;
 
 	switch( uv_handle_get_type( uv_handle ) )
@@ -23,6 +24,34 @@ void cleanup_uv_handle( uv_handle_t* uv_handle )
 		delete uv_handle;
 		break;
 	}
+}
+
+HandleData::HandleData() : channel( PyChannel_New( nullptr ) ), request(nullptr)
+{
+	buf = uv_buf_init( nullptr, 0 );
+}
+
+HandleData::~HandleData()
+{
+	Py_XDECREF( channel );
+	channel = nullptr;
+	delete buf.base;
+	buf.base = nullptr;
+	buf.len = 0;
+	bufReadPos = -1;
+	bufWritePos = -1;
+}
+
+
+void* create_handle_data()
+{
+	auto* data = new HandleData;
+	if( data->channel == nullptr )
+	{
+		delete data;
+		return nullptr;
+	}
+	return data;
 }
 
 void PyErr_FromUvErr( int error )
@@ -75,10 +104,10 @@ void SetTimeoutErrorType(PyObject* value)
 
 IRequest::IRequest( PySocketSockObject* socket ) : m_handle( socket->uv_handle ), m_timeout_nanoseconds(socket->sock_timeout)
 {
-	m_channel = reinterpret_cast<PyChannelObject*>( m_handle->data );
+	auto* data = reinterpret_cast<HandleData*>(m_handle->data);
+	m_channel = data->channel;
 	Py_IncRef( reinterpret_cast<PyObject*>( m_channel ) );
-	m_handle->data = this;
-	m_handle->data = reinterpret_cast<void*>(uint64_t(m_handle->data) | TAG);
+	data->request = this;
 }
 
 void IRequest::sendError(std::string_view msg)
@@ -140,30 +169,6 @@ void IRequest::onTimeout()
 	sendError("IRequest::onTimeout failed to send timeout exception");
 }
 
-
-void* IRequest::untag( void* tagged_pointer )
-{
-	return reinterpret_cast<void*>( uint64_t( tagged_pointer ) & ~TAG );
-}
-
-PyChannelObject* IRequest::ChannelPtr( void* tagged_pointer )
-{
-	if( isTagged(tagged_pointer) )
-	{
-		auto request = reinterpret_cast<IRequest*>( untag( tagged_pointer ) );
-		return request->channel();
-	}
-	return reinterpret_cast<PyChannelObject*>(tagged_pointer);
-}
-
-bool IRequest::isTagged( void* tagged_pointer )
-{
-	return uint64_t( tagged_pointer ) & TAG;
-}
-bool IRequest::timedOut( void* maybe_request )
-{
-	return !isTagged(maybe_request);
-}
 void IRequest::cancel()
 {
 	if( m_timeout )
@@ -177,14 +182,14 @@ PyObject* StreamRecvRequest::receive( Py_ssize_t length, int flags )
 {
 	m_requested_len = length;
 	m_flags = flags;
-	if( !m_data )
+
+	auto* data = reinterpret_cast<HandleData*>(m_handle->data);
+
+	auto bufferedAmount = data->bufWritePos - data->bufReadPos;
+
+	if ( m_requested_len > bufferedAmount )
 	{
-		PyErr_BadInternalCall();
-		return nullptr;
-	}
-	if ( PyBytes_Size( m_data ) == 0 )
-	{
-		auto ret = uv_read_start( handle(), alloc, StreamRecvRequest::readCallback );
+		auto ret = uv_read_start( handle(), StreamRecvRequest::alloc, StreamRecvRequest::readCallback );
 		if( ret < 0 )
 		{
 			PyErr_FromUvErr( ret );
@@ -203,12 +208,13 @@ PyObject* StreamRecvRequest::receive( Py_ssize_t length, int flags )
 			return nullptr;
 		}
 	}
-	auto remaining_data_length = PyBytes_GET_SIZE(m_data) - m_pos;
-	auto chunk_size = remaining_data_length < m_requested_len ? remaining_data_length : m_requested_len;
-	auto chunk = PyBytes_FromStringAndSize( PyBytes_AS_STRING(m_data) + m_pos, chunk_size);
-	m_pos += chunk_size;
 
-	return chunk;
+	data->bufWritePos += m_received_len;
+	bufferedAmount = data->bufWritePos - data->bufReadPos;
+	auto chunkSize = bufferedAmount < m_requested_len ? bufferedAmount : m_requested_len;
+	auto* ret =  PyBytes_FromStringAndSize(data->buf.base + data->bufReadPos, chunkSize);
+	data->bufReadPos += chunkSize;
+	return ret;
 }
 
 void StreamRecvRequest::onReceive( ssize_t nread, const uv_buf_t* buf )
@@ -227,15 +233,9 @@ void StreamRecvRequest::onReceive( ssize_t nread, const uv_buf_t* buf )
 				PyWriteUnraisable( "StreamRecvRequest::onReceive failed to signal sentinel" );
 			}
 		}
-		delete[] buf->base;
-		//uv_close((uv_handle_t*) m_handle, cleanup_uv_handle);
 	}
 	if ( nread > 0 ) {
-		PyBytes_ConcatAndDel(&m_data, PyBytes_FromStringAndSize( buf->base, nread ) );
 		m_received_len += nread;
-		if ( ! m_data ) {
-			sendError("OnReceive failed to construct PyBytes object.");
-		}
 		if (m_received_len >= m_requested_len) {
 			uv_read_stop( handle() );
 			if ( PyChannel_Send( channel(), Py_None ) < 0 ) {
@@ -243,6 +243,33 @@ void StreamRecvRequest::onReceive( ssize_t nread, const uv_buf_t* buf )
 			}
 		}
 	}
+}
+
+void StreamRecvRequest::alloc(uv_handle_t* handle, size_t size, uv_buf_t* buf)
+{
+	auto& handleBuf = reinterpret_cast<HandleData*>(handle->data)->buf;
+	if( !handleBuf.base )
+	{
+		handleBuf.base = new char[size];
+		handleBuf.len = ULONG(size);
+	}
+	if( handleBuf.len < size )
+	{
+		if( ULONG_MAX - handleBuf.len < size )
+		{
+			delete handleBuf.base;
+			handleBuf.base = nullptr;
+			handleBuf.len = 0;
+			return;
+		}
+		handleBuf.len += ULONG(size);
+		char* old = handleBuf.base;
+		handleBuf.base = new char [handleBuf.len];
+		memcpy_s(handleBuf.base, handleBuf.len, old, handleBuf.len - size);
+		delete old;
+	}
+	buf->base = handleBuf.base;
+	buf->len = handleBuf.len;
 }
 
 void StreamRecvRequest::onTimeout()
@@ -260,9 +287,10 @@ void alloc(uv_handle_t* handle, size_t size, uv_buf_t* buf)
 
 void StreamRecvRequest::readCallback( uv_stream_t* client, ssize_t nread, const uv_buf_t* buf )
 {
-	if( !timedOut( client->data ) )
+	auto* data = reinterpret_cast<HandleData*>( client->data );
+	if( data->request )
 	{
-		auto _this = reinterpret_cast<StreamRecvRequest*>( untag( client->data ) );
+		auto _this = reinterpret_cast<StreamRecvRequest*>( data->request );
 		_this->onReceive( nread, buf );
 	}
 }
@@ -279,10 +307,6 @@ void StreamRecvRequest::cancel()
 StreamRecvRequest::StreamRecvRequest( PySocketSockObject* socket ) :
 	IStreamRequest( socket )
 {
-	m_data = PyBytes_FromStringAndSize( "", 0 );
-	if ( !m_data ) {
-		PyWriteUnraisable("StreamRecvRequest::StreamRecvRequest failed to allocate m_data");
-	}
 }
 
 PyObject* StreamSendRequest::send()
@@ -304,9 +328,10 @@ PyObject* StreamSendRequest::send()
 
 void StreamSendRequest::sendCallback( uv_write_t* request, int status )
 {
-	if( !timedOut( request->handle->data ) )
+	auto* data = reinterpret_cast<HandleData*>( request->handle->data );
+	if( data->request )
 	{
-		auto _this = reinterpret_cast<StreamSendRequest*>( untag( request->handle->data ) );
+		auto _this = reinterpret_cast<StreamSendRequest*>( data->request );
 		_this->onSend( status );
 	}
 }
@@ -363,9 +388,10 @@ PyObject* UdpRecvRequest::receive()
 
 void UdpRecvRequest::receiveCallback( uv_udp_t* handle, ssize_t nread, const uv_buf_t* buf, const struct sockaddr* addr, unsigned int flags )
 {
-	if( !timedOut( handle->data ) )
+	auto* data = reinterpret_cast<HandleData*>( handle->data );
+	if( data->request )
 	{
-		auto _this = reinterpret_cast<UdpRecvRequest*>( untag( handle->data ) );
+		auto _this = reinterpret_cast<UdpRecvRequest*>( data->request );
 		_this->onRead( handle, nread, buf, addr, flags );
 	}
 }
@@ -516,9 +542,10 @@ PyObject* UdpSendRequest::send()
 
 void UdpSendRequest::sendCallback( uv_udp_send_t* request, int status )
 {
-	if( !timedOut( request->handle->data ) )
+	auto* data = reinterpret_cast<HandleData*>( request->handle->data );
+	if( data->request )
 	{
-		auto _this = reinterpret_cast<UdpSendRequest*>( untag( request->handle->data ) );
+		auto _this = reinterpret_cast<UdpSendRequest*>( data->request );
 		_this->onSend( status );
 	}
 }

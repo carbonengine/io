@@ -16,6 +16,34 @@ void cleanup_uv_handle( uv_handle_t* uv_handle );
 void PyErr_FromUvErr( int error );
 void PyWriteUnraisable( const char* msg );
 
+struct IRequest;
+struct HandleData
+{
+	HandleData();
+	~HandleData();
+
+	// This will always be the channel that we're looking for
+	PyChannelObject* channel;
+
+	// This will always point to the associated request while there is one
+	IRequest* request;
+
+	// This backing buffer needs to outlive any potential request so that
+	// we can correctly re-construct multiple `receive()` requests.
+	uv_buf_t buf;
+
+	// When receiving on a socket, libuv returns us more data than might have
+	// been requested by the user. Since the buffer outlives the request, then
+	// we also need to do some bookkeeping on where we are in the buffer.
+	//
+	// bufReadPos is the offset into the buffer to the data which will be returned to
+	// the user on the next receive call.
+	//
+	// bufWritePos points to the end of the data we have on hand, but have not
+	// returned to the user yet.
+	ssize_t bufReadPos{0};
+	ssize_t bufWritePos{0};
+};
 
 enum ChannelPreference : int {
 	PREFER_RECEIVER = -1,
@@ -33,6 +61,8 @@ extern void SetTimeoutErrorType(PyObject* error_type);
 
 extern uv_loop_t * get_uv_loop();
 
+void* create_handle_data();
+
 extern "C" typedef struct PySocketSockObject_t PySocketSockObject;
 
 struct IRequest
@@ -42,7 +72,10 @@ public:
 
 	virtual ~IRequest()
 	{
-		m_handle->data = m_channel;
+		if( m_handle->data )
+		{
+			reinterpret_cast<HandleData*>( m_handle->data )->request = nullptr;
+		}
 		Py_DECREF(m_channel);
 	}
 
@@ -58,32 +91,6 @@ public:
 	static void timeoutCallback(uv_timer_t* result);
 
 	virtual void onTimeout();
-
-	// A libuv callback may fire after a timeout has occurred. At this point,
-	// the data member on the request may no longer point to a request, but to
-	// a stackless channel instead. Check the tag on the pointer to see if the
-	// data still points to a valid request.
-	static bool timedOut( void* maybe_request );
-
-	// The libuv handle has a single data member on which the user can store application specific data.
-	// We use this data member to serve two purposes:
-	// 1. When the handle is created we store the stackless channel for the request
-	//    in there. The channel continues to live there except during the execution of use case 2.
-	// 2. When we register for callbacks from libuv, we store the request itself in the data attribute. Once
-	//    the callback is finished, we set the attribute back to the channel.
-	//
-	// These use-cases conflict when we receive uv callbacks from outside the context of a request
-	// For example on_accept and cleanup_uv_handle need access to the channel, but at any given time may either
-	// be holding a pointer to a request class or to a stackless channel.
-	//
-	// Here we use the "tagged pointer" pattern to solve this problem.
-	// https://en.wikipedia.org/wiki/Tagged_pointer
-
-	static void* untag( void* tagged_pointer );
-	static bool isTagged( void* tagged_pointer );
-	static PyChannelObject* ChannelPtr( void* tagged_pointer );
-
-	static constexpr uint64_t TAG = 0x1000000000000000L;
 
 protected:
 	void sendError(std::string_view msg);
@@ -105,21 +112,19 @@ class StreamRecvRequest : public IStreamRequest
 {
 public:
 	StreamRecvRequest( PySocketSockObject* socket );
-	~StreamRecvRequest(){ Py_XDECREF(m_data);}
 	PyObject* receive(Py_ssize_t length, int flags);
 	uv_stream_t* handle() { return reinterpret_cast<uv_stream_t*>( m_handle ); }
 	void onTimeout() override;
 	void cancel() override;
-	static void readCallback( uv_stream_t* client, ssize_t nread, const uv_buf_t* buf );
 
 private:
+	static void readCallback( uv_stream_t* client, ssize_t nread, const uv_buf_t* buf );
 	void onReceive( ssize_t nread, const uv_buf_t* buf );
+	static void alloc(uv_handle_t* handle, size_t size, uv_buf_t* buf);
 
 	Py_ssize_t m_requested_len{0};
 	Py_ssize_t m_received_len{0};
 	int m_flags{0};
-	PyObject* m_data{nullptr};
-	Py_ssize_t m_pos{0};
 };
 
 class StreamSendRequest : public IStreamRequest

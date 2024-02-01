@@ -3291,7 +3291,7 @@ void on_accept(uv_stream_t *handle, int status)
 		return; // may have been closed before this one arrived
 	}
 
-    auto channel = IRequest::ChannelPtr( handle->data );
+    auto* channel = reinterpret_cast<HandleData*>( handle->data )->channel;
 	Ccp::PyGilEnsure gil;
     if( !channel )
 	{
@@ -3317,14 +3317,13 @@ void on_accept(uv_stream_t *handle, int status)
 		SendError(channel, "on_accept: uv_fileno failed");
 		return;
 	}
-	auto* client_channel = PyChannel_New(nullptr);
-	if( !client_channel )
+	client->data = create_handle_data();
+	if( !client->data )
 	{
 		uv_close((uv_handle_t*)client, cleanup_uv_handle);
 		SendError(channel, "on_accept: Failed to create client channel");
 		return;
 	}
-	client->data = client_channel;
 
 	auto py_fd = PyLong_FromSocket_t( newfd );
 	if( !py_fd )
@@ -3346,7 +3345,7 @@ void on_accept(uv_stream_t *handle, int status)
 		uv_close((uv_handle_t*)client, cleanup_uv_handle);
 		Py_DecRef(py_fd);
 		Py_DecRef(py_status);
-		Py_DecRef(reinterpret_cast<PyObject*>(client_channel));
+		Py_DecRef(reinterpret_cast<PyObject*>(reinterpret_cast<HandleData*>(client->data)->channel));
 		SendError(channel, "on_accept: Failed to pack tuple");
 		return;
 	}
@@ -3360,7 +3359,7 @@ void on_accept(uv_stream_t *handle, int status)
 
 void on_connect(uv_connect_t* connection, int status)
 {
-	auto channel = IRequest::ChannelPtr(connection->handle->data);
+	auto channel = reinterpret_cast<HandleData*>(connection->handle->data)->channel;
 	Ccp::PyGilEnsure gil;
 	if( !channel )
 	{
@@ -3592,7 +3591,7 @@ static PyObject*
 
 		uv_connect_t* connect = new uv_connect_t;
 		uv_tcp_connect(connect, handle, SAS2SA( &addrbuf ), on_connect);
-		auto channel = IRequest::ChannelPtr(handle->data);
+		auto channel = reinterpret_cast<HandleData*>(handle->data)->channel;
 		if( !channel )
 		{
 			PyErr_BadInternalCall();
@@ -5693,12 +5692,12 @@ uv_tcp_t* create_uv_tcp_handle( SOCKET_T* fd, int family )
 		PyErr_FromUvErr( ret );
 		return nullptr;
 	}
-	auto channel = PyChannel_New( nullptr );
-	handle->data = reinterpret_cast<void*>(channel);
+
+	handle->data = create_handle_data();
 	if( handle->data == nullptr )
 	{
 		uv_close((uv_handle_t*)handle, cleanup_uv_handle);
-		// PyChannel_New should have set an error.
+		// create_handle_data should have set an error.
 		return nullptr;
 	}
 	return handle;
@@ -5728,12 +5727,11 @@ uv_udp_t* create_uv_udp_handle(SOCKET_T* fd, int family)
 		uv_close((uv_handle_t*)handle, cleanup_uv_handle);
 		return nullptr;
 	}
-	auto channel = PyChannel_New( nullptr );
-	handle->data = reinterpret_cast<void*>( channel );
+	handle->data = create_handle_data();
 	if( handle->data == nullptr )
 	{
 		uv_close((uv_handle_t*)handle, cleanup_uv_handle);
-		// PyChannel_New should have set an error.
+		// create_handle_data should have set an error.
 		return nullptr;
 	}
 	return handle;
@@ -6817,12 +6815,11 @@ bool dup_uv_tcp_handle( SOCKET_T newfd )
 	// at this point we need to delegate cleaning up the libuv handle to libuv
 	handle_guard.Dismiss();
 
-	auto channel = PyChannel_New( nullptr );
-	handle->data = reinterpret_cast<void*>( channel );
+	handle->data = create_handle_data();
 	if( handle->data == nullptr )
 	{
 		uv_close( (uv_handle_t*)handle, cleanup_uv_handle );
-		// PyChannel_New should have set an error.
+		// create_handle_data should have set an error.
 		return false;
 	}
 	return true;
@@ -6848,12 +6845,11 @@ bool dup_uv_udp_handle( SOCKET_T newfd )
 	// at this point we need to delegate cleaning up the libuv handle to libuv
 	handle_guard.Dismiss();
 
-	auto channel = PyChannel_New( nullptr );
-	handle->data = reinterpret_cast<void*>( channel );
+	handle->data = create_handle_data();
 	if( handle->data == nullptr )
 	{
 		uv_close( (uv_handle_t*)handle, cleanup_uv_handle );
-		// PyChannel_New should have set an error.
+		// create_handle_data should have set an error.
 		return false;
 	}
 	return true;
