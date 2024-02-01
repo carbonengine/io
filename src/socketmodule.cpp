@@ -4613,6 +4613,7 @@ static PyObject*
 
 	if( is_managed_by_libuv( s ) )
 	{
+		ON_BLOCK_EXIT( [&] { PyBuffer_Release(&pbuf); } );
 		auto py_status = uv_sendall_impl(s, reinterpret_cast<char*>(pbuf.buf), pbuf.len, flags);
 		auto status = PyLong_AsLong( py_status );
 		if( status == -1 && PyErr_Occurred() )
@@ -4623,7 +4624,6 @@ static PyObject*
 		if( status < 0 )
 		{
 			PyErr_FromUvErr( status );
-			PyBuffer_Release( &pbuf );
 			return nullptr;
 		}
 		return PyLong_FromSsize_t( pbuf.len );
