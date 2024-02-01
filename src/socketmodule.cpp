@@ -3867,6 +3867,7 @@ static PyObject* uv_udp_recv_impl( PySocketSockObject* s, Py_ssize_t recvlen, in
 	{
 		auto request = new UdpRecvRequest( s, recvlen, flags );
 		tup = request->receive();
+		delete request;
 	} else
 	{
 		errno = EBADF;
