@@ -3345,7 +3345,6 @@ void on_accept(uv_stream_t *handle, int status)
 		uv_close((uv_handle_t*)client, cleanup_uv_handle);
 		Py_DecRef(py_fd);
 		Py_DecRef(py_status);
-		Py_DecRef(reinterpret_cast<PyObject*>(reinterpret_cast<HandleData*>(client->data)->channel));
 		SendError(channel, "on_accept: Failed to pack tuple");
 		return;
 	}
@@ -5903,7 +5902,6 @@ static int
 #else
 			proto = 0;
 #endif
-			s->request = nullptr;
 			s->uv_handle = nullptr;
 			if( is_managed_by_libuv( type ) )
 			{
