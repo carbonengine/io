@@ -172,9 +172,16 @@ void IRequest::onTimeout()
 
 void IRequest::cancel()
 {
+	clearTimeout();
+}
+
+void IRequest::clearTimeout()
+{
 	if( m_timeout )
 	{
 		uv_timer_stop( m_timeout );
+		delete m_timeout;
+		m_timeout = nullptr;
 	}
 }
 

@@ -72,6 +72,7 @@ public:
 
 	virtual ~IRequest()
 	{
+		clearTimeout();
 		if( m_handle->data )
 		{
 			reinterpret_cast<HandleData*>( m_handle->data )->request = nullptr;
@@ -93,6 +94,7 @@ public:
 	virtual void onTimeout();
 
 protected:
+	void clearTimeout();
 	void sendError(std::string_view msg);
 
 	PyChannelObject* m_channel{nullptr};
