@@ -6150,30 +6150,37 @@ class CreateServerFunctionalTest(unittest.TestCase):
 
     def setUp(self):
         self.thread = None
+        self.event = threading.Event()
 
     def tearDown(self):
         if self.thread is not None:
             self.thread.join(self.timeout)
 
-    def echo_server(self, sock):
-        def run(sock):
-            with sock:
+    def echo_server(self, port):
+        def run(port):
+            with socket.create_server(("", port), family=socket.AF_INET6,
+                                 dualstack_ipv6=True) as sock:
+                sock.settimeout(self.timeout)
+                self.event.set()
                 conn, _ = sock.accept()
                 with conn:
-                    event.wait(self.timeout)
-                    msg = conn.recv(1024)
+                    msg = conn.recv(2048)
                     if not msg:
                         return
                     conn.sendall(msg)
+        def stackless_run(port):
+            import stackless
+            t = stackless.tasklet(run)(port)
+            while t.alive:
+                stackless.run()
+                socket.dispatch()
 
-        event = threading.Event()
-        sock.settimeout(self.timeout)
-        self.thread = threading.Thread(target=run, args=(sock, ))
+        self.thread = threading.Thread(target=stackless_run, args=(port,))
         self.thread.start()
-        event.set()
 
     def echo_client(self, addr, family):
         with socket.socket(family=family) as sock:
+            self.event.wait(self.timeout)
             sock.settimeout(self.timeout)
             sock.connect(addr)
             sock.sendall(b'foo')
@@ -6181,17 +6188,14 @@ class CreateServerFunctionalTest(unittest.TestCase):
 
     def test_tcp4(self):
         port = support.find_unused_port()
-        with socket.create_server(("", port)) as sock:
-            self.echo_server(sock)
-            self.echo_client(("127.0.0.1", port), socket.AF_INET)
+        self.echo_server(port)
+        self.echo_client(("127.0.0.1", port), socket.AF_INET)
 
     @unittest.skipUnless(support.IPV6_ENABLED, 'IPv6 required for this test')
     def test_tcp6(self):
         port = support.find_unused_port()
-        with socket.create_server(("", port),
-                                  family=socket.AF_INET6) as sock:
-            self.echo_server(sock)
-            self.echo_client(("::1", port), socket.AF_INET6)
+        self.echo_server(port)
+        self.echo_client(("::1", port), socket.AF_INET6)
 
     # --- dual stack tests
 
@@ -6200,20 +6204,16 @@ class CreateServerFunctionalTest(unittest.TestCase):
     @unittest.skipUnless(support.IPV6_ENABLED, 'IPv6 required for this test')
     def test_dual_stack_client_v4(self):
         port = support.find_unused_port()
-        with socket.create_server(("", port), family=socket.AF_INET6,
-                                  dualstack_ipv6=True) as sock:
-            self.echo_server(sock)
-            self.echo_client(("127.0.0.1", port), socket.AF_INET)
+        self.echo_server(port)
+        self.echo_client(("127.0.0.1", port), socket.AF_INET)
 
     @unittest.skipIf(not socket.has_dualstack_ipv6(),
                      "dualstack_ipv6 not supported")
     @unittest.skipUnless(support.IPV6_ENABLED, 'IPv6 required for this test')
     def test_dual_stack_client_v6(self):
         port = support.find_unused_port()
-        with socket.create_server(("", port), family=socket.AF_INET6,
-                                  dualstack_ipv6=True) as sock:
-            self.echo_server(sock)
-            self.echo_client(("::1", port), socket.AF_INET6)
+        self.echo_server(port)
+        self.echo_client(("::1", port), socket.AF_INET6)
 
 
 def test_main():
