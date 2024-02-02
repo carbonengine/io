@@ -244,11 +244,9 @@ void StreamRecvRequest::onReceive( ssize_t nread, const uv_buf_t* buf )
 	}
 	if ( nread > 0 ) {
 		m_received_len += nread;
-		if (m_received_len >= m_requested_len) {
-			uv_read_stop( handle() );
-			if ( PyChannel_Send( channel(), Py_None ) < 0 ) {
-				PyWriteUnraisable( "StreamRecvRequest::onReceive failed to signal sentinel" );
-			}
+		uv_read_stop( handle() );
+		if ( PyChannel_Send( channel(), Py_None ) < 0 ) {
+			PyWriteUnraisable( "StreamRecvRequest::onReceive failed to signal sentinel" );
 		}
 	}
 }
