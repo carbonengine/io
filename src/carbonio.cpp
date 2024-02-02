@@ -114,6 +114,7 @@ void IRequest::sendError(std::string_view msg)
 {
 	PyObject *exc, *val, *tb;
 	PyErr_Fetch( &exc, &val, &tb );
+	PyChannel_SetPreference(channel(), PREFER_SENDER );
 	auto ret = PyChannel_SendThrow( channel(), exc, val, tb);
 	if( ret < 0 )
 	{
