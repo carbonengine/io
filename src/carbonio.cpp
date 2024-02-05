@@ -5,11 +5,13 @@ void cleanup_uv_handle( uv_handle_t* uv_handle )
 {
 	Ccp::PyGilEnsure gil;
 	auto data = reinterpret_cast<HandleData*>( uv_handle->data );
-	if ( data->request ) {
-		data->request->cancel();
+	if( data )
+	{
+		if ( data->request ) {
+			data->request->cancel();
+		}
+		delete data;
 	}
-
-	delete data;
 	uv_handle->data = nullptr;
 
 	switch( uv_handle_get_type( uv_handle ) )
@@ -180,7 +182,8 @@ void IRequest::clearTimeout()
 	if( m_timeout )
 	{
 		uv_timer_stop( m_timeout );
-		delete m_timeout;
+		m_timeout->data = nullptr;
+		uv_close( reinterpret_cast<uv_handle_t*>( m_timeout ), cleanup_uv_handle);
 		m_timeout = nullptr;
 	}
 }
