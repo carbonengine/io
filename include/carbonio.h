@@ -113,20 +113,36 @@ public:
 class StreamRecvRequest : public IStreamRequest
 {
 public:
-	StreamRecvRequest( PySocketSockObject* socket );
-	PyObject* receive(Py_ssize_t length, int flags);
+	StreamRecvRequest( PySocketSockObject* socket, Py_ssize_t length, int flags );
+	PyObject* receive();
 	uv_stream_t* handle() { return reinterpret_cast<uv_stream_t*>( m_handle ); }
 	void onTimeout() override;
 	void cancel() override;
 
-private:
+protected:
 	static void readCallback( uv_stream_t* client, ssize_t nread, const uv_buf_t* buf );
-	void onReceive( ssize_t nread, const uv_buf_t* buf );
-	static void alloc(uv_handle_t* handle, size_t size, uv_buf_t* buf);
+	virtual int startRead();
+	virtual PyObject* constructResult( HandleData* data ) const;
 
 	Py_ssize_t m_requested_len{0};
 	Py_ssize_t m_received_len{0};
 	int m_flags{0};
+
+private:
+	void onReceive( ssize_t nread, const uv_buf_t* buf );
+	static void alloc(uv_handle_t* handle, size_t size, uv_buf_t* buf);
+};
+
+class StreamRecvIntoRequest : public StreamRecvRequest
+{
+public:
+	StreamRecvIntoRequest(PySocketSockObject* s, char* buf, Py_ssize_t length, int flags);
+private:
+	int startRead() override;
+	static void alloc(uv_handle_t* handle, size_t size, uv_buf_t* buf);
+	PyObject* constructResult( HandleData* data ) const override;
+
+	char* m_buf{nullptr};
 };
 
 class StreamSendRequest : public IStreamRequest

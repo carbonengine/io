@@ -3846,8 +3846,8 @@ static PyObject* uv_tcp_recv_impl( PySocketSockObject* s, Py_ssize_t recvlen, in
 	PyObject* buf{ nullptr };
 	if( s->sock_fd != INVALID_SOCKET && is_valid_uv_handle( s->uv_handle ) )
 	{
-		auto request = new StreamRecvRequest( s );
-		buf = reinterpret_cast<StreamRecvRequest*>( request )->receive( recvlen, flags );
+		auto* request = new StreamRecvRequest( s, recvlen, flags );
+		buf = request->receive();
 		delete request;
 	}
 	else
@@ -3990,8 +3990,32 @@ static PyObject*
 		return NULL;
 	}
 
-	/* Call the guts */
-	readlen = sock_recv_guts( s, buf, recvlen, flags );
+	if( is_managed_by_libuv( s ) )
+	{
+		if( s->sock_type == SOCK_STREAM )
+		{
+			StreamRecvIntoRequest* request = new StreamRecvIntoRequest(s, buf, recvlen, flags);
+			PyObject* bytesReceived = request->receive();
+			delete request;
+			if( !bytesReceived )
+			{
+				PyBuffer_Release(&pbuf);
+				return nullptr;
+			}
+			readlen = PyLong_AsSsize_t(bytesReceived);
+		}
+		else
+		{
+			PyErr_Format(PyExc_NotImplementedError, "Unsupported socket type %d", s->sock_type);
+			PyBuffer_Release(&pbuf);
+			return nullptr;
+		}
+	}
+	else
+	{
+		/* Call the guts */
+		readlen = sock_recv_guts( s, buf, recvlen, flags );
+	}
 	if( readlen < 0 )
 	{
 		/* Return an error. */
@@ -4214,7 +4238,47 @@ static PyObject*
 		return NULL;
 	}
 
-	readlen = sock_recvfrom_guts( s, buf, recvlen, flags, &addr );
+	if( is_managed_by_libuv( s ) )
+	{
+		if( s->sock_type == SOCK_STREAM )
+		{
+			auto* request = new StreamRecvIntoRequest(s, buf, recvlen, flags);
+			PyObject* bytesReceived = request->receive();
+			delete request;
+			if( !bytesReceived )
+			{
+				PyBuffer_Release(&pbuf);
+				return nullptr;
+			}
+			readlen = PyLong_AsSsize_t(bytesReceived);
+
+			sock_addr_t addrbuf;
+			socklen_t addrlen;
+
+			if( !getsockaddrlen( s, &addrlen ) )
+			{
+				PyBuffer_Release(&pbuf);
+				return nullptr;
+			}
+
+			addr = makesockaddr( s->sock_fd, SAS2SA( &addrbuf ), addrlen, s->sock_proto );
+			if( !addr )
+			{
+				PyBuffer_Release(&pbuf);
+				return nullptr;
+			}
+		}
+		else
+		{
+			PyErr_Format(PyExc_NotImplementedError, "Unsupported socket type %d", s->sock_type);
+			PyBuffer_Release(&pbuf);
+			return nullptr;
+		}
+	}
+	else
+	{
+		readlen = sock_recvfrom_guts( s, buf, recvlen, flags, &addr );
+	}
 	if( readlen < 0 )
 	{
 		PyBuffer_Release( &pbuf );

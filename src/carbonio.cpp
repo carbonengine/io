@@ -189,18 +189,15 @@ void IRequest::clearTimeout()
 }
 
 
-PyObject* StreamRecvRequest::receive( Py_ssize_t length, int flags )
+PyObject* StreamRecvRequest::receive()
 {
-	m_requested_len = length;
-	m_flags = flags;
-
 	auto* data = reinterpret_cast<HandleData*>(m_handle->data);
 
 	auto bufferedAmount = data->bufWritePos - data->bufReadPos;
 
 	if ( m_requested_len > bufferedAmount )
 	{
-		auto ret = uv_read_start( handle(), StreamRecvRequest::alloc, StreamRecvRequest::readCallback );
+		auto ret = startRead();
 		if( ret < 0 )
 		{
 			PyErr_FromUvErr( ret );
@@ -219,9 +216,14 @@ PyObject* StreamRecvRequest::receive( Py_ssize_t length, int flags )
 			return nullptr;
 		}
 	}
-
 	data->bufWritePos += m_received_len;
-	bufferedAmount = data->bufWritePos - data->bufReadPos;
+	PyObject* ret = constructResult( data );
+	return ret;
+}
+
+PyObject* StreamRecvRequest::constructResult( HandleData* data ) const
+{
+	ssize_t bufferedAmount = data->bufWritePos - data->bufReadPos;
 	auto chunkSize = bufferedAmount < m_requested_len ? bufferedAmount : m_requested_len;
 	auto* ret =  PyBytes_FromStringAndSize(data->buf.base + data->bufReadPos, chunkSize);
 	data->bufReadPos += chunkSize;
@@ -234,6 +236,7 @@ void StreamRecvRequest::onReceive( ssize_t nread, const uv_buf_t* buf )
 	if( nread == 0 ) {
 		return;
 	}
+	PyChannel_SetPreference(channel(), PREFER_SENDER );
 	if ( nread < 0 ) {
 		if (nread != UV_EOF) {
 			PyErr_FromUvErr( int( nread ) );
@@ -256,27 +259,70 @@ void StreamRecvRequest::onReceive( ssize_t nread, const uv_buf_t* buf )
 
 void StreamRecvRequest::alloc(uv_handle_t* handle, size_t size, uv_buf_t* buf)
 {
-	auto& handleBuf = reinterpret_cast<HandleData*>(handle->data)->buf;
+	auto* data = reinterpret_cast<HandleData*>(handle->data);
+	auto& handleBuf = data->buf;
+
+	constexpr size_t BUF_SIZE = 4096;
+
+	// Scenario 1: We don't have a buffer yet, allocate one.
 	if( !handleBuf.base )
 	{
-		handleBuf.base = new char[size];
-		handleBuf.len = ULONG(size);
+		handleBuf.base = new char[BUF_SIZE];
+		handleBuf.len = BUF_SIZE;
+
+		buf->base = handleBuf.base;
+		buf->len = handleBuf.len;
+		return;
 	}
-	if( handleBuf.len < size )
+
+	// Scenario 2: We have a buffer, but we have read everything.
+	// Just use it completely.
+	auto unreadBytes = data->bufWritePos - data->bufReadPos;
+	if( unreadBytes == 0 )
 	{
-		if( ULONG_MAX - handleBuf.len < size )
-		{
-			delete handleBuf.base;
-			handleBuf.base = nullptr;
-			handleBuf.len = 0;
-			return;
-		}
-		handleBuf.len += ULONG(size);
-		char* old = handleBuf.base;
-		handleBuf.base = new char [handleBuf.len];
-		memcpy_s(handleBuf.base, handleBuf.len, old, handleBuf.len - size);
-		delete old;
+		data->bufReadPos = 0;
+		data->bufWritePos = 0;
+
+		buf->base = handleBuf.base;
+		buf->len = handleBuf.len;
+		return;
 	}
+
+	// Scenario 3: We have a buffer with unread data. How much space
+	// do we have left in the buffer? If it's very little, we should
+	// provide more space.
+	auto _this = reinterpret_cast<StreamRecvRequest*>(data->request);
+
+	auto remainingBytes = handleBuf.len - data->bufWritePos;
+	if( remainingBytes > 0 )
+	{
+		buf->base = handleBuf.base + data->bufWritePos;
+		buf->len = handleBuf.len - data->bufWritePos;
+		return;
+	}
+
+	// Scenario 4: We have no space in the buffer.
+	// Let's see if we can free up some space without reallocating
+	if( unreadBytes < handleBuf.len )
+	{
+		memmove_s(handleBuf.base, handleBuf.len, handleBuf.base + data->bufReadPos, unreadBytes);
+		data->bufWritePos -= data->bufReadPos;
+		data->bufReadPos = 0;
+
+		buf->base = handleBuf.base + data->bufWritePos;
+		buf->len = handleBuf.len - data->bufWritePos;
+		return;
+	}
+
+	// Scenario 5: Still no space in the buffer. Let's give up and cough up some memory.
+	char* newBuf = new char[unreadBytes + BUF_SIZE];
+	memcpy_s(newBuf, unreadBytes + BUF_SIZE, handleBuf.base + data->bufReadPos, unreadBytes);
+	delete handleBuf.base;
+	data->bufWritePos -= data->bufReadPos;
+	data->bufReadPos = 0;
+	handleBuf.base = newBuf;
+	handleBuf.len = unreadBytes + BUF_SIZE;
+
 	buf->base = handleBuf.base;
 	buf->len = handleBuf.len;
 }
@@ -313,9 +359,13 @@ void StreamRecvRequest::cancel()
 	IRequest::cancel();
 }
 
-StreamRecvRequest::StreamRecvRequest( PySocketSockObject* socket ) :
-	IStreamRequest( socket )
+StreamRecvRequest::StreamRecvRequest( PySocketSockObject* socket, Py_ssize_t length, int flags ) :
+	IStreamRequest( socket ), m_requested_len(length), m_flags(flags)
 {
+}
+int StreamRecvRequest::startRead()
+{
+	return uv_read_start( handle(), StreamRecvRequest::alloc, StreamRecvRequest::readCallback );
 }
 
 PyObject* StreamSendRequest::send()
@@ -600,4 +650,45 @@ PyObject* StreamAcceptRequest::accept()
 		return nullptr;
 	}
 	return PyTuple_GetItem(result, 1);
+}
+
+StreamRecvIntoRequest::StreamRecvIntoRequest( PySocketSockObject* s, char* buf, Py_ssize_t length, int flags ) :
+	StreamRecvRequest( s, length, flags ), m_buf(buf)
+{
+
+}
+int StreamRecvIntoRequest::startRead()
+{
+	return uv_read_start( handle(), StreamRecvIntoRequest::alloc, StreamRecvRequest::readCallback );
+}
+
+void StreamRecvIntoRequest::alloc( uv_handle_t* handle, size_t size, uv_buf_t* buf )
+{
+	auto* data = reinterpret_cast<HandleData*>(handle->data);
+	auto* request = reinterpret_cast<StreamRecvIntoRequest*>(data->request);
+
+	buf->base = request->m_buf;
+	buf->len = ULONG( request->m_requested_len );
+
+	ssize_t unreadBytes = data->bufReadPos - data->bufWritePos;
+
+	// StreamRecvRequest's receive function should ensure that uv_read_start
+	// doesn't get called when we already have all the data on hand.
+	assert(unreadBytes < request->m_requested_len);
+
+	if( unreadBytes > 0 )
+	{
+		auto copyAmount = unreadBytes < request->m_requested_len ? unreadBytes : request->m_requested_len;
+		memcpy_s(buf->base, copyAmount, data->buf.base + data->bufReadPos, copyAmount);
+		buf->base += copyAmount;
+		buf->len -= ULONG( copyAmount );
+	}
+}
+
+PyObject* StreamRecvIntoRequest::constructResult( HandleData* data ) const
+{
+	ssize_t bufferedAmount = data->bufWritePos - data->bufReadPos;
+	auto chunkSize = bufferedAmount < m_requested_len ? bufferedAmount : m_requested_len;
+	data->bufReadPos += chunkSize;
+	return PyLong_FromSsize_t(chunkSize);
 }
