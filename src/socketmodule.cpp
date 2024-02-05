@@ -3328,12 +3328,14 @@ void on_accept(uv_stream_t *handle, int status)
 	auto py_fd = PyLong_FromSocket_t( newfd );
 	if( !py_fd )
 	{
+		uv_close((uv_handle_t*)client, cleanup_uv_handle);
 		SendError(channel, "Failed to convert status to python long");
 		return;
 	}
 	auto py_status = PyLong_FromLong(status);
 	if( !py_status )
 	{
+		uv_close((uv_handle_t*)client, cleanup_uv_handle);
 		Py_DecRef(py_fd);
 		SendError(channel, "Failed to convert status to python long");
 		return;
@@ -3349,9 +3351,11 @@ void on_accept(uv_stream_t *handle, int status)
 		return;
 	}
 
+	PyChannel_SetPreference( channel, PREFER_SENDER );
 	int ret = PyChannel_Send(channel, tuple);
 	if( ret < 0 )
 	{
+		uv_close((uv_handle_t*)client, cleanup_uv_handle);
 		PyWriteUnraisable( "on_accept failed to send status" );
 	}
 }
@@ -5969,7 +5973,13 @@ static int
 			s->uv_handle = nullptr;
 			if( is_managed_by_libuv( type ) )
 			{
-				uv_walk( get_uv_loop(), find_handle_for_fd, (void*)s );
+				auto loop = get_uv_loop();
+				if( !loop )
+				{
+					return -1;
+				}
+
+				uv_walk( loop, find_handle_for_fd, (void*)s );
 				if( s->uv_handle == nullptr )
 				{
 					// No handle found for re-use, must create one.
@@ -6860,22 +6870,20 @@ sockets; on some platforms os.close() won't work for socket file descriptors." )
 bool dup_uv_tcp_handle( SOCKET_T newfd )
 {
 	auto handle = new uv_tcp_t;
-	ScopeGuard handle_guard = MakeGuard([&]{ delete handle; });
 	auto status = uv_tcp_init( get_uv_loop(), handle );
 	if( status < 0 )
 	{
+		delete handle;
 		PyErr_FromUvErr( status );
 		return false;
 	}
 	status = uv_tcp_open( handle, uv_os_sock_t( newfd ) );
 	if( status < 0 )
 	{
+		uv_close( (uv_handle_t*)handle, cleanup_uv_handle );
 		PyErr_FromUvErr( status );
 		return false;
 	}
-
-	// at this point we need to delegate cleaning up the libuv handle to libuv
-	handle_guard.Dismiss();
 
 	handle->data = create_handle_data();
 	if( handle->data == nullptr )
