@@ -87,7 +87,7 @@ public:
 
 	virtual void cancel();
 
-	int startTimeout();
+	[[nodiscard]] PyObject* startTimeout();
 
 	static void timeoutCallback(uv_timer_t* result);
 

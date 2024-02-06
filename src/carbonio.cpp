@@ -132,7 +132,7 @@ void IRequest::timeoutCallback( uv_timer_t* result )
 	_this->onTimeout();
 }
 
-int IRequest::startTimeout()
+PyObject* IRequest::startTimeout()
 {
 	// Python differentiates between three kinds of socket operations:
 	// Blocking: these are operations on sockets that never experienced a `settimeout(None)` or `setblocking(True)` call, internally their blocking value is `Py_None`
@@ -147,28 +147,35 @@ int IRequest::startTimeout()
 	// And even though there are no real "non-blocking" operations in libuv, then this mapping simulates such behaviour via `IRequest`'s timeout mechanism.
 	if( m_timeout_nanoseconds < 0 )
 	{
-		return 0;
+		Py_RETURN_NONE;
+	}
+	if( m_timeout_nanoseconds == 0 )
+	{
+		// The Python socket module returns an `BlockingIOError` when making blocking operations
+		// in non-blocking mode, which can be set either by calling `setblocking(False)`
+		// or setting the timeout to 0.0.
+		auto errnoModule = PyImport_ImportModule("errno");
+		auto errnoEWouldBlockObj = PyObject_GetAttrString( errnoModule, "EWOULDBLOCK" );
+		errno = PyLong_AsLong( errnoEWouldBlockObj );
+		PyErr_SetFromErrno(PyExc_BlockingIOError);
+		return nullptr;
 	}
 	uint64_t timeout_ms = m_timeout_nanoseconds / 1000000;
 	m_timeout = new uv_timer_t;
 	m_timeout->data = this;
 	uv_timer_init( get_uv_loop(), m_timeout );
-	return uv_timer_start(m_timeout, timeoutCallback, timeout_ms, 0);
+	auto status = uv_timer_start(m_timeout, timeoutCallback, timeout_ms, 0);
+	if ( status < 0 ) {
+		PyErr_FromUvErr( status );
+		return nullptr;
+	}
+	Py_RETURN_NONE;
 }
 
 void IRequest::onTimeout()
 {
 	Ccp::PyGilEnsure gil;
-	if( m_timeout_nanoseconds == 0 )
-	{
-		// The Python socket module returns an OSError when making blocking operations in non-blocking mode,
-		// which can be set either by calling setblocking(False) or setting the timeout to 0.0.
-		PyErr_SetString(PyExc_OSError, "Attempted a blocking operation on a non-blocking socket");
-	}
-	else
-	{
-		PyErr_SetString( s_timeout_error, "timed out" );
-	}
+	PyErr_SetString( s_timeout_error, "timed out" );
 	sendError("IRequest::onTimeout failed to send timeout exception");
 }
 
@@ -191,23 +198,21 @@ void IRequest::clearTimeout()
 
 PyObject* StreamRecvRequest::receive()
 {
+	auto ret = startTimeout();
+	if( ret != Py_None )
+	{
+		return nullptr;
+	}
 	auto* data = reinterpret_cast<HandleData*>(m_handle->data);
 
 	auto bufferedAmount = data->bufWritePos - data->bufReadPos;
 
 	if ( m_requested_len > bufferedAmount )
 	{
-		auto ret = startRead();
-		if( ret < 0 )
+		auto status = startRead();
+		if( status < 0 )
 		{
-			PyErr_FromUvErr( ret );
-			return nullptr;
-		}
-		ret = startTimeout();
-		if( ret < 0 )
-		{
-			uv_read_stop(handle());
-			PyErr_FromUvErr( ret );
+			PyErr_FromUvErr( status );
 			return nullptr;
 		}
 		auto sentinel = PyChannel_Receive( channel() );
@@ -217,7 +222,7 @@ PyObject* StreamRecvRequest::receive()
 		}
 	}
 	data->bufWritePos += m_received_len;
-	PyObject* ret = constructResult( data );
+	ret = constructResult( data );
 	return ret;
 }
 
@@ -424,6 +429,12 @@ void SendError(PyChannelObject* channel, std::string_view msg)
 
 PyObject* UdpRecvRequest::receive()
 {
+	auto ret = startTimeout();
+	if( ret != Py_None )
+	{
+		return nullptr;
+	}
+
 	auto status = uv_udp_recv_start( handle(), alloc, UdpRecvRequest::receiveCallback );
 	if ( status < 0 )
 	{
@@ -431,13 +442,6 @@ PyObject* UdpRecvRequest::receive()
 		return nullptr;
 	}
 
-	status = startTimeout();
-	if( status < 0 )
-	{
-		uv_udp_recv_stop(handle());
-		PyErr_FromUvErr( status );
-		return nullptr;
-	}
 	auto sentinel = PyChannel_Receive( channel() );
 	if( !sentinel )
 	{
@@ -627,8 +631,13 @@ void UdpSendRequest::onSend( int status )
 
 PyObject* StreamAcceptRequest::accept()
 {
-	startTimeout();
-	auto result = PyChannel_Receive(channel());
+	auto result = startTimeout();
+	if( result != Py_None )
+	{
+		return nullptr;
+	}
+
+	result = PyChannel_Receive(channel());
 	if( !result ) {
 		return nullptr;
 	}

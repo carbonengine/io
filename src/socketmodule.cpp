@@ -3998,7 +3998,7 @@ static PyObject*
 	{
 		if( s->sock_type == SOCK_STREAM )
 		{
-			StreamRecvIntoRequest* request = new StreamRecvIntoRequest(s, buf, recvlen, flags);
+			auto* request = new StreamRecvIntoRequest(s, buf, recvlen, flags);
 			PyObject* bytesReceived = request->receive();
 			delete request;
 			if( !bytesReceived )
