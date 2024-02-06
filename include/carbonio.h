@@ -110,6 +110,20 @@ public:
 	uv_stream_t* handle() { return reinterpret_cast<uv_stream_t*>( m_handle ); }
 };
 
+class StreamConnectRequest : public IStreamRequest
+{
+public:
+	StreamConnectRequest( PySocketSockObject* socket, struct sockaddr* address );
+	PyObject* connect();
+
+	static void connectCallback(uv_connect_t* connection, int status);
+
+private:
+	void onConnect(int status);
+
+	struct sockaddr* m_address{ nullptr };
+};
+
 class StreamRecvRequest : public IStreamRequest
 {
 public:

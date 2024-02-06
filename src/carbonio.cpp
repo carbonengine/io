@@ -698,3 +698,64 @@ PyObject* StreamRecvIntoRequest::constructResult( HandleData* data ) const
 	data->bufReadPos += chunkSize;
 	return PyLong_FromSsize_t(chunkSize);
 }
+
+StreamConnectRequest::StreamConnectRequest( PySocketSockObject* socket, struct sockaddr* address ) :
+	IStreamRequest( socket ), m_address( address )
+{
+}
+
+PyObject* StreamConnectRequest::connect() {
+	auto* connect = new uv_connect_t;
+	ON_BLOCK_EXIT( [&] { delete connect; } );
+	int status = uv_tcp_connect(connect, reinterpret_cast<uv_tcp_t*>( handle() ), m_address, &StreamConnectRequest::connectCallback);
+	if ( status < 0 )
+	{
+		PyErr_FromUvErr( status );
+		return nullptr;
+	}
+	PyObject* connect_status = PyChannel_Receive(channel());
+	if( connect_status == nullptr ) {
+		return nullptr;
+	}
+	if( !PyLong_Check( connect_status ) ) {
+		PyErr_BadInternalCall();
+		return nullptr;
+	}
+	status = PyLong_AsLong( connect_status );
+	if( status < 0 ) {
+		PyErr_FromUvErr( status );
+		return nullptr;
+	}
+
+	Py_RETURN_NONE;
+}
+
+void StreamConnectRequest::connectCallback( uv_connect_t* connection, int status )
+{
+	auto _this = reinterpret_cast<StreamConnectRequest*>(reinterpret_cast<HandleData*>(connection->handle->data)->request);
+	_this->onConnect( status );
+}
+
+void StreamConnectRequest::onConnect( int status )
+{
+	Ccp::PyGilEnsure gil;
+
+	auto py_status = PyLong_FromLong( status );
+	if( py_status == nullptr )
+	{
+		PyObject *exc, *val, *tb;
+		PyErr_Fetch( &exc, &val, &tb );
+		auto ret = PyChannel_SendThrow( channel(), exc, val, tb );
+		if( ret < 0 )
+		{
+			PyErr_Restore( exc, val, tb );
+			PyWriteUnraisable( "StreamConnectRequest::onConnect failed to send exception" );
+		}
+		return;
+	}
+	int ret = PyChannel_Send( channel(), py_status );
+	if( ret < 0 )
+	{
+		PyWriteUnraisable( "StreamConnectRequest::onConnect failed to send status" );
+	}
+}

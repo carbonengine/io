@@ -3360,37 +3360,6 @@ void on_accept(uv_stream_t *handle, int status)
 	}
 }
 
-void on_connect(uv_connect_t* connection, int status)
-{
-	auto channel = reinterpret_cast<HandleData*>(connection->handle->data)->channel;
-	Ccp::PyGilEnsure gil;
-	if( !channel )
-	{
-		PyErr_BadInternalCall();
-		PyWriteUnraisable("on_connect received null channel pointer" );
-		return;
-	}
-	auto py_status = PyLong_FromLong(status);
-	if( py_status == nullptr )
-	{
-		PyObject *exc, *val, *tb;
-		PyErr_Fetch( &exc, &val, &tb );
-		auto ret = PyChannel_SendThrow(channel, exc, val, tb);
-		if( ret < 0 )
-		{
-			PyErr_Restore( exc, val, tb );
-			PyWriteUnraisable( "on_connect failed to send exception" );
-		}
-		return;
-	}
-	int ret = PyChannel_Send(channel, py_status);
-	if( ret < 0 )
-	{
-		PyWriteUnraisable( "on_connect failed to send status" );
-	}
-}
-
-
 /* s.close() method.
    Set the file descriptor to -1 so operations tried subsequently
    will surely fail. */
@@ -3589,34 +3558,9 @@ static PyObject*
 			return nullptr;
 		}
 
-        auto loop = get_uv_loop();
-        if ( !loop ) {
-            return nullptr;
-        }
-
-		uv_tcp_t* handle = reinterpret_cast<uv_tcp_t*>(s->uv_handle);
-
-		uv_connect_t* connect = new uv_connect_t;
-		uv_tcp_connect(connect, handle, SAS2SA( &addrbuf ), on_connect);
-		auto channel = reinterpret_cast<HandleData*>(handle->data)->channel;
-		if( !channel )
-		{
-			PyErr_BadInternalCall();
-			return nullptr;
-		}
-		PyObject* connect_status = PyChannel_Receive(channel);
-		if( connect_status == nullptr ) {
-			return nullptr;
-		}
-		if( !PyLong_Check( connect_status ) ) {
-			PyErr_BadInternalCall();
-			return nullptr;
-		}
-		int status = PyLong_AsLong( connect_status );
-		if( status < 0 ) {
-			PyErr_FromUvErr(status);
-			return nullptr;
-		}
+		auto* request = new StreamConnectRequest( s, SAS2SA( &addrbuf ) );
+		ON_BLOCK_EXIT( [&] { delete request; } );
+		return request->connect();
 	}
 	else
 	{
