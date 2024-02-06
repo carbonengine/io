@@ -149,17 +149,7 @@ PyObject* IRequest::startTimeout()
 	{
 		Py_RETURN_NONE;
 	}
-	if( m_timeout_nanoseconds == 0 )
-	{
-		// The Python socket module returns an `BlockingIOError` when making blocking operations
-		// in non-blocking mode, which can be set either by calling `setblocking(False)`
-		// or setting the timeout to 0.0.
-		auto errnoModule = PyImport_ImportModule("errno");
-		auto errnoEWouldBlockObj = PyObject_GetAttrString( errnoModule, "EWOULDBLOCK" );
-		errno = PyLong_AsLong( errnoEWouldBlockObj );
-		PyErr_SetFromErrno(PyExc_BlockingIOError);
-		return nullptr;
-	}
+
 	uint64_t timeout_ms = m_timeout_nanoseconds / 1000000;
 	m_timeout = new uv_timer_t;
 	m_timeout->data = this;
