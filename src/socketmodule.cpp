@@ -702,7 +702,7 @@ bool is_managed_by_libuv( int sock_type )
 
 bool is_managed_by_libuv( PySocketSockObject* s )
 {
-    return is_managed_by_libuv( s->sock_type );
+    return is_managed_by_libuv( s->sock_type ) && ( s->sock_timeout != 0 );
 }
 
 /* Function to perform the setting of socket blocking mode
@@ -3406,11 +3406,11 @@ static PyObject*
 	{
 		s->sock_fd = INVALID_SOCKET;
 
-		/* We do not want to retry upon EINTR: see
-           http://lwn.net/Articles/576478/ and
-           http://linux.derkeiler.com/Mailing-Lists/Kernel/2005-09/3000.html
-           for more details. */
-		if( is_managed_by_libuv( s ) )
+		// When closing the socket we may have a dangling uv_handle from when
+		// the socket was originally created before being put into non-blocking
+		// mode. Therefore, just check if the socket type is supposed to be
+		// managed by libuv, instead of the socket object itself.
+		if( is_managed_by_libuv( s->sock_type ) )
 		{
 			if (!is_valid_uv_handle(s->uv_handle))
 			{
@@ -3423,6 +3423,10 @@ static PyObject*
 		}
 		else
 		{
+			/* We do not want to retry upon EINTR: see
+           http://lwn.net/Articles/576478/ and
+           http://linux.derkeiler.com/Mailing-Lists/Kernel/2005-09/3000.html
+           for more details. */
             Py_BEGIN_ALLOW_THREADS
 			res = SOCKETCLOSE( fd );
             Py_END_ALLOW_THREADS
