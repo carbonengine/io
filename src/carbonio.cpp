@@ -56,9 +56,16 @@ void* create_handle_data()
 	return data;
 }
 
-void PyErr_FromUvErr( int error )
+void PyErr_FromUvErr( int uv_status )
 {
-	PyErr_SetString( PyExc_OSError, uv_err_name( error ) );
+	auto errnoModule = PyImport_ImportModule("errno");
+	auto errnoObj = PyObject_GetAttrString( errnoModule, uv_err_name( uv_status ) );
+	errno = PyLong_AsLong( errnoObj );
+	PyObject* exc_type = PyExc_OSError;
+	if ( errno == EWOULDBLOCK ) {
+		exc_type = PyExc_BlockingIOError;
+	}
+	PyErr_SetFromErrno( exc_type );
 }
 
 void PyWriteUnraisable( const char* msg )
