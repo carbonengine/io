@@ -4630,6 +4630,10 @@ static PyObject*
 	{
 		ON_BLOCK_EXIT( [&] { PyBuffer_Release(&pbuf); } );
 		auto py_status = uv_sendall_impl(s, reinterpret_cast<char*>(pbuf.buf), pbuf.len, flags);
+		if (!py_status)
+		{
+			return nullptr;
+		}
 		auto status = PyLong_AsLong( py_status );
 		if( status == -1 && PyErr_Occurred() )
 		{

@@ -5828,7 +5828,7 @@ class SendfileUsingSendTest(ThreadedTCPSocketTest):
         address = self.serv.getsockname()
         with open(support.TESTFN, 'rb') as file:
             with socket.create_connection(address) as sock:
-                sock.settimeout(0.01)
+                sock.settimeout(0.0001)
                 meth = self.meth_from_sock(sock)
                 self.assertRaises(socket.timeout, meth, file)
 

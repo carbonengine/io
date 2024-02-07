@@ -372,6 +372,10 @@ int StreamRecvRequest::startRead()
 
 PyObject* StreamSendRequest::send()
 {
+	if ( ! startTimeout() )
+	{
+		return nullptr;
+	}
 	uv_write_t* request = new uv_write_t;
 	constexpr int NUM_BUFFERS = 1;
 	auto* bufferarray = new std::array<uv_buf_t, NUM_BUFFERS>;
@@ -401,6 +405,7 @@ void StreamSendRequest::sendCallback( uv_write_t* request, int status )
 
 void StreamSendRequest::onSend( int status )
 {
+	Ccp::PyGilEnsure gil;
 	auto py_status = PyLong_FromLong(status);
 	if( !py_status ){
 		sendError("StreamSendRequest::send Failed to convert status to python int");
