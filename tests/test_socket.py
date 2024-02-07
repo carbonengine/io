@@ -5507,6 +5507,7 @@ class NonblockConstantTest(unittest.TestCase):
 
 @unittest.skipUnless(os.name == "nt", "Windows specific")
 @unittest.skipUnless(multiprocessing, "need multiprocessing")
+@unittest.skip("libuv does not support sharing handles")
 class TestSocketSharing(SocketTCPTest):
     # This must be classmethod and not staticmethod or multiprocessing
     # won't be able to bootstrap it.
