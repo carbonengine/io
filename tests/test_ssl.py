@@ -2377,6 +2377,13 @@ class ThreadedEchoServer(threading.Thread):
                 self.sock.close()
 
         def run(self):
+            import stackless
+            stackless.tasklet(self._run)()
+            while getattr(self._run, "running", True):
+                stackless.run()
+                socket.dispatch()
+
+        def _run(self):
             self.running = True
             if not self.server.starttls_server:
                 if not self.wrap_conn():
@@ -4754,3 +4761,4 @@ if __name__ == "__main__":
     stackless.tasklet(test_main)()
     while getattr(test_main, "running", True):
         stackless.run()
+        socket.dispatch()
