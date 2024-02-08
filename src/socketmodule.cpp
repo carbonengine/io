@@ -4879,8 +4879,27 @@ static PyObject*
 				return nullptr;
 			}
 			ctx.result = PyLong_AsSsize_t( ret );
-			if ( ctx.result == -1 && PyErr_Occurred() )
+			if( ctx.result == -1 && PyErr_Occurred() )
 			{
+				PyBuffer_Release( &pbuf );
+				return nullptr;
+			}
+		} else if ( s->sock_type == SOCK_STREAM ) {
+			auto py_status = uv_sendall_impl(s, reinterpret_cast<char*>(pbuf.buf), pbuf.len, flags);
+			if ( !py_status )
+			{
+				PyBuffer_Release( &pbuf );
+				return nullptr;
+			}
+			ctx.result = PyLong_AsSsize_t( py_status );
+			if( ctx.result < 0)
+			{
+				if( ctx.result == -1 && PyErr_Occurred() )
+				{
+				} else
+				{
+					PyErr_FromUvErr( ctx.result );
+				}
 				PyBuffer_Release( &pbuf );
 				return nullptr;
 			}
