@@ -1916,6 +1916,7 @@ class SSLObjectTests(unittest.TestCase):
         c_in.write(s_out.read())
         client.unwrap()
 
+@unittest.skip("Moves socket between threads")
 class SimpleBackgroundTests(unittest.TestCase):
     """Tests that connect to a simple server running in the background"""
 
@@ -2492,6 +2493,7 @@ class ThreadedEchoServer(threading.Thread):
                  chatty=True, connectionchatty=False, starttls_server=False,
                  npn_protocols=None, alpn_protocols=None,
                  ciphers=None, context=None):
+        raise unittest.SkipTest("Moves socket between threads")
         if context:
             self.context = context
         else:
@@ -2640,6 +2642,7 @@ class AsyncoreEchoServer(threading.Thread):
             raise
 
     def __init__(self, certfile):
+        raise unittest.SkipTest("Asyncore deprecated since 3.6 to be removed in 3.12")
         self.flag = None
         self.active = False
         self.server = self.EchoServer(certfile)
@@ -3146,20 +3149,29 @@ class ThreadedTests(unittest.TestCase):
         listener_ready = threading.Event()
         listener_gone = threading.Event()
 
-        s = socket.socket()
-        port = support.bind_port(s, HOST)
+        port = support.find_unused_port()
 
         # `listener` runs in a thread.  It sits in an accept() until
         # the main thread connects.  Then it rudely closes the socket,
         # and sets Event `listener_gone` to let the main thread know
         # the socket is gone.
-        def listener():
+        def _listener():
+            s = socket.socket()
+            s.bind((HOST, port))
             s.listen()
             listener_ready.set()
             newsock, addr = s.accept()
             newsock.close()
             s.close()
             listener_gone.set()
+            _listener.running = False
+
+        def listener():
+            import stackless
+            stackless.tasklet(_listener)()
+            while getattr(_listener, "running", True):
+                stackless.run()
+                socket.dispatch()
 
         def connector():
             listener_ready.wait()
@@ -3639,6 +3651,7 @@ class ThreadedTests(unittest.TestCase):
             s.setblocking(True)
             s.close()
 
+    @unittest.skip("Uses select, shares socket between threads")
     def test_handshake_timeout(self):
         # Issue #5103: SSL handshake must respect the socket timeout
         server = socket.socket(socket.AF_INET)
@@ -3695,22 +3708,31 @@ class ThreadedTests(unittest.TestCase):
         context.verify_mode = ssl.CERT_REQUIRED
         context.load_verify_locations(SIGNING_CA)
         context.load_cert_chain(SIGNED_CERTFILE)
-        server = socket.socket(socket.AF_INET)
         host = "127.0.0.1"
-        port = support.bind_port(server)
-        server = context.wrap_socket(server, server_side=True)
-        self.assertTrue(server.server_side)
+        port = support.find_unused_port()
 
         evt = threading.Event()
         remote = None
         peer = None
-        def serve():
+        def _serve():
             nonlocal remote, peer
+            server = socket.socket(socket.AF_INET)
+            server = context.wrap_socket(server, server_side=True)
+            self.assertTrue(server.server_side)
+            server.bind((host, port))
             server.listen()
             # Block on the accept and wait on the connection to close.
             evt.set()
             remote, peer = server.accept()
             remote.send(remote.recv(4))
+            server.close()
+            _serve.running = False
+        def serve():
+            import stackless
+            stackless.tasklet(_serve)()
+            while getattr(_serve, "running", True):
+                stackless.run()
+                socket.dispatch()
 
         t = threading.Thread(target=serve)
         t.start()
@@ -3724,7 +3746,6 @@ class ThreadedTests(unittest.TestCase):
         client.close()
         t.join()
         remote.close()
-        server.close()
         # Sanity checks.
         self.assertIsInstance(remote, ssl.SSLSocket)
         self.assertEqual(peer, client_addr)
