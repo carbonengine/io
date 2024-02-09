@@ -2804,11 +2804,20 @@ static PyObject*
 	    else {
 			auto* request = new StreamAcceptRequest( s );
 			ON_BLOCK_EXIT( [&] { delete request; } );
-			sock = request->accept();
+			auto result = request->accept();
+			if( !result )
+			{
+				goto finally;
+			}
+			ON_BLOCK_EXIT( [&] { Py_DecRef(result); } );
+			sock = PyTuple_GetItem(result, 0);
+			Py_IncRef(sock);
 			if( !sock )
 			{
 				goto finally;
 			}
+			addr = PyTuple_GetItem(result, 1);
+			Py_IncRef(addr);
         }
     }
 	else {
@@ -2849,9 +2858,9 @@ static PyObject*
 			SOCKETCLOSE(newfd);
 			goto finally;
 		}
+		addr = makesockaddr(s->sock_fd, SAS2SA(&addrbuf), addrlen, s->sock_proto);
     }
 
-    addr = makesockaddr(s->sock_fd, SAS2SA(&addrbuf), addrlen, s->sock_proto);
     if (addr == NULL)
         goto finally;
 
@@ -3302,8 +3311,8 @@ void on_accept(uv_stream_t *handle, int status)
 	auto *client = new uv_tcp_t;
 	uv_tcp_init(handle->loop, client);
 	status = uv_accept(handle, reinterpret_cast<uv_stream_t*>(client));
+	auto guard = MakeGuard([&] {uv_close((uv_handle_t*)client, cleanup_uv_handle);});
 	if( status < 0 ) {
-		uv_close((uv_handle_t*)client, cleanup_uv_handle);
 		PyErr_FromUvErr(status);
 		SendError(channel, "on_accept: uv_accept failed");
 		return;
@@ -3312,7 +3321,6 @@ void on_accept(uv_stream_t *handle, int status)
 	status = uv_fileno( reinterpret_cast<const uv_handle_t*>( client ), reinterpret_cast<uv_os_fd_t*>( &newfd ) );
 	if( status < 0 )
 	{
-		uv_close((uv_handle_t*)client, cleanup_uv_handle);
 		PyErr_FromUvErr( status );
 		SendError(channel, "on_accept: uv_fileno failed");
 		return;
@@ -3320,7 +3328,6 @@ void on_accept(uv_stream_t *handle, int status)
 	client->data = create_handle_data();
 	if( !client->data )
 	{
-		uv_close((uv_handle_t*)client, cleanup_uv_handle);
 		SendError(channel, "on_accept: Failed to create client channel");
 		return;
 	}
@@ -3328,25 +3335,40 @@ void on_accept(uv_stream_t *handle, int status)
 	auto py_fd = PyLong_FromSocket_t( newfd );
 	if( !py_fd )
 	{
-		uv_close((uv_handle_t*)client, cleanup_uv_handle);
 		SendError(channel, "Failed to convert status to python long");
 		return;
 	}
+	ON_BLOCK_EXIT([&] { Py_DecRef(py_fd); } );
 	auto py_status = PyLong_FromLong(status);
 	if( !py_status )
 	{
-		uv_close((uv_handle_t*)client, cleanup_uv_handle);
-		Py_DecRef(py_fd);
 		SendError(channel, "Failed to convert status to python long");
 		return;
 	}
+	ON_BLOCK_EXIT( ( [&] { Py_DecRef(py_status);} ) );
 
-	auto tuple = PyTuple_Pack(2, py_status, py_fd);
+    // Get the peer name
+	sock_addr_t addrbuf;
+	socklen_t addrlen = sizeof( struct sockaddr_in6 );
+	memset(&addrbuf, 0, addrlen);
+	status = uv_tcp_getpeername( reinterpret_cast<uv_tcp_t*>( client ), SAS2SA(&addrbuf) , &addrlen );
+	if( status < 0 )
+	{
+		PyErr_FromUvErr( status );
+		SendError(channel, "on_accept: Failed to get peer address");
+		return;
+	}
+	auto py_address = makesockaddr(newfd, SAS2SA(&addrbuf), addrlen, 0);
+	if( !py_address )
+	{
+		SendError(channel, "on_accept: Failed to construct peer address");
+		return;
+	}
+	ON_BLOCK_EXIT( [&] { Py_DecRef(py_address); } );
+
+	auto tuple = PyTuple_Pack(3, py_status, py_fd, py_address );
 	if( !tuple )
 	{
-		uv_close((uv_handle_t*)client, cleanup_uv_handle);
-		Py_DecRef(py_fd);
-		Py_DecRef(py_status);
 		SendError(channel, "on_accept: Failed to pack tuple");
 		return;
 	}
@@ -3355,9 +3377,9 @@ void on_accept(uv_stream_t *handle, int status)
 	int ret = PyChannel_Send(channel, tuple);
 	if( ret < 0 )
 	{
-		uv_close((uv_handle_t*)client, cleanup_uv_handle);
 		PyWriteUnraisable( "on_accept failed to send status" );
 	}
+	guard.Dismiss();
 }
 
 /* s.close() method.

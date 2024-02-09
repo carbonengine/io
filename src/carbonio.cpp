@@ -639,28 +639,30 @@ PyObject* StreamAcceptRequest::accept()
 		return nullptr;
 	}
 
-	result = PyChannel_Receive(channel());
-	if( !result ) {
+	result = PyChannel_Receive( channel() );
+	if( !result )
+	{
 		return nullptr;
 	}
 	ON_BLOCK_EXIT( [&] { Py_XDECREF( result ); } );
-	auto listen_status = PyTuple_GetItem(result, 0);
+	auto listen_status = PyTuple_GetItem( result, 0 );
 
-	if( !PyLong_Check( listen_status ) ) {
+	if( !PyLong_Check( listen_status ) )
+	{
 		PyErr_BadInternalCall();
 		return nullptr;
 	}
-	ON_BLOCK_EXIT( [&] { Py_XDECREF( listen_status ); } );
 
 	auto status = PyLong_AsLong( listen_status );
-	if( status < 0 ) {
+	if( status < 0 )
+	{
 		if( !PyErr_Occurred() )
 		{
 			PyErr_FromUvErr( status );
 		}
 		return nullptr;
 	}
-	return PyTuple_GetItem(result, 1);
+	return PyTuple_GetSlice(result, 1, 3);
 }
 
 StreamRecvIntoRequest::StreamRecvIntoRequest( PySocketSockObject* s, char* buf, Py_ssize_t length, int flags ) :
