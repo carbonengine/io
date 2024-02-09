@@ -83,6 +83,11 @@ target_link_libraries(_ssl
         OpenSSL::Crypto
         OpenSSL::SSL
 )
+set_target_properties(_ssl
+        PROPERTIES
+        DEBUG_POSTFIX ""
+)
+
 
 # --- _select ---
 ccp_add_library(_select SHARED
