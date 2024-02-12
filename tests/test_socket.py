@@ -4402,7 +4402,11 @@ class NonBlockingTCPTests(ThreadedTCPSocketTest):
 
     def testAccept(self):
         # Testing non-blocking accept
+        self.serv.close()
+        self.serv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.port = support.bind_port(self.serv)
         self.serv.setblocking(0)
+        self.serv.listen()
 
         # connect() didn't start: non-blocking accept() fails
         start_time = time.monotonic()
