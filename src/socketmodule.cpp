@@ -3242,16 +3242,19 @@ static PyObject*
 			int bind_flags = 0;
 			int ipv6_v6only_flag = 0;
 			socklen_t flagsize = sizeof ipv6_v6only_flag;
-			res = getsockopt( s->sock_fd, IPPROTO_IPV6, IPV6_V6ONLY, (char*)&ipv6_v6only_flag, &flagsize );
-			if (res < 0)
+			if ( s->sock_family == AF_INET6 )
 			{
-				return s->errorhandler();
+				res = getsockopt( s->sock_fd, IPPROTO_IPV6, IPV6_V6ONLY, (char*)&ipv6_v6only_flag, &flagsize );
+				if( res < 0 )
+				{
+					return s->errorhandler();
+				}
 			}
 
 			if ( s->sock_type == SOCK_STREAM )
 			{
 				auto handle = reinterpret_cast<uv_tcp_t *>(s->uv_handle);
-				if ( ipv6_v6only_flag && ( s->sock_family == AF_INET6 ) )
+				if ( ipv6_v6only_flag )
 				{
 					bind_flags = UV_TCP_IPV6ONLY;
 				}
@@ -3259,7 +3262,7 @@ static PyObject*
 			} else if ( s->sock_type == SOCK_DGRAM )
 			{
 				auto handle = reinterpret_cast<uv_udp_t *>(s->uv_handle);
-				if ( ipv6_v6only_flag && ( s->sock_family == AF_INET6 ) )
+				if ( ipv6_v6only_flag )
 				{
 					bind_flags = UV_UDP_IPV6ONLY;
 				}
