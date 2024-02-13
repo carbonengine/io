@@ -13,6 +13,17 @@ typedef unsigned int ULONG;
 #endif
 #endif
 
+static uv_key_t s_tlsKey;
+
+int InitUvLoop() {
+	// uv_loop instances aren't thread-safe, thus we keep a loop instance per thread for which we need to initialize TLS
+	auto status = uv_key_create(&s_tlsKey);
+	if ( status != 0 ) {
+		PyErr_FromUvErr( status );
+	}
+	return status;
+}
+
 void cleanup_uv_handle( uv_handle_t* uv_handle )
 {
 	Ccp::PyGilEnsure gil;
@@ -98,21 +109,17 @@ void PyWriteUnraisable( const char* msg )
 
 uv_loop_t * get_uv_loop()
 {
-	Ccp::PyGilEnsure gil;
-	uv_loop_t* ret = reinterpret_cast<uv_loop_t*>(PyThread_tss_get(&UV_LOOP_KEY));
+	uv_loop_t* ret = reinterpret_cast<uv_loop_t*>(uv_key_get(&s_tlsKey));
 	if ( !ret ) {
 		ret = new uv_loop_t;
 		auto res = uv_loop_init( ret );
 		if ( res < 0 ) {
 			uv_loop_delete( ret );
+			Ccp::PyGilEnsure gil;
 			PyErr_FromUvErr( res );
 			return nullptr;
 		}
-		if ( PyThread_tss_set( &UV_LOOP_KEY, reinterpret_cast<void *>( ret ) ) ) {
-			uv_loop_close( ret );
-			delete ret;
-			return nullptr;
-		}
+		uv_key_set( &s_tlsKey, reinterpret_cast<void *>( ret ) );
 	}
 	return ret;
 }

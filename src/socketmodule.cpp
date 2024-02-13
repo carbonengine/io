@@ -9466,11 +9466,9 @@ PyMODINIT_FUNC
 
 	SetTimeoutErrorType(socket_timeout);
 
-    // uv_loop instances aren't thread-safe, thus we keep a loop instance per thread
-    if ( PyThread_tss_create( &UV_LOOP_KEY ) )
-    {
-        return nullptr;
-    }
+	if ( InitUvLoop() != 0 ) {
+		return nullptr;
+	}
 
 	return m;
 }

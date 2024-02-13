@@ -54,11 +54,11 @@ enum ChannelPreference : int {
 extern void SendError(PyChannelObject* channel, std::string_view msg);
 
 extern void alloc(uv_handle_t* handle, size_t size, uv_buf_t* buf);
-static Py_tss_t UV_LOOP_KEY = Py_tss_NEEDS_INIT;
 
 extern void SetTimeoutErrorType(PyObject* error_type);
 
 
+extern int InitUvLoop();
 extern uv_loop_t * get_uv_loop();
 
 void* create_handle_data();
