@@ -2487,6 +2487,9 @@ static struct PyModuleDef selectmodule = {
 
 
 
+#ifdef __APPLE__
+__attribute__((visibility("default")))
+#endif
 PyMODINIT_FUNC
 PyInit_select(void)
 {

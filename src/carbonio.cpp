@@ -1,6 +1,18 @@
 #include <carbonio.h>
 #include "socketmodule.h"
 
+#ifdef __APPLE__
+// AppleClang doesn't know the _s versions yet, so we are forced to do the unsafe thing
+#ifndef __STDC_LIB_EXT1_
+#define memcpy_s(dst, dstsize, src, srcsize) memcpy(dst, src, srcsize)
+#define memmove_s(dst, dstsize, src, srcsize) memmove(dst, src, srcsize)
+#endif
+// Same for ULONG, which we need to use with libuv on Windows
+#ifndef ULONG
+typedef unsigned int ULONG;
+#endif
+#endif
+
 void cleanup_uv_handle( uv_handle_t* uv_handle )
 {
 	Ccp::PyGilEnsure gil;
@@ -586,7 +598,8 @@ PyObject* UdpSendRequest::send()
 	ON_BLOCK_EXIT( [&] { delete request; } );
 
 	constexpr int NUM_BUFFERS = 1;
-	auto bufferarray = new std::array<uv_buf_t, NUM_BUFFERS>{ { ULONG( m_len ), m_buf } };
+	auto bufferarray = new std::array<uv_buf_t, NUM_BUFFERS>{};
+	bufferarray->front() = uv_buf_init(m_buf, m_len);
 	ON_BLOCK_EXIT( [&] { delete bufferarray; } );
 
 	int status = uv_udp_send( request, handle(), bufferarray->data(), NUM_BUFFERS, m_addr, UdpSendRequest::sendCallback );

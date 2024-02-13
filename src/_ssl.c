@@ -5964,6 +5964,9 @@ parse_openssl_version(unsigned long libver,
     *major = libver & 0xFF;
 }
 
+#ifdef __APPLE__
+__attribute__((visibility("default")))
+#endif
 PyMODINIT_FUNC
 PyInit__ssl(void)
 {

@@ -3241,7 +3241,7 @@ static PyObject*
         else {
 			int bind_flags = 0;
 			int ipv6_v6only_flag = 0;
-			int flagsize = sizeof ipv6_v6only_flag;
+			socklen_t flagsize = sizeof ipv6_v6only_flag;
 			res = getsockopt( s->sock_fd, IPPROTO_IPV6, IPV6_V6ONLY, (char*)&ipv6_v6only_flag, &flagsize );
 			if (res < 0)
 			{
@@ -3349,7 +3349,7 @@ void on_accept(uv_stream_t *handle, int status)
 
     // Get the peer name
 	sock_addr_t addrbuf;
-	socklen_t addrlen = sizeof( struct sockaddr_in6 );
+	int addrlen = sizeof( struct sockaddr_in6 );
 	memset(&addrbuf, 0, addrlen);
 	status = uv_tcp_getpeername( reinterpret_cast<uv_tcp_t*>( client ), SAS2SA(&addrbuf) , &addrlen );
 	if( status < 0 )
@@ -8220,6 +8220,9 @@ static struct PyModuleDef socketmodule = {
 	NULL
 };
 
+#ifdef __APPLE__
+__attribute__((visibility("default")))
+#endif
 PyMODINIT_FUNC
 	PyInit__socket( void )
 {
