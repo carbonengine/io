@@ -52,6 +52,7 @@ target_link_libraries(_socket
 set_target_properties(_socket
         PROPERTIES
         DEBUG_POSTFIX ""
+        INTERNAL_POSTFIX ""
 )
 
 target_include_directories(_socket
@@ -86,12 +87,18 @@ target_link_libraries(_ssl
 set_target_properties(_ssl
         PROPERTIES
         DEBUG_POSTFIX ""
+        INTERNAL_POSTFIX ""
 )
 
 
 # --- _select ---
 ccp_add_library(_select SHARED
     src/selectmodule.c
+)
+set_target_properties(_select
+        PROPERTIES
+        DEBUG_POSTFIX ""
+        INTERNAL_POSTFIX ""
 )
 get_target_property(_SOURCES _select SOURCES)
 source_group("_select" FILES
