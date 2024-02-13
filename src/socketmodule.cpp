@@ -6860,7 +6860,7 @@ Close an integer socket file descriptor.  This is like os.close(), but for\n\
 sockets; on some platforms os.close() won't work for socket file descriptors." );
 
 #ifndef NO_DUP
-bool dup_uv_tcp_handle( SOCKET_T newfd )
+uv_tcp_t* dup_uv_tcp_handle( SOCKET_T newfd )
 {
 	auto handle = new uv_tcp_t;
 	auto status = uv_tcp_init( get_uv_loop(), handle );
@@ -6868,14 +6868,14 @@ bool dup_uv_tcp_handle( SOCKET_T newfd )
 	{
 		delete handle;
 		PyErr_FromUvErr( status );
-		return false;
+		return nullptr;
 	}
 	status = uv_tcp_open( handle, uv_os_sock_t( newfd ) );
 	if( status < 0 )
 	{
 		uv_close( (uv_handle_t*)handle, cleanup_uv_handle );
 		PyErr_FromUvErr( status );
-		return false;
+		return nullptr;
 	}
 
 	handle->data = create_handle_data();
@@ -6883,12 +6883,12 @@ bool dup_uv_tcp_handle( SOCKET_T newfd )
 	{
 		uv_close( (uv_handle_t*)handle, cleanup_uv_handle );
 		// create_handle_data should have set an error.
-		return false;
+		return nullptr;
 	}
-	return true;
+	return handle;
 }
 
-bool dup_uv_udp_handle( SOCKET_T newfd )
+uv_udp_t* dup_uv_udp_handle( SOCKET_T newfd )
 {
 	auto handle = new uv_udp_t;
 	ScopeGuard handle_guard = MakeGuard([&]{ delete handle; });
@@ -6896,13 +6896,13 @@ bool dup_uv_udp_handle( SOCKET_T newfd )
 	if( status < 0 )
 	{
 		PyErr_FromUvErr( status );
-		return false;
+		return nullptr;
 	}
 	status = uv_udp_open( handle, uv_os_sock_t( newfd ) );
 	if( status < 0 )
 	{
 		PyErr_FromUvErr( status );
-		return false;
+		return nullptr;
 	}
 
 	// at this point we need to delegate cleaning up the libuv handle to libuv
@@ -6913,9 +6913,9 @@ bool dup_uv_udp_handle( SOCKET_T newfd )
 	{
 		uv_close( (uv_handle_t*)handle, cleanup_uv_handle );
 		// create_handle_data should have set an error.
-		return false;
+		return nullptr;
 	}
-	return true;
+	return handle;
 }
 /* dup() function for socket fds */
 
@@ -7030,7 +7030,6 @@ static PySocketSockObject*
 }
 
 
-#ifdef HAVE_SOCKETPAIR
 /* Create a pair of sockets using the socketpair() function.
    Arguments as for socket() except the default family is AF_UNIX if
    defined on the platform; otherwise, the default is AF_INET. */
@@ -7080,18 +7079,60 @@ static PyObject*
 	}
 	else
 #endif
+	if( !is_managed_by_libuv(type) )
 	{
-		ret = socketpair( family, type, proto, sv );
+		PyErr_Format(PyExc_NotImplementedError, "Unsupported socket type %d", type);
+		goto finally;
 	}
+	ret = uv_socketpair( type, proto, sv, UV_NONBLOCK_PIPE, UV_NONBLOCK_PIPE );
 	Py_END_ALLOW_THREADS
 
-		if( ret < 0 ) return set_error();
+	if( ret < 0 )
+	{
+		PyErr_FromUvErr(ret);
+		goto finally;
+	}
 
+	if( type == SOCK_STREAM )
+	{
+		auto handle = dup_uv_tcp_handle( sv[0] );
+		if( !handle )
+		{
+			goto finally;
+		}
+		if( !dup_uv_tcp_handle( sv[1] ) )
+		{
+			uv_close( reinterpret_cast<uv_handle_t*>( handle ), cleanup_uv_handle );
+			goto finally;
+		}
+	}
+	else if( type == SOCK_DGRAM )
+	{
+		auto handle = dup_uv_udp_handle( sv[0] );
+		if( !handle )
+		{
+			goto finally;
+		}
+		if( !dup_uv_udp_handle( sv[1] ) )
+		{
+			uv_close( reinterpret_cast<uv_handle_t*>( handle ), cleanup_uv_handle );
+			goto  finally;
+		}
+	}
+	else
+	{
+		PyErr_Format( PyExc_NotImplementedError, "Unsupported socket type: %d", type );
+	}
+
+#ifdef MS_WINDOWS
+	// PEP 446 states all newly created file descriptors should be non-inheritable https://peps.python.org/pep-0446/
+	// The Windows API creates non-inheritable handles by default, so we don't need to do anything here.
+#else
 	if( _Py_set_inheritable( sv[0], 0, atomic_flag_works ) < 0 )
 		goto finally;
 	if( _Py_set_inheritable( sv[1], 0, atomic_flag_works ) < 0 )
 		goto finally;
-
+#endif
 	s0 = new_sockobject( sv[0], family, type, proto );
 	if( s0 == NULL )
 		goto finally;
@@ -7121,7 +7162,6 @@ socketpair() function.\n\
 The arguments are the same as for socket() except the default family is\n\
 AF_UNIX if defined on the platform; otherwise, the default is AF_INET." );
 
-#endif /* HAVE_SOCKETPAIR */
 
 
 static PyObject*
@@ -8061,9 +8101,7 @@ static PyMethodDef socket_methods[] = {
 #ifndef NO_DUP
 	{ "dup", socket_dup, METH_O, dup_doc },
 #endif
-#ifdef HAVE_SOCKETPAIR
 	{ "socketpair", socket_socketpair, METH_VARARGS, socketpair_doc },
-#endif
 	{ "ntohs", socket_ntohs, METH_VARARGS, ntohs_doc },
 	{ "ntohl", socket_ntohl, METH_O, ntohl_doc },
 	{ "htons", socket_htons, METH_VARARGS, htons_doc },

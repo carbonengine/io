@@ -508,11 +508,10 @@ class SocketConnectedTest(ThreadedTCPSocketTest):
         self.serv_conn = None
         ThreadedTCPSocketTest.clientTearDown(self)
 
-class SocketPairTest(unittest.TestCase, ThreadableTest):
+class SocketPairTest(unittest.TestCase):
 
     def __init__(self, methodName='runTest'):
         unittest.TestCase.__init__(self, methodName=methodName)
-        ThreadableTest.__init__(self)
 
     def setUp(self):
         self.serv, self.cli = socket.socketpair()
@@ -520,14 +519,8 @@ class SocketPairTest(unittest.TestCase, ThreadableTest):
     def tearDown(self):
         self.serv.close()
         self.serv = None
-
-    def clientSetUp(self):
-        pass
-
-    def clientTearDown(self):
         self.cli.close()
         self.cli = None
-        ThreadableTest.clientTearDown(self)
 
 
 # The following classes are used by the sendmsg()/recvmsg() tests.
@@ -4279,23 +4272,17 @@ class BasicSocketPairTest(SocketPairTest):
         self.assertEqual(sock.type, socket.SOCK_STREAM)
         self.assertEqual(sock.proto, 0)
 
-    def _testDefaults(self):
-        self._check_defaults(self.cli)
-
     def testDefaults(self):
+        self._check_defaults(self.cli)
         self._check_defaults(self.serv)
 
     def testRecv(self):
+        self.cli.send(MSG)
         msg = self.serv.recv(1024)
         self.assertEqual(msg, MSG)
 
-    def _testRecv(self):
-        self.cli.send(MSG)
-
     def testSend(self):
         self.serv.send(MSG)
-
-    def _testSend(self):
         msg = self.cli.recv(1024)
         self.assertEqual(msg, MSG)
 
