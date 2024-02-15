@@ -99,6 +99,7 @@ set_target_properties(_select
         PROPERTIES
         DEBUG_POSTFIX ""
         INTERNAL_POSTFIX ""
+        OUTPUT_NAME select
 )
 get_target_property(_SOURCES _select SOURCES)
 source_group("_select" FILES
@@ -137,28 +138,13 @@ if(CMAKE_PROJECT_NAME STREQUAL io)
     endif()
 
     # Install rule to ensure that our runtime and linker files are in the expected, platform-specific folders
-#    install(
-#            TARGETS io
-#            EXPORT ioTarget
-#            CONFIGURATIONS ${CMAKE_CONFIGURATION_TYPES}
-#            LIBRARY DESTINATION lib/${CCP_PLATFORM}/${CCP_ARCHITECTURE}/${CCP_TOOLSET}/
-#            ARCHIVE DESTINATION lib/${CCP_PLATFORM}/${CCP_ARCHITECTURE}/${CCP_TOOLSET}/
-#            RUNTIME DESTINATION bin/${CCP_PLATFORM}/${CCP_ARCHITECTURE}/${CCP_TOOLSET}/
-#    )
-    # Install rule for available public headers
-#    install(FILES ${PUBLIC_HEADER_FILES} DESTINATION include)
+    install(
+            TARGETS _socket _ssl _select
+            EXPORT ioTarget
+            CONFIGURATIONS ${CMAKE_CONFIGURATION_TYPES}
+            LIBRARY DESTINATION lib/${CCP_PLATFORM}/${CCP_ARCHITECTURE}/${CCP_TOOLSET}/
+            ARCHIVE DESTINATION lib/${CCP_PLATFORM}/${CCP_ARCHITECTURE}/${CCP_TOOLSET}/
+            RUNTIME DESTINATION bin/${CCP_PLATFORM}/${CCP_ARCHITECTURE}/${CCP_TOOLSET}/
+    )
 
-#    configure_ccp_vendor_config_file(
-#            TARGET io
-#            DESTINATION "${CMAKE_CURRENT_BINARY_DIR}/ioConfig.cmake"
-#            DEPENDENCIES ""
-#    )
-#    install(FILES ${CMAKE_CURRENT_BINARY_DIR}/ioConfig.cmake DESTINATION .)
-
-    # Install python package
-#    install(DIRECTORY python/ DESTINATION io
-#            FILES_MATCHING
-#            PATTERN "*.py"
-#            PATTERN "package.yaml"
-#            )
 endif()
