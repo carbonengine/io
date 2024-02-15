@@ -5561,6 +5561,139 @@ socket.fromshare()." );
 
 #endif
 
+/* CCP Extensions begin */
+static PyObject *sock_recvpacketoob(PySocketSockObject *s, PyObject *args)
+{
+	if (!PyArg_ParseTuple(args, ":recvpacket"))
+		return nullptr;
+
+	PyErr_SetString(PyExc_NotImplementedError, "Not implemented");
+	return nullptr;
+}
+PyDoc_STRVAR( recvpacketoob_doc,
+			  "recvpacketoob()\n\
+\n\
+Recieve a single packet/oob data from the socket, which has been sent with\n\
+sendpacket. Returns a tuple (packet, oob, sequence) where 'oob' can be None\n\
+and 'sequence' is a continuously growing index representing the sequence\n\
+of packes received on the socket.");
+
+//Helper function to parse arguments to send function, taking into account that we may accept
+//a sequence instead of a string or buffer type thingy.
+//fmt1 is expected to start with "s*" while fmt2 should start with "O"
+int slsock_parse_send(PyObject *args, const char *fmt1, const char *fmt2, PyObject **obj, Py_buffer *buf, void *flags, void *addro)
+{
+	_ASSERT(fmt1[0] == 's' && fmt1[1] == '*');
+	_ASSERT(fmt2[0] == 'O');
+	if (!PyArg_ParseTuple(args, fmt1, buf, flags, addro)) {
+		PyErr_Clear();
+		if (!PyArg_ParseTuple(args, fmt2, obj, flags, addro))
+			return 0; //something weird
+
+		//ok, found an object
+		if (!PySequence_Check(*obj)) {
+			PyErr_SetString(PyExc_TypeError, "expected a string or sequence");
+			return 0;
+		}
+		//found a sequence
+	} else {
+		//found a Py_buffer object
+		*obj = nullptr;
+		// BUG WORKAROUND: Python doesn't incref the object if it didn't support the buffer interface!  We must do it here
+		// Remove the following three lines when python has been fixed.
+		if (!buf->obj) {
+			buf->obj = PyTuple_GET_ITEM(args, 0);
+			Py_INCREF(buf->obj);
+		}
+	}
+	return 1;
+}
+
+static PyObject *sock_sendpacket(PySocketSockObject *s, PyObject *args)
+{
+	Py_buffer pbuf;
+	PyObject *obj;
+	if (!slsock_parse_send(args, "s*:sendpacket", "O:sendpacket", &obj, &pbuf, 0, 0))
+		return nullptr;
+	PyErr_SetString(PyExc_NotImplementedError, "Not implemented");
+	return nullptr;
+}
+
+PyDoc_STRVAR(sendpacket_doc,
+			  "sendpacket(data)\n\
+\n\
+Send a packet to the socket, prepended with a simple internal header.\n\
+This calls send() repeatedly until all data is sent.\n\
+If an error occurs, it's impossible to tell how much data has been sent.");
+
+static PyObject *sock_setblockingsend(PySocketSockObject *s, PyObject *args)
+{
+	PyObject *o = nullptr, *result;
+	int newvalue, oldvalue;
+	if (!PyArg_ParseTuple(args, "|O:setblockingsend", &o))
+		return nullptr;
+	newvalue = o ? PyObject_IsTrue(o) : 0;
+
+	PyErr_SetString(PyExc_NotImplementedError, "Not implemented");
+	return nullptr;
+}
+PyDoc_STRVAR(setblockingsend_doc,
+			  "setblockingsend(flag)\n\
+\n\
+Sets or clears the blocking send flag on the stackless socket.\n\
+When clear, send operations return immediately withoug blocking, \n\
+but then no return values are available.\n\
+Returns the old value of the flag.  Call with no arguments to query..");
+
+static PyObject *sock_getstats(PySocketSockObject *s)
+{
+	PyErr_SetString(PyExc_NotImplementedError, "Not implemented");
+	return nullptr;
+}
+
+PyDoc_STRVAR(getstats_doc,
+			  "getstats()\n\
+\n\
+Return usage statsistics on the socket");
+
+static PyObject *sock_setzerobytereads(PySocketSockObject *s, PyObject *args)
+{
+
+	PyObject *o = nullptr, *result;
+	int newvalue, oldvalue;
+	if (!PyArg_ParseTuple(args, "|O:setzerobytereads", &o))
+		return nullptr;
+	newvalue = o ? PyObject_IsTrue(o) : 0;
+	PyErr_SetString(PyExc_NotImplementedError, "Not implemented");
+	return nullptr;
+
+}
+PyDoc_STRVAR(setzerobytereads_doc,
+			  "setzerobytereads(flag)\n\
+\n\
+Sets or clears the flag for the use of zero byte reads.\n\
+This can be used to handle a high number of connections\n\
+on windows.\n\
+The default is true.  Call with no arguments to query..");
+
+static PyObject* sock_setmaxpacketsize(PySocketSockObject *s, PyObject *args)
+{
+	int oldvalue, newvalue = -1;
+	if (!PyArg_ParseTuple(args, "|i:setmaxpacketsize", &newvalue))
+		return nullptr;
+
+	PyErr_SetString(PyExc_NotImplementedError, "Not implemented");
+	return nullptr;
+}
+PyDoc_STRVAR(setmaxpacketsize_doc,
+			  "setmaxpacketsize(length)\n\
+\n\
+Sets the maximum datasize sent or received with sendpacket\n\
+and recvpacket.  Returns the old value.\n\
+The default is 1Mb.  Call with no arguments to query..");
+
+/* CCP Extensions end */
+
 /* List of methods for socket objects */
 
 static PyMethodDef sock_methods[] = {
@@ -5609,6 +5742,12 @@ static PyMethodDef sock_methods[] = {
 #ifdef HAVE_SOCKADDR_ALG
 	{ "sendmsg_afalg", (PyCFunction)(void ( * )( void ))sock_sendmsg_afalg, METH_VARARGS | METH_KEYWORDS, sendmsg_afalg_doc },
 #endif
+	{"recvpacketoob", (PyCFunction)sock_recvpacketoob, METH_VARARGS, recvpacketoob_doc},
+	{"sendpacket", (PyCFunction)sock_sendpacket, METH_VARARGS, sendpacket_doc},
+	{"setblockingsend", (PyCFunction)sock_setblockingsend, METH_VARARGS, setblockingsend_doc},
+	{"getstats", (PyCFunction)sock_getstats, METH_NOARGS, getstats_doc },
+	{"setzerobytereads", (PyCFunction)sock_setzerobytereads, METH_VARARGS, setzerobytereads_doc},
+	{"setmaxpacketsize", (PyCFunction)sock_setmaxpacketsize, METH_VARARGS, setmaxpacketsize_doc},
 	{ NULL, NULL } /* sentinel */
 };
 
