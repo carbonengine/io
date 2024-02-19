@@ -695,14 +695,22 @@ static PyObject*
 #include <BluePyCpp.h>
 #include <carbonio.h>
 
-bool is_managed_by_libuv( int sock_type )
+bool is_managed_by_libuv( int sock_type, int family )
 {
-	return ( sock_type == SOCK_DGRAM || sock_type == SOCK_STREAM );
+	if ( sock_type == SOCK_DGRAM ) {
+		return true;
+	}
+
+	if ( sock_type == SOCK_STREAM ) {
+		return family == AF_INET || family == AF_INET6;
+	}
+
+	return false;
 }
 
 bool is_managed_by_libuv( PySocketSockObject* s )
 {
-    return is_managed_by_libuv( s->sock_type ) && ( s->sock_timeout != 0 );
+    return is_managed_by_libuv( s->sock_type, s->sock_family ) && ( s->sock_timeout != 0 );
 }
 
 /* Function to perform the setting of socket blocking mode
@@ -3404,7 +3412,7 @@ static PyObject*
 		// the socket was originally created before being put into non-blocking
 		// mode. Therefore, just check if the socket type is supposed to be
 		// managed by libuv, instead of the socket object itself.
-		if( is_managed_by_libuv( s->sock_type ) )
+		if( is_managed_by_libuv( s->sock_type, s->sock_family ) )
 		{
 			if (!is_valid_uv_handle(s->uv_handle))
 			{
@@ -5967,7 +5975,7 @@ static int
 			proto = 0;
 #endif
 			s->uv_handle = nullptr;
-			if( is_managed_by_libuv( type ) )
+			if( is_managed_by_libuv( type, family ) )
 			{
 				auto loop = get_uv_loop();
 				if( !loop )
@@ -6016,23 +6024,26 @@ static int
 		{
 			proto = 0;
 		}
-		if( type == SOCK_STREAM )
+		if ( is_managed_by_libuv( type, family ))
 		{
-			auto handle = create_uv_tcp_handle(&fd, family);
-			if( !handle )
+			if( type == SOCK_STREAM )
 			{
-				return -1;
+				 auto handle = create_uv_tcp_handle( &fd, family );
+				 if( !handle )
+				 {
+					 return -1;
+				 }
+				 s->uv_handle = reinterpret_cast<uv_handle_t*>( handle );
 			}
-			s->uv_handle = reinterpret_cast<uv_handle_t*>(handle);
-		}
-		else if( type == SOCK_DGRAM )
-		{
-			auto handle = create_uv_udp_handle(&fd, family);
-			if( !handle )
+			else if( type == SOCK_DGRAM )
 			{
-				return -1;
+				 auto handle = create_uv_udp_handle( &fd, family );
+				 if( !handle )
+				 {
+					 return -1;
+				 }
+				 s->uv_handle = reinterpret_cast<uv_handle_t*>( handle );
 			}
-			s->uv_handle = reinterpret_cast<uv_handle_t*>(handle);
 		}
 		else
 		{
@@ -6116,7 +6127,7 @@ static int
 			s->sock_fd = fd;
 			s->uv_handle = nullptr;
 			uv_walk( get_uv_loop(), find_handle_for_fd, (void*)s );
-			if ( ! s->uv_handle )
+			if ( ! s->uv_handle && is_managed_by_libuv( type, family ) )
 			{
 				if( type == SOCK_STREAM )
 				{
@@ -6783,30 +6794,15 @@ static PyObject*
 #else
 	type = SOCK_STREAM;
 #endif
-	if( is_managed_by_libuv( type ) )
+
+	PySocketSockObject s;
+	s.sock_fd = fd;
+	s.uv_handle = nullptr;
+	uv_walk( get_uv_loop(), find_handle_for_fd, &s );
+	if( s.uv_handle && !uv_is_closing( s.uv_handle ) )
 	{
-		if ( fd == INVALID_SOCKET )
-		{
-			errno = EBADF;
-			res = -1;
-		}
-		else
-		{
-			PySocketSockObject s;
-			s.sock_fd = fd;
-			s.uv_handle = nullptr;
-			uv_walk( get_uv_loop(), find_handle_for_fd, &s );
-			if( s.uv_handle && !uv_is_closing( s.uv_handle ) )
-			{
-				uv_close( s.uv_handle, cleanup_uv_handle );
-				res = 0;
-			}
-			else
-			{
-				errno = EBADF;
-				res = -1;
-			}
-		}
+		  uv_close( s.uv_handle, cleanup_uv_handle );
+		  res = 0;
 	} else {
         Py_BEGIN_ALLOW_THREADS
         res = SOCKETCLOSE( fd );
@@ -6968,7 +6964,35 @@ static PyObject*
 	type = SOCK_STREAM;
 #endif
 
-	if( is_managed_by_libuv( type ) )
+	int family = -1;
+	/* validate that passed file descriptor is valid and a socket. */
+	sock_addr_t addrbuf;
+	socklen_t addrlen = sizeof( sock_addr_t );
+
+	memset( &addrbuf, 0, addrlen );
+	if( getsockname( fd, SAS2SA( &addrbuf ), &addrlen ) == 0 )
+	{
+		 family = SAS2SA( &addrbuf )->sa_family;
+	}
+	else
+	{
+#ifdef MS_WINDOWS
+		/* getsockname() on an unbound socket is an error on Windows.
+			   Invalid descriptor and not a socket is same error code.
+			   Error out if family must be resolved, or bad descriptor. */
+		if( CHECK_ERRNO( ENOTSOCK ) )
+		{
+#else
+		/* getsockname() is not supported for SOL_ALG on Linux. */
+		if( CHECK_ERRNO( EBADF ) || CHECK_ERRNO( ENOTSOCK ) )
+		{
+#endif
+			set_error();
+			return nullptr;
+		}
+	}
+
+	if( is_managed_by_libuv( type, family ) )
 	{
 		if( type == SOCK_STREAM )
 		{
@@ -7082,7 +7106,7 @@ static PyObject*
 	}
 	else
 #endif
-	if( !is_managed_by_libuv(type) )
+	if( !is_managed_by_libuv(type, family) )
 	{
 		PyErr_Format(PyExc_NotImplementedError, "Unsupported socket type %d", type);
 		goto finally;
