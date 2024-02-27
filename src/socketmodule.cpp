@@ -5628,14 +5628,34 @@ If an error occurs, it's impossible to tell how much data has been sent.");
 
 static PyObject *sock_setblockingsend(PySocketSockObject *s, PyObject *args)
 {
-	PyObject *o = nullptr, *result;
-	int newvalue, oldvalue;
+	PyObject *o{nullptr};
+	if( !s->uv_handle )
+	{
+		PyErr_SetString(PyExc_ValueError, "Cannot call setblockingsend on non-uv-managed socket");
+		return nullptr;
+	}
+
 	if (!PyArg_ParseTuple(args, "|O:setblockingsend", &o))
 		return nullptr;
-	newvalue = o ? PyObject_IsTrue(o) : 0;
-
-	PyErr_SetString(PyExc_NotImplementedError, "Not implemented");
-	return nullptr;
+	bool& blockingSend = reinterpret_cast<HandleData*>( s->uv_handle->data )->blockingSend;
+	bool ret{blockingSend};
+	if( o )
+	{
+		int val = PyObject_IsTrue(o);
+		if( val == -1 )
+		{
+			return nullptr;
+		}
+		blockingSend = ( val == 1 );
+	}
+	if( ret )
+	{
+		Py_RETURN_TRUE;
+	}
+	else
+	{
+		Py_RETURN_FALSE;
+	}
 }
 PyDoc_STRVAR(setblockingsend_doc,
 			  "setblockingsend(flag)\n\

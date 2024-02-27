@@ -1847,6 +1847,18 @@ class GeneralModuleTests(unittest.TestCase):
                     fileno=afile.fileno())
             self.assertEqual(cm.exception.errno, errno.ENOTSOCK)
 
+    def test_setblockingsend(self):
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.assertFalse(s.setblockingsend(True))
+        self.assertTrue(s.setblockingsend())
+        self.assertTrue(s.setblockingsend(False))
+        self.assertFalse(s.setblockingsend())
+
+        if hasattr(socket, "AF_UNIX"):
+            with self.assertRaises(ValueError):
+                q = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+                q.setblockingsend()
+
 
 @unittest.skipUnless(HAVE_SOCKET_CAN, 'SocketCan required for this test.')
 class BasicCANTest(unittest.TestCase):
