@@ -1859,6 +1859,13 @@ class GeneralModuleTests(unittest.TestCase):
                 q = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
                 q.setblockingsend()
 
+    def test_setmaxpacketsize(self):
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.assertEqual(1024*1024, s.setmaxpacketsize(512))
+        self.assertEqual(512, s.setmaxpacketsize())
+        self.assertEqual(512, s.setmaxpacketsize(128))
+        self.assertEqual(128, s.setmaxpacketsize())
+
 
 @unittest.skipUnless(HAVE_SOCKET_CAN, 'SocketCan required for this test.')
 class BasicCANTest(unittest.TestCase):

@@ -44,6 +44,7 @@ struct HandleData
 	ssize_t bufReadPos{0};
 	ssize_t bufWritePos{0};
 	bool blockingSend{false};
+	size_t maxPacketSize{1024*1024}; //one megabyte
 };
 
 enum ChannelPreference : int {

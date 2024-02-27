@@ -5695,12 +5695,29 @@ The default is true.  Call with no arguments to query..");
 
 static PyObject* sock_setmaxpacketsize(PySocketSockObject *s, PyObject *args)
 {
-	int oldvalue, newvalue = -1;
-	if (!PyArg_ParseTuple(args, "|i:setmaxpacketsize", &newvalue))
+	PyObject *o{nullptr};
+	if( !s->uv_handle )
+	{
+		PyErr_SetString(PyExc_ValueError, "Cannot call setmaxpacketsize on non-uv-managed socket");
 		return nullptr;
+	}
 
-	PyErr_SetString(PyExc_NotImplementedError, "Not implemented");
-	return nullptr;
+	if (!PyArg_ParseTuple(args, "|O:setmaxpacketsize", &o))
+	{
+		return nullptr;
+	}
+	size_t& maxPacketSize = reinterpret_cast<HandleData*>( s->uv_handle->data )->maxPacketSize;
+	size_t ret{maxPacketSize};
+	if( o )
+	{
+		size_t val = PyLong_AsSize_t(o);
+		if( PyErr_Occurred() )
+		{
+			return nullptr;
+		}
+		maxPacketSize = val;
+	}
+	return PyLong_FromSize_t(ret);
 }
 PyDoc_STRVAR(setmaxpacketsize_doc,
 			  "setmaxpacketsize(length)\n\
