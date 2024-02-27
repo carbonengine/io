@@ -5678,16 +5678,13 @@ Return usage statsistics on the socket");
 
 static PyObject *sock_setzerobytereads(PySocketSockObject *s, PyObject *args)
 {
-
-	PyObject *o = nullptr, *result;
-	int newvalue, oldvalue;
-	if (!PyArg_ParseTuple(args, "|O:setzerobytereads", &o))
-		return nullptr;
-	newvalue = o ? PyObject_IsTrue(o) : 0;
-	PyErr_SetString(PyExc_NotImplementedError, "Not implemented");
-	return nullptr;
-
+	// This functionality is no longer required since we use libUV.
+	// References to this method should eventually get
+	// cleaned up from the Python code and then from here.
+	PyErr_WarnEx(PyExc_DeprecationWarning, "socket.setzerobytereads no longer has any effect.", 2);
+	Py_RETURN_TRUE;
 }
+
 PyDoc_STRVAR(setzerobytereads_doc,
 			  "setzerobytereads(flag)\n\
 \n\
