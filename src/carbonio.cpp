@@ -132,18 +132,16 @@ void SetTimeoutErrorType(PyObject* value)
 
 IRequest::IRequest( PySocketSockObject* socket ) : m_handle( socket->uv_handle ), m_timeout_nanoseconds(socket->sock_timeout)
 {
-	auto* data = reinterpret_cast<HandleData*>(m_handle->data);
-	m_channel = data->channel;
-	Py_IncRef( reinterpret_cast<PyObject*>( m_channel ) );
-	data->request = this;
+	handleData()->request.reset(this);
+	m_self = handleData()->request;
 }
 
 void IRequest::sendError(std::string_view msg)
 {
 	PyObject *exc, *val, *tb;
 	PyErr_Fetch( &exc, &val, &tb );
-	PyChannel_SetPreference(channel(), PREFER_SENDER );
-	auto ret = PyChannel_SendThrow( channel(), exc, val, tb);
+	PyChannel_SetPreference(handleData()->channel, PREFER_SENDER );
+	auto ret = PyChannel_SendThrow( handleData()->channel, exc, val, tb);
 	if( ret < 0 )
 	{
 		PyErr_Restore( exc, val, tb );
@@ -212,34 +210,34 @@ void IRequest::clearTimeout()
 }
 
 
-PyObject* StreamRecvRequest::receive()
+PyObject* StreamRecvRequest::execute()
 {
-	auto ret = startTimeout();
-	if( ret != Py_None )
-	{
-		return nullptr;
-	}
-	auto* data = reinterpret_cast<HandleData*>(m_handle->data);
+	auto* data = handleData();
 
 	auto bufferedAmount = data->bufWritePos - data->bufReadPos;
 
 	if ( m_requested_len > bufferedAmount )
 	{
+		auto ret = startTimeout();
+		if( ret != Py_None )
+		{
+			return nullptr;
+		}
 		auto status = startRead();
 		if( status < 0 )
 		{
 			PyErr_FromUvErr( status );
 			return nullptr;
 		}
-		auto sentinel = PyChannel_Receive( channel() );
+		auto sentinel = PyChannel_Receive( data->channel );
 		if( !sentinel )
 		{
 			return nullptr;
 		}
 	}
 	data->bufWritePos += m_received_len;
-	ret = constructResult( data );
-	return ret;
+
+	return constructResult( data );
 }
 
 PyObject* StreamRecvRequest::constructResult( HandleData* data ) const
@@ -251,20 +249,23 @@ PyObject* StreamRecvRequest::constructResult( HandleData* data ) const
 	return ret;
 }
 
-void StreamRecvRequest::onReceive( ssize_t nread, const uv_buf_t* buf )
+void StreamRecvRequest::onCallback( ICallbackParams* callbackParams )
 {
+	auto params = dynamic_cast<StreamRecvRequest::Params*>(callbackParams);
+	ssize_t nread = params->nread;
 	Ccp::PyGilEnsure gil;
 	if( nread == 0 ) {
 		return;
 	}
-	PyChannel_SetPreference(channel(), PREFER_SENDER );
+	ON_BLOCK_EXIT( [&] { clearTimeout(); finalize();} );
+	PyChannel_SetPreference(handleData()->channel, PREFER_SENDER );
 	if ( nread < 0 ) {
 		if (nread != UV_EOF) {
 			PyErr_FromUvErr( int( nread ) );
 			sendError("OnReceive failed to read data.");
 		}
 		else {
-			if ( PyChannel_Send( channel(), Py_None ) < 0 ) {
+			if ( PyChannel_Send( handleData()->channel, Py_None ) < 0 ) {
 				PyWriteUnraisable( "StreamRecvRequest::onReceive failed to signal sentinel" );
 			}
 		}
@@ -272,7 +273,7 @@ void StreamRecvRequest::onReceive( ssize_t nread, const uv_buf_t* buf )
 	if ( nread > 0 ) {
 		m_received_len += nread;
 		uv_read_stop( handle() );
-		if ( PyChannel_Send( channel(), Py_None ) < 0 ) {
+		if ( PyChannel_Send( handleData()->channel, Py_None ) < 0 ) {
 			PyWriteUnraisable( "StreamRecvRequest::onReceive failed to signal sentinel" );
 		}
 	}
@@ -312,8 +313,6 @@ void StreamRecvRequest::alloc(uv_handle_t* handle, size_t size, uv_buf_t* buf)
 	// Scenario 3: We have a buffer with unread data. How much space
 	// do we have left in the buffer? If it's very little, we should
 	// provide more space.
-	auto _this = reinterpret_cast<StreamRecvRequest*>(data->request);
-
 	auto remainingBytes = handleBuf.len - data->bufWritePos;
 	if( remainingBytes > 0 )
 	{
@@ -366,16 +365,22 @@ void StreamRecvRequest::readCallback( uv_stream_t* client, ssize_t nread, const 
 	auto* data = reinterpret_cast<HandleData*>( client->data );
 	if( data->request )
 	{
-		auto _this = reinterpret_cast<StreamRecvRequest*>( data->request );
-		_this->onReceive( nread, buf );
+		auto _this = reinterpret_cast<StreamRecvRequest*>( data->request.get() );
+		auto params = std::make_unique<StreamRecvRequest::Params>(nread, buf);
+		_this->onCallback( params.get() );
 	}
 }
+
 void StreamRecvRequest::cancel()
 {
 	uv_read_stop( handle() );
-	if( PyChannel_Send( channel(), Py_None ) < 0 )
+	// Check the balance, as this could be called after the request has finished executing.
+	if( PyChannel_GetBalance( handleData()->channel ) < 0 )
 	{
-		PyWriteUnraisable( "StreamRecvRequest::cancel failed to signal sentinel" );
+		if( PyChannel_Send( handleData()->channel, Py_None ) < 0 )
+		{
+			PyWriteUnraisable( "StreamRecvRequest::cancel failed to signal sentinel" );
+		}
 	}
 	IRequest::cancel();
 }
@@ -389,50 +394,49 @@ int StreamRecvRequest::startRead()
 	return uv_read_start( handle(), StreamRecvRequest::alloc, StreamRecvRequest::readCallback );
 }
 
-PyObject* StreamSendRequest::send()
+PyObject* StreamSendRequest::execute()
 {
 	if ( ! startTimeout() )
 	{
 		return nullptr;
 	}
-	uv_write_t* request = new uv_write_t;
-	constexpr int NUM_BUFFERS = 1;
-	auto* bufferarray = new std::array<uv_buf_t, NUM_BUFFERS>;
-	bufferarray->data()->len = ULONG( m_len );
-	bufferarray->data()->base = m_buf;
-	int status = uv_write(request, handle(), bufferarray->data(), NUM_BUFFERS, StreamSendRequest::sendCallback );
+	m_writeRequest.data = this;
+	int status = uv_write(&m_writeRequest, handle(), &m_sendBuffer, 1, StreamSendRequest::sendCallback );
 	if( status < 0 ){
-		delete bufferarray;
-		delete request;
 		return PyLong_FromLong(status);
 	}
-	auto ret = PyChannel_Receive(channel() );
-	delete bufferarray;
-	delete request;
-	return ret;
+
+	if( handleData()->blockingSend )
+	{
+		return PyChannel_Receive( handleData()->channel );
+	}
+	return PyLong_FromLong(0);
 }
 
 void StreamSendRequest::sendCallback( uv_write_t* request, int status )
 {
-	auto* data = reinterpret_cast<HandleData*>( request->handle->data );
-	if( data->request )
-	{
-		auto _this = reinterpret_cast<StreamSendRequest*>( data->request );
-		_this->onSend( status );
-	}
+	auto *_this = reinterpret_cast<StreamSendRequest*>( request->data );
+	auto params = std::make_unique<StreamSendRequest::Params>( status );
+	_this->onCallback( params.get() );
 }
 
-void StreamSendRequest::onSend( int status )
+void StreamSendRequest::onCallback( ICallbackParams* callbackParams )
 {
+	ON_BLOCK_EXIT( [&] { clearTimeout(); finalize();} );
+	auto *params = dynamic_cast<StreamSendRequest::Params*>(callbackParams);
 	Ccp::PyGilEnsure gil;
-	auto py_status = PyLong_FromLong(status);
+
+	auto py_status = PyLong_FromLong(params->status);
 	if( !py_status ){
 		sendError("StreamSendRequest::send Failed to convert status to python int");
 		return;
 	}
-	if( PyChannel_Send( channel(), py_status ) < 0 )
+	if( handleData()->blockingSend )
 	{
-		PyWriteUnraisable("StreamSendRequest::send Failed to send status over channel");
+		if( PyChannel_Send( handleData()->channel, py_status ) < 0 )
+		{
+			PyWriteUnraisable( "StreamSendRequest::send Failed to send status over channel" );
+		}
 	}
 }
 
@@ -448,7 +452,7 @@ void SendError(PyChannelObject* channel, std::string_view msg)
 	}
 }
 
-PyObject* UdpRecvRequest::receive()
+PyObject* UdpRecvRequest::execute()
 {
 	auto ret = startTimeout();
 	if( ret != Py_None )
@@ -463,7 +467,7 @@ PyObject* UdpRecvRequest::receive()
 		return nullptr;
 	}
 
-	auto sentinel = PyChannel_Receive( channel() );
+	auto sentinel = PyChannel_Receive( handleData()->channel );
 	if( !sentinel )
 	{
 		return nullptr;
@@ -477,8 +481,9 @@ void UdpRecvRequest::receiveCallback( uv_udp_t* handle, ssize_t nread, const uv_
 	auto* data = reinterpret_cast<HandleData*>( handle->data );
 	if( data->request )
 	{
-		auto _this = reinterpret_cast<UdpRecvRequest*>( data->request );
-		_this->onRead( handle, nread, buf, addr, flags );
+		auto _this = reinterpret_cast<UdpRecvRequest*>( data->request.get() );
+		auto params = std::make_unique<UdpRecvRequest::Params>( nread, buf, addr, flags );
+		_this->onCallback( params.get() );
 	}
 }
 
@@ -512,9 +517,16 @@ static PyObject*
 }
 #endif
 
-void UdpRecvRequest::onRead( uv_udp_t* handle, ssize_t nread, const uv_buf_t* buf, const struct sockaddr* addr, unsigned int flags )
+void UdpRecvRequest::onCallback( ICallbackParams* callbackParams )
 {
+	auto params = static_cast<UdpRecvRequest::Params*>(callbackParams);
+	ssize_t nread = params->nread;
+	const uv_buf_t* buf = params->buf;
+	const struct sockaddr* addr = params->addr;
+	unsigned flags = params->flags;
+
 	auto bufferGuard = MakeGuard([&] {delete buf;});
+	auto requestGuard = MakeGuard([&] { finalize();});
 	if ( nread < 0 )
 	{
 		PyErr_FromUvErr( int( nread ) );
@@ -571,7 +583,7 @@ void UdpRecvRequest::onRead( uv_udp_t* handle, ssize_t nread, const uv_buf_t* bu
 
 	// no more data, let's signal that we're done
 	if (nread == 0) {
-		if ( PyChannel_Send( channel(), Py_None ) < 0 )
+		if ( PyChannel_Send( handleData()->channel, Py_None ) < 0 )
 		{
 			PyWriteUnraisable( "UdpRecvRequest::onRead failed sending sentinel value on channel" );
 			return;
@@ -580,6 +592,7 @@ void UdpRecvRequest::onRead( uv_udp_t* handle, ssize_t nread, const uv_buf_t* bu
 
 	if ( ! ( flags & UV_UDP_MMSG_CHUNK ) ) {
 		bufferGuard.Dismiss();
+		requestGuard.Dismiss();
 	}
 }
 
@@ -592,29 +605,29 @@ void UdpRecvRequest::onTimeout()
 void UdpRecvRequest::cancel()
 {
 	uv_udp_recv_stop( handle() );
-	if( PyChannel_Send( channel(), Py_None ) < 0 )
+	// Check the balance, as this could be called
+	// after the request has finished executing.
+	if( PyChannel_GetBalance( handleData()->channel ) < 0 )
 	{
-		PyWriteUnraisable( "UdpRecvRequest::cancel failed sending sentinel value on channel" );
+		if( PyChannel_Send( handleData()->channel, Py_None ) < 0 )
+		{
+			PyWriteUnraisable( "UdpRecvRequest::cancel failed sending sentinel value on channel" );
+		}
 	}
 	IRequest::cancel();
 }
 
-PyObject* UdpSendRequest::send()
+PyObject* UdpSendRequest::execute()
 {
 	auto* request = new uv_udp_send_t;
 	ON_BLOCK_EXIT( [&] { delete request; } );
 
-	constexpr int NUM_BUFFERS = 1;
-	auto bufferarray = new std::array<uv_buf_t, NUM_BUFFERS>{};
-	bufferarray->front() = uv_buf_init(m_buf, m_len);
-	ON_BLOCK_EXIT( [&] { delete bufferarray; } );
-
-	int status = uv_udp_send( request, handle(), bufferarray->data(), NUM_BUFFERS, m_addr, UdpSendRequest::sendCallback );
+	int status = uv_udp_send( &m_writeRequest, handle(), &m_sendBuffer, 1, m_addr, UdpSendRequest::sendCallback );
 	if( status < 0 )
 	{
 		return PyLong_FromLong( status );
 	}
-	auto ret = PyChannel_Receive( channel() );
+	auto ret = PyChannel_Receive( handleData()->channel );
 	status = PyLong_AsLong( ret );
 	if ( status < 0 ) {
 		if( !( status == -1 && PyErr_Occurred() ) )
@@ -623,7 +636,7 @@ PyObject* UdpSendRequest::send()
 		}
 		return nullptr;
 	}
-	ret = PyLong_FromSsize_t(m_len);
+	ret = PyLong_FromSsize_t(m_sendBuffer.len);
 	return ret;
 }
 
@@ -632,34 +645,40 @@ void UdpSendRequest::sendCallback( uv_udp_send_t* request, int status )
 	auto* data = reinterpret_cast<HandleData*>( request->handle->data );
 	if( data->request )
 	{
-		auto _this = reinterpret_cast<UdpSendRequest*>( data->request );
-		_this->onSend( status );
+		auto _this = reinterpret_cast<UdpSendRequest*>( data->request.get() );
+		auto params = std::make_unique<UdpSendRequest::Params>( status );
+		_this->onCallback( params.get() );
 	}
 }
 
-void UdpSendRequest::onSend( int status )
+void UdpSendRequest::onCallback( ICallbackParams* callbackParams )
 {
-	auto py_status = PyLong_FromLong( status );
+	ON_BLOCK_EXIT( [&] { finalize();} );
+	auto *params = dynamic_cast<UdpSendRequest::Params*>(callbackParams);
+	auto py_status = PyLong_FromLong( params->status );
 	if( !py_status )
 	{
 		sendError( "UdpSendRequest::send Failed to convert status to python int" );
 		return;
 	}
-	if( PyChannel_Send( channel(), py_status ) < 0 )
+	if( PyChannel_Send( handleData()->channel, py_status ) < 0 )
 	{
 		PyWriteUnraisable( "UdpSendRequest::send Failed to send status over channel" );
 	}
 }
 
-PyObject* StreamAcceptRequest::accept()
+PyObject* StreamAcceptRequest::execute()
 {
+	ON_BLOCK_EXIT( [this] { clearTimeout(); finalize(); } );
+
 	auto result = startTimeout();
 	if( result != Py_None )
 	{
 		return nullptr;
 	}
 
-	result = PyChannel_Receive( channel() );
+	result = PyChannel_Receive( handleData()->channel );
+
 	if( !result )
 	{
 		return nullptr;
@@ -698,7 +717,7 @@ int StreamRecvIntoRequest::startRead()
 void StreamRecvIntoRequest::alloc( uv_handle_t* handle, size_t size, uv_buf_t* buf )
 {
 	auto* data = reinterpret_cast<HandleData*>(handle->data);
-	auto* request = reinterpret_cast<StreamRecvIntoRequest*>(data->request);
+	auto* request = reinterpret_cast<StreamRecvIntoRequest*>(data->request.get());
 
 	buf->base = request->m_buf;
 	buf->len = ULONG( request->m_requested_len );
@@ -731,16 +750,18 @@ StreamConnectRequest::StreamConnectRequest( PySocketSockObject* socket, struct s
 {
 }
 
-PyObject* StreamConnectRequest::connect() {
+PyObject* StreamConnectRequest::execute()
+{
 	auto* connect = new uv_connect_t;
-	ON_BLOCK_EXIT( [&] { delete connect; } );
+	ON_BLOCK_EXIT( [&connect] { delete connect; } );
+	Py_XDECREF(startTimeout());
 	int status = uv_tcp_connect(connect, reinterpret_cast<uv_tcp_t*>( handle() ), m_address, &StreamConnectRequest::connectCallback);
 	if ( status < 0 )
 	{
 		PyErr_FromUvErr( status );
 		return nullptr;
 	}
-	PyObject* connect_status = PyChannel_Receive(channel());
+	PyObject* connect_status = PyChannel_Receive(handleData()->channel);
 	if( connect_status == nullptr ) {
 		return nullptr;
 	}
@@ -759,20 +780,23 @@ PyObject* StreamConnectRequest::connect() {
 
 void StreamConnectRequest::connectCallback( uv_connect_t* connection, int status )
 {
-	auto _this = reinterpret_cast<StreamConnectRequest*>(reinterpret_cast<HandleData*>(connection->handle->data)->request);
-	_this->onConnect( status );
+	auto _this = reinterpret_cast<StreamConnectRequest*>(reinterpret_cast<HandleData*>(connection->handle->data)->request.get());
+	auto params = std::make_unique<StreamConnectRequest::Params>( status );
+	_this->onCallback( params.get() );
 }
 
-void StreamConnectRequest::onConnect( int status )
+void StreamConnectRequest::onCallback( ICallbackParams* callbackParams )
 {
+	ON_BLOCK_EXIT( [this] { clearTimeout(); finalize();} );
 	Ccp::PyGilEnsure gil;
+	auto *params = dynamic_cast<StreamConnectRequest::Params*>(callbackParams);
 
-	auto py_status = PyLong_FromLong( status );
+	auto py_status = PyLong_FromLong( params->status );
 	if( py_status == nullptr )
 	{
 		PyObject *exc, *val, *tb;
 		PyErr_Fetch( &exc, &val, &tb );
-		auto ret = PyChannel_SendThrow( channel(), exc, val, tb );
+		auto ret = PyChannel_SendThrow( handleData()->channel, exc, val, tb );
 		if( ret < 0 )
 		{
 			PyErr_Restore( exc, val, tb );
@@ -780,7 +804,7 @@ void StreamConnectRequest::onConnect( int status )
 		}
 		return;
 	}
-	int ret = PyChannel_Send( channel(), py_status );
+	int ret = PyChannel_Send( handleData()->channel, py_status );
 	if( ret < 0 )
 	{
 		PyWriteUnraisable( "StreamConnectRequest::onConnect failed to send status" );

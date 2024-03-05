@@ -2811,8 +2811,7 @@ static PyObject*
         }
 	    else {
 			auto* request = new StreamAcceptRequest( s );
-			ON_BLOCK_EXIT( [&] { delete request; } );
-			auto result = request->accept();
+			auto result = request->execute();
 			if( !result )
 			{
 				goto finally;
@@ -3328,6 +3327,7 @@ void on_accept(uv_stream_t *handle, int status)
 		SendError(channel, "on_accept: uv_accept failed");
 		return;
 	}
+	client->close_cb = nullptr;
 	SOCKET_T newfd;
 	status = uv_fileno( reinterpret_cast<const uv_handle_t*>( client ), reinterpret_cast<uv_os_fd_t*>( &newfd ) );
 	if( status < 0 )
@@ -3592,8 +3592,7 @@ static PyObject*
 		}
 
 		auto* request = new StreamConnectRequest( s, SAS2SA( &addrbuf ) );
-		ON_BLOCK_EXIT( [&] { delete request; } );
-		return request->connect();
+		return request->execute();
 	}
 	else
 	{
@@ -3832,8 +3831,7 @@ static PyObject* uv_tcp_recv_impl( PySocketSockObject* s, Py_ssize_t recvlen, in
 	if( s->sock_fd != INVALID_SOCKET && is_valid_uv_handle( s->uv_handle ) )
 	{
 		auto* request = new StreamRecvRequest( s, recvlen, flags );
-		buf = request->receive();
-		delete request;
+		buf = request->execute();
 	}
 	else
 	{
@@ -3849,8 +3847,7 @@ static PyObject* uv_udp_recv_impl( PySocketSockObject* s, Py_ssize_t recvlen, in
 	if ( s->sock_fd != INVALID_SOCKET && is_valid_uv_handle( s->uv_handle ) )
 	{
 		auto request = new UdpRecvRequest( s, recvlen, flags );
-		tup = request->receive();
-		delete request;
+		tup = request->execute();
 	} else
 	{
 		errno = EBADF;
@@ -3980,8 +3977,7 @@ static PyObject*
 		if( s->sock_type == SOCK_STREAM )
 		{
 			auto* request = new StreamRecvIntoRequest(s, buf, recvlen, flags);
-			PyObject* bytesReceived = request->receive();
-			delete request;
+			PyObject* bytesReceived = request->execute();
 			if( !bytesReceived )
 			{
 				PyBuffer_Release(&pbuf);
@@ -4228,8 +4224,7 @@ static PyObject*
 		if( s->sock_type == SOCK_STREAM )
 		{
 			auto* request = new StreamRecvIntoRequest(s, buf, recvlen, flags);
-			PyObject* bytesReceived = request->receive();
-			delete request;
+			PyObject* bytesReceived = request->execute();
 			if( !bytesReceived )
 			{
 				PyBuffer_Release(&pbuf);
@@ -4642,8 +4637,7 @@ static int
 PyObject* uv_sendall_impl(PySocketSockObject* s, char* buf, Py_ssize_t len, int flags)
 {
 	auto* request = new StreamSendRequest(s, buf, len, flags);
-	auto status = request->send();
-	delete request;
+	auto status = request->execute();
 	return status;
 }
 
@@ -4840,7 +4834,7 @@ static int
 PyObject* uv_udp_sendto_impl( PySocketSockObject* socket, struct sock_sendto* ctx )
 {
 	auto request = new UdpSendRequest( socket, ctx->buf, ctx->len, SAS2SA( ctx->addrbuf ), ctx->addrlen, ctx->flags );
-	return request->send();
+	return request->execute();
 }
 
 /* s.sendto(data, [flags,] sockaddr) method */
@@ -5929,6 +5923,7 @@ uv_tcp_t* create_uv_tcp_handle( SOCKET_T* fd, int family )
 		PyErr_FromUvErr( ret );
 		return nullptr;
 	}
+	handle->close_cb = nullptr;
 	ret = uv_fileno( reinterpret_cast<const uv_handle_t*>( handle ), reinterpret_cast<uv_os_fd_t*>( fd ) );
 	if( ret < 0 )
 	{
@@ -7042,6 +7037,7 @@ uv_tcp_t* dup_uv_tcp_handle( SOCKET_T newfd )
 		PyErr_FromUvErr( status );
 		return nullptr;
 	}
+	handle->close_cb = nullptr;
 	status = uv_tcp_open( handle, uv_os_sock_t( newfd ) );
 	if( status < 0 )
 	{

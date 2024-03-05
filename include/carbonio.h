@@ -1,8 +1,6 @@
 #ifndef CARBONIO_H
 #define CARBONIO_H
 
-#include <array>
-
 #include <Python.h>
 #include <stackless_api.h>
 
@@ -26,7 +24,7 @@ struct HandleData
 	PyChannelObject* channel;
 
 	// This will always point to the associated request while there is one
-	IRequest* request;
+	std::shared_ptr<IRequest> request;
 
 	// This backing buffer needs to outlive any potential request so that
 	// we can correctly re-construct multiple `receive()` requests.
@@ -67,6 +65,10 @@ void* create_handle_data();
 
 extern "C" typedef struct PySocketSockObject_t PySocketSockObject;
 
+struct ICallbackParams {
+	virtual ~ICallbackParams() = default;
+};
+
 struct IRequest
 {
 public:
@@ -75,16 +77,6 @@ public:
 	virtual ~IRequest()
 	{
 		clearTimeout();
-		if( m_handle->data )
-		{
-			reinterpret_cast<HandleData*>( m_handle->data )->request = nullptr;
-		}
-		Py_DECREF(m_channel);
-	}
-
-	PyChannelObject* channel() const
-	{
-		return m_channel;
 	}
 
 	virtual void cancel();
@@ -95,14 +87,26 @@ public:
 
 	virtual void onTimeout();
 
+	virtual PyObject* execute() = 0;
+
+	virtual void onCallback( ICallbackParams* params ) = 0;
+
 protected:
 	void clearTimeout();
+	HandleData* handleData() { return reinterpret_cast<HandleData*>(m_handle->data); }
 	void sendError(std::string_view msg);
+	void finalize() { m_self.reset(); }
 
-	PyChannelObject* m_channel{nullptr};
 	uv_handle_t* m_handle{nullptr};
 	uv_timer_t* m_timeout{nullptr};
 	_PyTime_t m_timeout_nanoseconds{-1};
+
+	// We keep around a shared pointer to ourselves because we need the request to live until
+	// the libuv callbacks for that request have finished, which in some cases is after the
+	// `execute()` method has returned.
+	// Once no more libuv callbacks are expected for the request, `finalize()` needs to
+	// be called in order to avoid leaking requests.
+	std::shared_ptr<IRequest> m_self{nullptr};
 };
 
 class IStreamRequest : public IRequest
@@ -116,12 +120,17 @@ class StreamConnectRequest : public IStreamRequest
 {
 public:
 	StreamConnectRequest( PySocketSockObject* socket, struct sockaddr* address );
-	PyObject* connect();
+	PyObject* execute() override;
 
 	static void connectCallback(uv_connect_t* connection, int status);
 
+	struct Params : public ICallbackParams {
+		int status;
+		Params(int status) : status(status) {};
+	};
+
 private:
-	void onConnect(int status);
+	void onCallback (ICallbackParams* status) override;
 
 	struct sockaddr* m_address{ nullptr };
 };
@@ -130,10 +139,16 @@ class StreamRecvRequest : public IStreamRequest
 {
 public:
 	StreamRecvRequest( PySocketSockObject* socket, Py_ssize_t length, int flags );
-	PyObject* receive();
+	PyObject* execute() override;
 	uv_stream_t* handle() { return reinterpret_cast<uv_stream_t*>( m_handle ); }
 	void onTimeout() override;
 	void cancel() override;
+
+	struct Params : public ICallbackParams {
+		ssize_t nread;
+		const uv_buf_t* buf;
+		Params(ssize_t nread, const uv_buf_t* buf) : nread(nread), buf(buf) {};
+	};
 
 protected:
 	static void readCallback( uv_stream_t* client, ssize_t nread, const uv_buf_t* buf );
@@ -145,7 +160,7 @@ protected:
 	int m_flags{0};
 
 private:
-	void onReceive( ssize_t nread, const uv_buf_t* buf );
+	void onCallback( ICallbackParams *callbackParams ) override;
 	static void alloc(uv_handle_t* handle, size_t size, uv_buf_t* buf);
 };
 
@@ -165,18 +180,24 @@ class StreamSendRequest : public IStreamRequest
 {
 public:
 	StreamSendRequest( PySocketSockObject* socket, char* buf, Py_ssize_t len, int flags ) :
-		IStreamRequest( socket ), m_buf( buf ), m_len( len ), m_flags( flags )
+		IStreamRequest( socket ), m_flags( flags )
 	{
+		m_sendBuffer.base = buf;
+		m_sendBuffer.len = len;
 	}
-	PyObject* send();
+	PyObject* execute() override;
 	static void sendCallback( uv_write_t* request, int status );
 
-private:
-		void onSend( int status );
+	struct Params : public ICallbackParams {
+		int status;
+		Params(int status) : status(status) {};
+	};
 
-		char* m_buf;
-		Py_ssize_t m_len;
+private:
+		void onCallback( ICallbackParams *callbackParams ) override;
 		int m_flags;
+		uv_write_t m_writeRequest;
+		uv_buf_t m_sendBuffer;
 };
 
 class IUdpRequest : public IRequest
@@ -194,12 +215,19 @@ public:
 	{
 	}
 
-	PyObject* receive();
+	PyObject* execute() override;
 	void cancel() override;
 	static void receiveCallback( uv_udp_t* handle, ssize_t nread, const uv_buf_t* buf, const struct sockaddr* addr, unsigned flags );
+	struct Params : public ICallbackParams {
+		ssize_t nread;
+		const uv_buf_t* buf;
+		const struct sockaddr* addr;
+		unsigned flags;
+		Params( ssize_t nread, const uv_buf_t* buf, const struct sockaddr* addr, unsigned flags ) : nread(nread), buf(buf), addr(addr), flags(flags) {};
+	};
 
 private:
-	void onRead( uv_udp_t* handle, ssize_t nread, const uv_buf_t* buf, const struct sockaddr* addr, unsigned flags );
+	void onCallback( ICallbackParams *callbackParams ) override;
 	void onTimeout() override;
 
 	Py_ssize_t m_len;
@@ -212,21 +240,29 @@ class UdpSendRequest : public IUdpRequest
 {
 public:
 	UdpSendRequest( PySocketSockObject* socket, char* buf, ssize_t len, const struct sockaddr* addr, int addrlen , int flags )
-	: IUdpRequest( socket ), m_buf( buf ), m_len( len ), m_addr( addr ), m_addrLen( addrlen ) , m_flags( flags )
+	: IUdpRequest( socket ), m_addr( addr ), m_addrLen( addrlen ) , m_flags( flags )
 	{
+		m_sendBuffer.base = buf;
+		m_sendBuffer.len = len;
 	}
 
-	PyObject* send();
+	PyObject* execute() override;
 	static void sendCallback(uv_udp_send_t* request, int status);
 
-private:
-	void onSend( int status );
+	struct Params : public ICallbackParams {
+		int status;
+		Params(int status) : status(status) {};
+	};
 
-	char* m_buf;
-	ssize_t m_len;
+private:
+	void onCallback( ICallbackParams *callbackParams ) override;
+
 	const struct sockaddr* m_addr;
 	int m_addrLen;
 	int m_flags;
+
+	uv_udp_send_t m_writeRequest;
+	uv_buf_t m_sendBuffer;
 };
 
 
@@ -238,7 +274,9 @@ public:
 	{
 	}
 
-	PyObject* accept();
+	PyObject* execute() override;
+private:
+	void onCallback(ICallbackParams *params) override {};
 };
 
 
