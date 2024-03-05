@@ -43,7 +43,7 @@ struct HandleData
 	// returned to the user yet.
 	ssize_t bufReadPos{0};
 	ssize_t bufWritePos{0};
-	bool blockingSend{false};
+	bool blockingSend{true};
 	size_t maxPacketSize{1024*1024}; //one megabyte
 };
 
