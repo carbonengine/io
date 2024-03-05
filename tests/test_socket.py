@@ -1849,10 +1849,10 @@ class GeneralModuleTests(unittest.TestCase):
 
     def test_setblockingsend(self):
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.assertFalse(s.setblockingsend(True))
-        self.assertTrue(s.setblockingsend())
         self.assertTrue(s.setblockingsend(False))
         self.assertFalse(s.setblockingsend())
+        self.assertFalse(s.setblockingsend(True))
+        self.assertTrue(s.setblockingsend())
 
         if hasattr(socket, "AF_UNIX"):
             with self.assertRaises(ValueError):
