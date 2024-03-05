@@ -1847,18 +1847,6 @@ class GeneralModuleTests(unittest.TestCase):
                     fileno=afile.fileno())
             self.assertEqual(cm.exception.errno, errno.ENOTSOCK)
 
-    def test_setblockingsend(self):
-        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.assertTrue(s.setblockingsend(False))
-        self.assertFalse(s.setblockingsend())
-        self.assertFalse(s.setblockingsend(True))
-        self.assertTrue(s.setblockingsend())
-
-        if hasattr(socket, "AF_UNIX"):
-            with self.assertRaises(ValueError):
-                q = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-                q.setblockingsend()
-
     def test_setmaxpacketsize(self):
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.assertEqual(1024*1024, s.setmaxpacketsize(512))
@@ -6230,6 +6218,27 @@ class CreateServerFunctionalTest(unittest.TestCase):
         self.echo_client(("::1", port), socket.AF_INET6)
 
 
+class CarbonIoTest(SocketPairTest):
+    def test_setblockingsend(self):
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.assertTrue(s.setblockingsend(False))
+        self.assertFalse(s.setblockingsend())
+        self.assertFalse(s.setblockingsend(True))
+        self.assertTrue(s.setblockingsend())
+
+        if hasattr(socket, "AF_UNIX"):
+            with self.assertRaises(ValueError):
+                q = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+                q.setblockingsend()
+
+    def test_blockingsend_behaviour(self):
+        stackless.current.block_trap = True
+        with self.assertRaises(RuntimeError):
+            self.serv.send(MSG)
+        self.serv.setblockingsend(False)
+        self.serv.send(MSG)
+
+
 def test_main():
     tests = [GeneralModuleTests, BasicTCPTest, TCPCloserTest, TCPTimeoutTest,
              TestExceptions, BufferIOTest, BasicTCPTest2, BasicUDPTest,
@@ -6292,6 +6301,9 @@ def test_main():
         SendfileUsingSendfileTest,
     ])
     tests.append(TestMSWindowsTCPFlags)
+
+    tests.append(CarbonIoTest)
+    tests = [CarbonIoTest]
 
     thread_info = support.threading_setup()
     support.run_unittest(*tests)
