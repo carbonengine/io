@@ -6233,10 +6233,35 @@ class CarbonIoTest(SocketPairTest):
 
     def test_blockingsend_behaviour(self):
         stackless.current.block_trap = True
-        with self.assertRaises(RuntimeError):
+        try:
+            with self.assertRaises(RuntimeError):
+                self.serv.send(MSG)
+            self.serv.setblockingsend(False)
             self.serv.send(MSG)
-        self.serv.setblockingsend(False)
+        finally:
+            stackless.current.block_trap = False
+
+    def test_stats(self):
+        expected_stats_per_socket = {
+            'BytesReceived': len(MSG),
+            'BytesSent': len(MSG),
+            'PacketsReceived': 0,
+            'PacketsSent': 0,
+        }
+        expected_stats_per_module = {
+            'BytesReceived': len(MSG) * 2,
+            'BytesSent': len(MSG) * 2,
+            'PacketsReceived': 0,
+            'PacketsSent': 0,
+        }
+        self.cli.send(MSG)
+        self.serv.recv(1024)
         self.serv.send(MSG)
+        self.cli.recv(1024)
+        self.assertDictEqual(expected_stats_per_socket, self.cli.getstats())
+        self.assertDictEqual(expected_stats_per_socket, self.serv.getstats())
+        self.assertDictEqual(expected_stats_per_module, _socket.getstats())
+
 
 
 def test_main():

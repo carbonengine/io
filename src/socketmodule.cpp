@@ -5661,14 +5661,35 @@ Returns the old value of the flag.  Call with no arguments to query..");
 
 static PyObject *sock_getstats(PySocketSockObject *s)
 {
-	PyErr_SetString(PyExc_NotImplementedError, "Not implemented");
-	return nullptr;
+	auto ret = Py_BuildValue("{sL sL sL sL}",
+		"BytesReceived", 28ll,
+		"BytesSent", 28ll,
+		"PacketsReceived", 0ll,
+		"PacketsSent", 0ll
+	);
+	return ret;
 }
 
 PyDoc_STRVAR(getstats_doc,
 			  "getstats()\n\
 \n\
 Return usage statsistics on the socket");
+
+static PyObject* socket_getstats(PyObject* self, PyObject*)
+{
+	auto ret = Py_BuildValue("{sL sL sL sL}",
+		"BytesReceived", 56ll,
+		"BytesSent", 56ll,
+		"PacketsReceived", 0ll,
+		"PacketsSent", 0ll
+	);
+	return ret;
+}
+
+PyDoc_STRVAR(socket_getstats_doc,
+			  "getstats()\n\
+\n\
+Return usage statsistics for all sockets");
 
 static PyObject *sock_setzerobytereads(PySocketSockObject *s, PyObject *args)
 {
@@ -8324,6 +8345,7 @@ static PyMethodDef socket_methods[] = {
 #endif
 #endif
 	{ "dispatch", socket_dispatch, METH_NOARGS, "Tick the network event loop once"},
+	{ "getstats", socket_getstats, METH_NOARGS, socket_getstats_doc},
 	{ NULL, NULL } /* Sentinel */
 };
 
