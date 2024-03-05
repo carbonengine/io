@@ -190,6 +190,7 @@ void IRequest::onTimeout()
 {
 	Ccp::PyGilEnsure gil;
 	PyErr_SetString( s_timeout_error, "timed out" );
+	m_timedOut = true;
 	sendError("IRequest::onTimeout failed to send timeout exception");
 }
 
@@ -431,7 +432,7 @@ void StreamSendRequest::onCallback( ICallbackParams* callbackParams )
 		sendError("StreamSendRequest::send Failed to convert status to python int");
 		return;
 	}
-	if( handleData()->blockingSend )
+	if( handleData()->blockingSend && !m_timedOut )
 	{
 		if( PyChannel_Send( handleData()->channel, py_status ) < 0 )
 		{

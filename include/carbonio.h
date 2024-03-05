@@ -100,6 +100,7 @@ protected:
 	uv_handle_t* m_handle{nullptr};
 	uv_timer_t* m_timeout{nullptr};
 	_PyTime_t m_timeout_nanoseconds{-1};
+	bool m_timedOut{false};
 
 	// We keep around a shared pointer to ourselves because we need the request to live until
 	// the libuv callbacks for that request have finished, which in some cases is after the
