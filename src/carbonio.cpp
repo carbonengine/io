@@ -1,4 +1,7 @@
 #include <carbonio.h>
+
+#include <atomic>
+
 #include "socketmodule.h"
 
 #ifdef __APPLE__
@@ -14,6 +17,23 @@ typedef unsigned int ULONG;
 #endif
 
 static uv_key_t s_tlsKey;
+
+static std::atomic_size_t s_bytesReceived{0};
+static std::atomic_size_t s_bytesSent{0};
+static std::atomic_size_t s_packetsReceived{0};
+static std::atomic_size_t s_packetsSent{0};
+
+PyObject* GetStatistics()
+{
+	auto ret = Py_BuildValue("{sL sL sL sL}",
+		"BytesReceived", s_bytesReceived.load(),
+		"BytesSent", s_bytesSent.load(),
+		"PacketsReceived", s_packetsReceived.load(),
+		"PacketsSent", s_packetsSent.load()
+	);
+	return ret;
+}
+
 
 int InitUvLoop() {
 	// uv_loop instances aren't thread-safe, thus we keep a loop instance per thread for which we need to initialize TLS
@@ -237,6 +257,7 @@ PyObject* StreamRecvRequest::execute()
 		}
 	}
 	data->bufWritePos += m_received_len;
+	s_bytesReceived += m_received_len;
 
 	return constructResult( data );
 }
@@ -406,6 +427,7 @@ PyObject* StreamSendRequest::execute()
 	if( status < 0 ){
 		return PyLong_FromLong(status);
 	}
+	s_bytesSent += m_sendBuffer.len;
 
 	if( handleData()->blockingSend )
 	{
@@ -535,6 +557,8 @@ void UdpRecvRequest::onCallback( ICallbackParams* callbackParams )
 		return;
 	}
 
+	s_bytesReceived += nread;
+
 	if (!m_buf) {
 		m_buf = PyBytes_FromStringAndSize( buf->base, nread );
 	} else {
@@ -637,6 +661,7 @@ PyObject* UdpSendRequest::execute()
 		}
 		return nullptr;
 	}
+	s_bytesSent += m_sendBuffer.len;
 	ret = PyLong_FromSsize_t(m_sendBuffer.len);
 	return ret;
 }

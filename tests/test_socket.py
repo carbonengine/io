@@ -6242,26 +6242,20 @@ class CarbonIoTest(SocketPairTest):
             stackless.current.block_trap = False
 
     def test_stats(self):
-        expected_stats_per_socket = {
-            'BytesReceived': len(MSG),
-            'BytesSent': len(MSG),
-            'PacketsReceived': 0,
-            'PacketsSent': 0,
-        }
         expected_stats_per_module = {
             'BytesReceived': len(MSG) * 2,
             'BytesSent': len(MSG) * 2,
             'PacketsReceived': 0,
             'PacketsSent': 0,
         }
+        stats = socket.getstats()
         self.cli.send(MSG)
         self.serv.recv(1024)
         self.serv.send(MSG)
         self.cli.recv(1024)
-        self.assertDictEqual(expected_stats_per_socket, self.cli.getstats())
-        self.assertDictEqual(expected_stats_per_socket, self.serv.getstats())
-        self.assertDictEqual(expected_stats_per_module, _socket.getstats())
-
+        new_stats = socket.getstats()
+        delta_stats = { k: new_stats[k] - stats[k] for k in stats }
+        self.assertDictEqual(expected_stats_per_module, delta_stats)
 
 
 def test_main():
@@ -6326,9 +6320,7 @@ def test_main():
         SendfileUsingSendfileTest,
     ])
     tests.append(TestMSWindowsTCPFlags)
-
     tests.append(CarbonIoTest)
-    tests = [CarbonIoTest]
 
     thread_info = support.threading_setup()
     support.run_unittest(*tests)

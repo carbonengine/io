@@ -5659,31 +5659,9 @@ When clear, send operations return immediately withoug blocking, \n\
 but then no return values are available.\n\
 Returns the old value of the flag.  Call with no arguments to query..");
 
-static PyObject *sock_getstats(PySocketSockObject *s)
-{
-	auto ret = Py_BuildValue("{sL sL sL sL}",
-		"BytesReceived", 28ll,
-		"BytesSent", 28ll,
-		"PacketsReceived", 0ll,
-		"PacketsSent", 0ll
-	);
-	return ret;
-}
-
-PyDoc_STRVAR(getstats_doc,
-			  "getstats()\n\
-\n\
-Return usage statsistics on the socket");
-
 static PyObject* socket_getstats(PyObject* self, PyObject*)
 {
-	auto ret = Py_BuildValue("{sL sL sL sL}",
-		"BytesReceived", 56ll,
-		"BytesSent", 56ll,
-		"PacketsReceived", 0ll,
-		"PacketsSent", 0ll
-	);
-	return ret;
+	return GetStatistics();
 }
 
 PyDoc_STRVAR(socket_getstats_doc,
@@ -5794,7 +5772,6 @@ static PyMethodDef sock_methods[] = {
 	{"recvpacketoob", (PyCFunction)sock_recvpacketoob, METH_VARARGS, recvpacketoob_doc},
 	{"sendpacket", (PyCFunction)sock_sendpacket, METH_VARARGS, sendpacket_doc},
 	{"setblockingsend", (PyCFunction)sock_setblockingsend, METH_VARARGS, setblockingsend_doc},
-	{"getstats", (PyCFunction)sock_getstats, METH_NOARGS, getstats_doc },
 	{"setzerobytereads", (PyCFunction)sock_setzerobytereads, METH_VARARGS, setzerobytereads_doc},
 	{"setmaxpacketsize", (PyCFunction)sock_setmaxpacketsize, METH_VARARGS, setmaxpacketsize_doc},
 	{ NULL, NULL } /* sentinel */
