@@ -6257,6 +6257,19 @@ class CarbonIoTest(SocketPairTest):
         delta_stats = { k: new_stats[k] - stats[k] for k in stats }
         self.assertDictEqual(expected_stats_per_module, delta_stats)
 
+    def test_sendpacket(self):
+        old_stats = socket.getstats()
+        self.cli.sendpacket(MSG)
+        new_stats = socket.getstats()
+        sent_packets = new_stats['PacketsSent'] - old_stats['PacketsSent']
+        self.assertEqual(1, sent_packets)
+
+        data = self.serv.recv(1024)
+        self.assertEqual(len(MSG) + 4, len(data))
+        size = struct.unpack("L", data[:4])[0]
+        self.assertEqual(len(MSG), size)
+        self.assertEqual(MSG, data[4:])
+
 
 def test_main():
     tests = [GeneralModuleTests, BasicTCPTest, TCPCloserTest, TCPTimeoutTest,

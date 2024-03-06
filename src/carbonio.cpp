@@ -836,3 +836,15 @@ void StreamConnectRequest::onCallback( ICallbackParams* callbackParams )
 		PyWriteUnraisable( "StreamConnectRequest::onConnect failed to send status" );
 	}
 }
+
+PyObject* SendPacket( PySocketSockObject* socket, void* data, Py_ssize_t len )
+{
+	Py_ssize_t bufsize = len + sizeof(uint32_t);
+	char* buf = new char[bufsize];
+	*reinterpret_cast<uint32_t*>(buf) = len;
+	memcpy_s( buf + sizeof(uint32_t), len, data, len );
+
+	auto req = new StreamSendRequest( socket, buf, bufsize, 0 );
+	s_packetsSent += 1;
+	return req->execute();
+}

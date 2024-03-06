@@ -5572,45 +5572,23 @@ sendpacket. Returns a tuple (packet, oob, sequence) where 'oob' can be None\n\
 and 'sequence' is a continuously growing index representing the sequence\n\
 of packes received on the socket.");
 
-//Helper function to parse arguments to send function, taking into account that we may accept
-//a sequence instead of a string or buffer type thingy.
-//fmt1 is expected to start with "s*" while fmt2 should start with "O"
-int slsock_parse_send(PyObject *args, const char *fmt1, const char *fmt2, PyObject **obj, Py_buffer *buf, void *flags, void *addro)
-{
-	_ASSERT(fmt1[0] == 's' && fmt1[1] == '*');
-	_ASSERT(fmt2[0] == 'O');
-	if (!PyArg_ParseTuple(args, fmt1, buf, flags, addro)) {
-		PyErr_Clear();
-		if (!PyArg_ParseTuple(args, fmt2, obj, flags, addro))
-			return 0; //something weird
-
-		//ok, found an object
-		if (!PySequence_Check(*obj)) {
-			PyErr_SetString(PyExc_TypeError, "expected a string or sequence");
-			return 0;
-		}
-		//found a sequence
-	} else {
-		//found a Py_buffer object
-		*obj = nullptr;
-		// BUG WORKAROUND: Python doesn't incref the object if it didn't support the buffer interface!  We must do it here
-		// Remove the following three lines when python has been fixed.
-		if (!buf->obj) {
-			buf->obj = PyTuple_GET_ITEM(args, 0);
-			Py_INCREF(buf->obj);
-		}
-	}
-	return 1;
-}
-
 static PyObject *sock_sendpacket(PySocketSockObject *s, PyObject *args)
 {
 	Py_buffer pbuf;
-	PyObject *obj;
-	if (!slsock_parse_send(args, "s*:sendpacket", "O:sendpacket", &obj, &pbuf, 0, 0))
+
+	if (!PyArg_ParseTuple( args, "y*:sendpacket", &pbuf ))
+	{
 		return nullptr;
-	PyErr_SetString(PyExc_NotImplementedError, "Not implemented");
-	return nullptr;
+	}
+
+	if ( pbuf.len > (std::numeric_limits<uint32_t>::max)() )
+	{
+		PyErr_Format( PyExc_ValueError, "Cannot send packet of size %llu", pbuf.len );
+		return nullptr;
+	}
+
+	return SendPacket( s, pbuf.buf, pbuf.len );
+
 }
 
 PyDoc_STRVAR(sendpacket_doc,

@@ -66,6 +66,8 @@ void* create_handle_data();
 
 extern "C" typedef struct PySocketSockObject_t PySocketSockObject;
 
+extern PyObject* SendPacket( PySocketSockObject* socket, void* data, Py_ssize_t len );
+
 struct ICallbackParams {
 	virtual ~ICallbackParams() = default;
 };
