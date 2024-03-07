@@ -6257,6 +6257,14 @@ class CarbonIoTest(SocketPairTest):
         delta_stats = { k: new_stats[k] - stats[k] for k in stats }
         self.assertDictEqual(expected_stats_per_module, delta_stats)
 
+    def test_sendpacket_maxsize(self):
+        self.assertTrue(len(MSG) > 1)
+        self.cli.setmaxpacketsize(len(MSG) - 1)
+        with self.assertRaises(ValueError):
+            self.cli.sendpacket(MSG)
+        self.cli.setmaxpacketsize(len(MSG))
+        self.cli.sendpacket(MSG)
+
     def test_sendpacket(self):
         old_stats = socket.getstats()
         self.cli.sendpacket(MSG)

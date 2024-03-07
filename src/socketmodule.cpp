@@ -5581,9 +5581,10 @@ static PyObject *sock_sendpacket(PySocketSockObject *s, PyObject *args)
 		return nullptr;
 	}
 
-	if ( pbuf.len > (std::numeric_limits<uint32_t>::max)() )
+	auto* handleData = reinterpret_cast<HandleData*>( s->uv_handle->data );
+	if ( pbuf.len > handleData->maxPacketSize )
 	{
-		PyErr_Format( PyExc_ValueError, "Cannot send packet of size %llu", pbuf.len );
+		PyErr_Format( PyExc_ValueError, "Cannot send packet of size %llu. Maximum packet size is %llu", pbuf.len, handleData->maxPacketSize );
 		return nullptr;
 	}
 
