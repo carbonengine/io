@@ -3,6 +3,7 @@
 #include <atomic>
 
 #include "socketmodule.h"
+#include "protocol.h"
 
 #ifdef __APPLE__
 // AppleClang doesn't know the _s versions yet, so we are forced to do the unsafe thing
@@ -847,4 +848,82 @@ PyObject* SendPacket( PySocketSockObject* socket, void* data, Py_ssize_t len )
 	auto req = new StreamSendRequest( socket, buf, bufsize, 0 );
 	s_packetsSent += 1;
 	return req->execute();
+}
+
+PyObject* ReceivePacket( PySocketSockObject* socket )
+{
+	auto* handleData = reinterpret_cast<HandleData*>( socket->uv_handle->data );
+
+	uint32_t header{0};
+	auto* request = new StreamRecvRequest(socket, sizeof(header), 0);
+	auto* pyHeader = request->execute();
+	if ( !pyHeader )
+	{
+		return nullptr;
+	}
+	ON_BLOCK_EXIT([pyHeader]{ Py_DecRef( pyHeader ); });
+
+	header = *reinterpret_cast<decltype(header)*>(PyBytes_AsString( pyHeader ) );
+	uint32_t payloadLen = header & ceHeaderSizeMask;
+
+	if ( payloadLen > handleData->maxPacketSize )
+	{
+		PyErr_Format(PyExc_OSError, "too large a packet detected at %d bytes, max is %llu", payloadLen, handleData->maxPacketSize);
+		return nullptr;
+	}
+
+	request = new StreamRecvRequest(socket, payloadLen, 0);
+	auto* pyPayload = request->execute();
+	if ( !pyPayload )
+	{
+		return nullptr;
+	}
+
+	char* payload = PyBytes_AsString( pyPayload );
+	char* payloadEnd = payload + payloadLen;
+	uint32_t oobDataLen{0};
+
+	if ( (header & ceHeaderExpectPayloadOffset) == ceHeaderExpectPayloadOffset)
+	{
+		oobDataLen = *reinterpret_cast<decltype(oobDataLen)*>( payload );
+
+		if ( oobDataLen > handleData->maxPacketSize )
+		{
+			PyErr_Format(PyExc_OSError, "corrupted out-of-band data in packet detected at %d bytes, max is %llu", oobDataLen, handleData->maxPacketSize);
+			return nullptr;
+		}
+
+		payload += sizeof(oobDataLen);
+		payload += oobDataLen;
+		// FIXME deal with oob data;
+		// e.g. the following snippet outlines what needs to happen, but it requires the BlueNet implementation:
+		/*
+		char* oobData = sizeof(uint32_t) + mData;
+		for (SCallbackEntry *callback = g_packetCallbackChainPostDecompress; callback; callback = callback->next) {
+			bool stop = callback->callback(
+				(long long)handle,
+				mData + oobDataLen + sizeof(uint32_t),
+				mPacketSize - oobDataLen,
+				oobData,
+				oobDataLen
+			);
+			if (stop) {
+				// BlueNet ate the packet, so reset our internal state
+				if (mData)
+					free(mData);
+				mBytesRead = mDataLen = 0;
+				mData = 0;
+				return;
+			}
+		}
+		 */
+	}
+
+	s_packetsReceived += 1;
+	Py_IncRef( Py_None );
+	auto* packet = PyTuple_Pack( 3, PyBytes_FromStringAndSize( payload, payloadEnd - payload ), Py_None, PyLong_FromSize_t( handleData->packetNumber++ ) );
+	if ( !packet ) {
+		Py_DecRef( Py_None );
+	}
+	return packet;
 }

@@ -6258,7 +6258,7 @@ class CarbonIoTest(SocketPairTest):
         self.assertDictEqual(expected_stats_per_module, delta_stats)
 
     def test_sendpacket_maxsize(self):
-        self.assertTrue(len(MSG) > 1)
+        self.assertGreater(len(MSG), 1)
         self.cli.setmaxpacketsize(len(MSG) - 1)
         with self.assertRaises(ValueError):
             self.cli.sendpacket(MSG)
@@ -6278,6 +6278,30 @@ class CarbonIoTest(SocketPairTest):
         self.assertEqual(len(MSG), size)
         self.assertEqual(MSG, data[4:])
 
+    def test_recvpacket(self):
+        numPackets = 10
+        headerSize = 4
+        expected_stats_per_module = {
+            'BytesReceived': (len(MSG) + headerSize) * numPackets,
+            'BytesSent': (len(MSG) + headerSize) * numPackets,
+            'PacketsReceived': numPackets,
+            'PacketsSent': numPackets,
+        }
+        old_stats = socket.getstats()
+        for i in range(numPackets):
+            self.cli.sendpacket(MSG)
+            msg, _, sequence = self.serv.recvpacketoob()
+            self.assertEqual(i, sequence)
+            self.assertEqual(MSG, msg)
+        new_stats = socket.getstats()
+        delta_stats = { k: new_stats[k] - old_stats[k] for k in old_stats }
+        self.assertDictEqual(expected_stats_per_module, delta_stats)
+
+        self.assertGreater(len(MSG), 1)
+        self.serv.setmaxpacketsize(len(MSG)-1)
+        self.cli.sendpacket(MSG)
+        with self.assertRaises(OSError):
+            _ = self.serv.recvpacketoob()
 
 def test_main():
     tests = [GeneralModuleTests, BasicTCPTest, TCPCloserTest, TCPTimeoutTest,

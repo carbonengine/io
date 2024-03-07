@@ -43,6 +43,9 @@ struct HandleData
 	ssize_t bufWritePos{0};
 	bool blockingSend{true};
 	size_t maxPacketSize{1024*1024}; //one megabyte
+
+	// in case the socket deals with packets, it needs to keep track of a packet's sequence number.
+	size_t packetNumber{0};
 };
 
 enum ChannelPreference : int {
@@ -66,6 +69,7 @@ void* create_handle_data();
 
 extern "C" typedef struct PySocketSockObject_t PySocketSockObject;
 
+extern PyObject* ReceivePacket( PySocketSockObject* socket );
 extern PyObject* SendPacket( PySocketSockObject* socket, void* data, Py_ssize_t len );
 
 struct ICallbackParams {

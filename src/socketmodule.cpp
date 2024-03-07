@@ -5561,8 +5561,7 @@ static PyObject *sock_recvpacketoob(PySocketSockObject *s, PyObject *args)
 	if (!PyArg_ParseTuple(args, ":recvpacket"))
 		return nullptr;
 
-	PyErr_SetString(PyExc_NotImplementedError, "Not implemented");
-	return nullptr;
+	return ReceivePacket( s );
 }
 PyDoc_STRVAR( recvpacketoob_doc,
 			  "recvpacketoob()\n\
