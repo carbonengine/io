@@ -1,6 +1,8 @@
 #include <carbonio.h>
 
+#include <algorithm>
 #include <atomic>
+#include <vector>
 
 #include "socketmodule.h"
 #include "protocol.h"
@@ -23,6 +25,8 @@ static std::atomic_size_t s_bytesReceived{0};
 static std::atomic_size_t s_bytesSent{0};
 static std::atomic_size_t s_packetsReceived{0};
 static std::atomic_size_t s_packetsSent{0};
+
+static std::vector<OobDataCallback> s_oobDataCallbacks{};
 
 PyObject* GetStatistics()
 {
@@ -899,29 +903,21 @@ PyObject* ReceivePacket( PySocketSockObject* socket )
 		}
 
 		payload += sizeof(oobDataLen);
-		payload += oobDataLen;
-		// FIXME deal with oob data;
-		// e.g. the following snippet outlines what needs to happen, but it requires the BlueNet implementation:
-		/*
-		char* oobData = sizeof(uint32_t) + mData;
-		for (SCallbackEntry *callback = g_packetCallbackChainPostDecompress; callback; callback = callback->next) {
-			bool stop = callback->callback(
-				(long long)handle,
-				mData + oobDataLen + sizeof(uint32_t),
-				mPacketSize - oobDataLen,
+		auto* oobData = payload;
+		for ( auto callback : s_oobDataCallbacks ) {
+			auto stop = callback(
+				static_cast<long long>( socket->sock_fd ),
+				payload + oobDataLen,
+				payloadLen - oobDataLen,
 				oobData,
 				oobDataLen
 			);
-			if (stop) {
-				// BlueNet ate the packet, so reset our internal state
-				if (mData)
-					free(mData);
-				mBytesRead = mDataLen = 0;
-				mData = 0;
-				return;
+			if (stop != 0) {
+				// BlueNet ate the packet, so reset our internal state ... is this correct? When would bluenet eat the packet?
+				Py_RETURN_NONE;
 			}
 		}
-		 */
+		payload += oobDataLen;
 	}
 
 	s_packetsReceived += 1;

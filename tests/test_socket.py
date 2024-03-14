@@ -6303,6 +6303,28 @@ class CarbonIoTest(SocketPairTest):
         with self.assertRaises(OSError):
             _ = self.serv.recvpacketoob()
 
+    def test_recvpacket_with_oob_data(self):
+        # Hand-crafted payload, setting `ceHeaderExpectPayloadOffset` to indicate existence of OOB data
+        oobData = b'foobar'
+        oobDataLen = len(oobData)
+        payload = struct.pack("ll", (len(MSG) + oobDataLen + 4) | 1<<28, oobDataLen)
+        payload += oobData
+        payload += MSG
+        self.serv.send(payload)
+        expected_stats = {
+            'BytesReceived': len(MSG) + oobDataLen + 8,
+            'BytesSent': 0,
+            'PacketsReceived': 1,
+            'PacketsSent': 0
+        }
+        old_stats = socket.getstats()
+        msg, _, _ = self.cli.recvpacketoob()
+        new_stats = socket.getstats()
+        delta_stats = { k: new_stats[k] - old_stats[k] for k in old_stats }
+        self.assertEqual(MSG, msg)
+        self.assertDictEqual(expected_stats, delta_stats)
+
+
 def test_main():
     tests = [GeneralModuleTests, BasicTCPTest, TCPCloserTest, TCPTimeoutTest,
              TestExceptions, BufferIOTest, BasicTCPTest2, BasicUDPTest,
