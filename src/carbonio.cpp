@@ -45,6 +45,11 @@ int InitUvLoop() {
 	return status;
 }
 
+void TickUvLoop()
+{
+	uv_run(GetUvLoop(), UV_RUN_NOWAIT);
+}
+
 void cleanup_uv_handle( uv_handle_t* uv_handle )
 {
 	Ccp::PyGilEnsure gil;
@@ -89,7 +94,7 @@ HandleData::~HandleData()
 }
 
 
-void* create_handle_data()
+void* CreateHandleData()
 {
 	auto* data = new HandleData;
 	if( data->channel == nullptr )
@@ -128,7 +133,7 @@ void PyWriteUnraisable( const char* msg )
 	Py_DECREF( msg_obj );
 }
 
-uv_loop_t * get_uv_loop()
+uv_loop_t * GetUvLoop()
 {
 	uv_loop_t* ret = reinterpret_cast<uv_loop_t*>(uv_key_get(&s_tlsKey));
 	if ( !ret ) {
@@ -198,7 +203,7 @@ PyObject* IRequest::startTimeout()
 	uint64_t timeout_ms = m_timeout_nanoseconds / 1000000;
 	m_timeout = new uv_timer_t;
 	m_timeout->data = this;
-	uv_timer_init( get_uv_loop(), m_timeout );
+	uv_timer_init( GetUvLoop(), m_timeout );
 	auto status = uv_timer_start(m_timeout, timeoutCallback, timeout_ms, 0);
 	if ( status < 0 ) {
 		PyErr_FromUvErr( status );

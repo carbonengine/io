@@ -3336,7 +3336,7 @@ void on_accept(uv_stream_t *handle, int status)
 		SendError(channel, "on_accept: uv_fileno failed");
 		return;
 	}
-	client->data = create_handle_data();
+	client->data = CreateHandleData();
 	if( !client->data )
 	{
 		SendError(channel, "on_accept: Failed to create client channel");
@@ -5887,7 +5887,7 @@ static int sock_cloexec_works = -1;
 uv_tcp_t* create_uv_tcp_handle( SOCKET_T* fd, int family )
 {
 	// create libuv tcp handle
-    auto loop = get_uv_loop();
+    auto loop = GetUvLoop();
     if(!loop) {
         return nullptr;
     }
@@ -5908,7 +5908,7 @@ uv_tcp_t* create_uv_tcp_handle( SOCKET_T* fd, int family )
 		return nullptr;
 	}
 
-	handle->data = create_handle_data();
+	handle->data = CreateHandleData();
 	if( handle->data == nullptr )
 	{
 		uv_close((uv_handle_t*)handle, cleanup_uv_handle);
@@ -5921,7 +5921,7 @@ uv_tcp_t* create_uv_tcp_handle( SOCKET_T* fd, int family )
 uv_udp_t* create_uv_udp_handle(SOCKET_T* fd, int family)
 {
 	// create libuv udp handle
-    auto loop = get_uv_loop();
+    auto loop = GetUvLoop();
     if (!loop)
     {
         return nullptr;
@@ -5942,7 +5942,7 @@ uv_udp_t* create_uv_udp_handle(SOCKET_T* fd, int family)
 		uv_close((uv_handle_t*)handle, cleanup_uv_handle);
 		return nullptr;
 	}
-	handle->data = create_handle_data();
+	handle->data = CreateHandleData();
 	if( handle->data == nullptr )
 	{
 		uv_close((uv_handle_t*)handle, cleanup_uv_handle);
@@ -6121,7 +6121,7 @@ static int
 			s->uv_handle = nullptr;
 			if( is_managed_by_libuv( type, family ) )
 			{
-				auto loop = get_uv_loop();
+				auto loop = GetUvLoop();
 				if( !loop )
 				{
 					return -1;
@@ -6270,7 +6270,7 @@ static int
 #endif
 			s->sock_fd = fd;
 			s->uv_handle = nullptr;
-			uv_walk( get_uv_loop(), find_handle_for_fd, (void*)s );
+			uv_walk( GetUvLoop(), find_handle_for_fd, (void*)s );
 			if ( ! s->uv_handle && is_managed_by_libuv( type, family ) )
 			{
 				if( type == SOCK_STREAM )
@@ -6942,7 +6942,7 @@ static PyObject*
 	PySocketSockObject s;
 	s.sock_fd = fd;
 	s.uv_handle = nullptr;
-	uv_walk( get_uv_loop(), find_handle_for_fd, &s );
+	uv_walk( GetUvLoop(), find_handle_for_fd, &s );
 	if( s.uv_handle && !uv_is_closing( s.uv_handle ) )
 	{
 		  uv_close( s.uv_handle, cleanup_uv_handle );
@@ -7006,7 +7006,7 @@ sockets; on some platforms os.close() won't work for socket file descriptors." )
 uv_tcp_t* dup_uv_tcp_handle( SOCKET_T newfd )
 {
 	auto handle = new uv_tcp_t;
-	auto status = uv_tcp_init( get_uv_loop(), handle );
+	auto status = uv_tcp_init( GetUvLoop(), handle );
 	if( status < 0 )
 	{
 		delete handle;
@@ -7022,7 +7022,7 @@ uv_tcp_t* dup_uv_tcp_handle( SOCKET_T newfd )
 		return nullptr;
 	}
 
-	handle->data = create_handle_data();
+	handle->data = CreateHandleData();
 	if( handle->data == nullptr )
 	{
 		uv_close( (uv_handle_t*)handle, cleanup_uv_handle );
@@ -7036,7 +7036,7 @@ uv_udp_t* dup_uv_udp_handle( SOCKET_T newfd )
 {
 	auto handle = new uv_udp_t;
 	ScopeGuard handle_guard = MakeGuard([&]{ delete handle; });
-	auto status = uv_udp_init( get_uv_loop(), handle );
+	auto status = uv_udp_init( GetUvLoop(), handle );
 	if( status < 0 )
 	{
 		PyErr_FromUvErr( status );
@@ -7052,7 +7052,7 @@ uv_udp_t* dup_uv_udp_handle( SOCKET_T newfd )
 	// at this point we need to delegate cleaning up the libuv handle to libuv
 	handle_guard.Dismiss();
 
-	handle->data = create_handle_data();
+	handle->data = CreateHandleData();
 	if( handle->data == nullptr )
 	{
 		uv_close( (uv_handle_t*)handle, cleanup_uv_handle );
@@ -8252,7 +8252,7 @@ range of values." );
 
 
 PyObject* socket_dispatch(PyObject*, PyObject*) {
-	uv_run(get_uv_loop(), UV_RUN_NOWAIT);
+	TickUvLoop();
 	Py_RETURN_NONE;
 }
 

@@ -62,10 +62,11 @@ extern void SetTimeoutErrorType(PyObject* error_type);
 
 
 extern int InitUvLoop();
-extern uv_loop_t * get_uv_loop();
+extern void TickUvLoop();
+extern uv_loop_t * GetUvLoop();
 extern PyObject* GetStatistics();
 
-void* create_handle_data();
+void* CreateHandleData();
 
 extern "C" typedef struct PySocketSockObject_t PySocketSockObject;
 
