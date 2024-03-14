@@ -16,14 +16,4 @@ enum EHeaderBits
 	ceHeaderExtraHeaderBitsFollow = 1 << 31, // in case it needs to be extended, reserve this bit [unimplemented]
 };
 
-// API servicing calls
-typedef bool ( *CioDataCallback )( long long descriptor, const char* data, const int len, const char* OOBdata, const int OOBLen );
-
-struct SCallbackEntry
-{
-	CioDataCallback callback;
-	SCallbackEntry* next;
-};
-
-extern SCallbackEntry* g_packetCallbackChainPostDecompress;
 #endif //PROTOCOL_H
