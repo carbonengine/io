@@ -25,29 +25,16 @@ find_package(Python CONFIG REQUIRED)
 find_package(OpenSSL CONFIG REQUIRED)
 find_package(CcpCore CONFIG REQUIRED)
 
-add_library(iobase STATIC
-    src/carbonio.cpp
-)
-target_link_libraries(iobase
-    PUBLIC
-        Python
-        libuv::uv_a
-        CcpCore
-)
-target_include_directories(iobase
-    PUBLIC
-        ${CMAKE_CURRENT_SOURCE_DIR}/include
-    PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/src
-)
-
 # --- _socket ---
 ccp_add_library(_socket SHARED
+    src/carbonio.cpp
     src/socketmodule.cpp
 )
 target_link_libraries(_socket
     PRIVATE
-        iobase
+        Python
+        libuv::uv_a
+        CcpCore
 )
 set_target_properties(_socket
         PROPERTIES
@@ -79,7 +66,7 @@ source_group("_ssl" FILES
 )
 target_link_libraries(_ssl
     PRIVATE
-        iobase
+        Python
     PUBLIC
         OpenSSL::Crypto
         OpenSSL::SSL
@@ -89,7 +76,6 @@ set_target_properties(_ssl
         DEBUG_POSTFIX ""
         INTERNAL_POSTFIX ""
 )
-
 
 # --- _select ---
 ccp_add_library(_select SHARED
@@ -108,7 +94,7 @@ source_group("_select" FILES
 )
 target_link_libraries(_select
     PRIVATE
-        iobase
+        Python
 )
 if(WIN32)
     target_link_libraries(_select PUBLIC ws2_32.lib)

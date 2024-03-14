@@ -180,9 +180,6 @@ typedef int SOCKET_T;
 #define PyLong_AsSocket_t(fd) (SOCKET_T)PyLong_AsLongLong(fd)
 #endif
 
-#include <uv.h>
-static_assert( sizeof( SOCKET_T ) == sizeof( uv_os_fd_t ), "Mismatching size between SOCKET_T and uv_os_fd_t" );
-
 /* Socket address */
 typedef union sock_addr {
     struct sockaddr_in in;
@@ -227,6 +224,7 @@ typedef union sock_addr {
    like the address family, which is used to decode socket address
    arguments properly. */
 
+typedef struct uv_handle_s uv_handle_t; // forward declare
 typedef struct PySocketSockObject_t {
     PyObject_HEAD
     SOCKET_T sock_fd;           /* Socket file descriptor */

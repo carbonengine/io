@@ -7,6 +7,8 @@
 #include "socketmodule.h"
 #include "protocol.h"
 
+static_assert( sizeof( SOCKET_T ) == sizeof( uv_os_fd_t ), "Mismatching size between SOCKET_T and uv_os_fd_t" );
+
 #ifdef __APPLE__
 // AppleClang doesn't know the _s versions yet, so we are forced to do the unsafe thing
 #ifndef __STDC_LIB_EXT1_
