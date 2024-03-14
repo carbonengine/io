@@ -56,8 +56,6 @@ enum ChannelPreference : int {
 
 extern void SendError(PyChannelObject* channel, std::string_view msg);
 
-extern void alloc(uv_handle_t* handle, size_t size, uv_buf_t* buf);
-
 extern void SetTimeoutErrorType(PyObject* error_type);
 
 
