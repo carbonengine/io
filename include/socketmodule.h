@@ -290,10 +290,15 @@ typedef struct PySocketSockObject_t {
 */
 
 /* C API for usage by other Python modules */
+typedef int(*OobDataCallback)(long long descriptor, const char* data, int len, const char* OOBdata, int OOBLen );
+
 typedef struct {
     PyTypeObject *Sock_Type;
     PyObject *error;
     PyObject *timeout_error;
+    void (*dispatch)();
+    void (*add_oob_data_callback)(OobDataCallback);
+    void (*remove_oob_data_callback)(OobDataCallback);
 } PySocketModule_APIObject;
 
 #define PySocketModule_ImportModuleAndAPI() PyCapsule_Import(PySocket_CAPSULE_NAME, 1)

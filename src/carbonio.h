@@ -6,8 +6,8 @@
 
 #include <uv.h>
 
-#include <CcpScopeGuard.h>
 #include <BluePyCpp.h>
+#include <socketmodule.h>
 
 void cleanup_uv_handle( uv_handle_t* uv_handle );
 
@@ -58,6 +58,7 @@ extern void SendError(PyChannelObject* channel, std::string_view msg);
 
 extern void SetTimeoutErrorType(PyObject* error_type);
 
+extern void AugmentSocketAPI(PySocketModule_APIObject* apiObject);
 
 extern int InitUvLoop();
 extern void TickUvLoop();

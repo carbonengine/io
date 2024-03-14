@@ -9639,6 +9639,8 @@ PyMODINIT_FUNC
 
 	SetTimeoutErrorType(socket_timeout);
 
+	AugmentSocketAPI(&PySocketModuleAPI);
+
 	if ( InitUvLoop() != 0 ) {
 		return nullptr;
 	}

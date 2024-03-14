@@ -15,7 +15,6 @@ endif()
 
 file(TO_CMAKE_PATH "$ENV{CCP_EVE_PERFORCE_BRANCH_PATH}" BRANCH_ROOT_DIR)
 list(INSERT CMAKE_MODULE_PATH 0 ${BRANCH_ROOT_DIR}/cmake)
-set(libuv_DIR ${BRANCH_ROOT_DIR}/vendor/github.com/libuv/libuv/v1.47.0)
 
 include(CcpGlobalSettings)
 include(CcpPackageConfigHelpers)
@@ -41,17 +40,22 @@ set_target_properties(_socket
         DEBUG_POSTFIX ""
         INTERNAL_POSTFIX ""
 )
-
 target_include_directories(_socket
-        PRIVATE
-        src
+    PUBLIC
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+    PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
 
 get_target_property(_SOURCES _socket SOURCES)
 source_group("_socket" FILES
     ${_SOURCES}
-    src/socketmodule.h
+    src/carbonio.h
+    include/socketmodule.h
 )
+
+# Define an alias target so we can export a target with the expected project name
+add_library(carbonio ALIAS _socket)
 
 # --- _ssl ---
 ccp_add_library(_ssl SHARED
@@ -75,6 +79,12 @@ set_target_properties(_ssl
         PROPERTIES
         DEBUG_POSTFIX ""
         INTERNAL_POSTFIX ""
+)
+target_include_directories(_ssl
+    PUBLIC
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+    PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
 
 # --- _select ---
@@ -127,10 +137,18 @@ if(CMAKE_PROJECT_NAME STREQUAL io)
     install(
             TARGETS _socket _ssl _select
             EXPORT ioTarget
-            CONFIGURATIONS ${CMAKE_CONFIGURATION_TYPES}
-            LIBRARY DESTINATION lib/${CCP_PLATFORM}/${CCP_ARCHITECTURE}/${CCP_TOOLSET}/
-            ARCHIVE DESTINATION lib/${CCP_PLATFORM}/${CCP_ARCHITECTURE}/${CCP_TOOLSET}/
+            CONFIGURATIONS Release
             RUNTIME DESTINATION bin/${CCP_PLATFORM}/${CCP_ARCHITECTURE}/${CCP_TOOLSET}/
     )
 
+    # Install rule for available public headers
+    install(DIRECTORY include DESTINATION . FILES_MATCHING PATTERN "*.h")
+
+    configure_ccp_vendor_config_file(
+            TARGET carbonio
+            DESTINATION "${CMAKE_CURRENT_BINARY_DIR}/CarbonIOConfig.cmake"
+            DEPENDENCIES "Python;OpenSSL;CcpCore;libuv"
+            CONFIGURATIONS Release
+    )
+    install(FILES ${CMAKE_CURRENT_BINARY_DIR}/CarbonIOConfig.cmake DESTINATION .)
 endif()

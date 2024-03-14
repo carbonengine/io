@@ -157,7 +157,7 @@ uv_loop_t * GetUvLoop()
 }
 
 static PyObject* s_timeout_error;
-void SetTimeoutErrorType(PyObject* value)
+void SetTimeoutErrorType( PyObject* value )
 {
 	s_timeout_error = value;
 }
@@ -929,4 +929,21 @@ PyObject* ReceivePacket( PySocketSockObject* socket )
 		Py_DecRef( Py_None );
 	}
 	return packet;
+}
+
+extern "C" void AddOobDataCallback( OobDataCallback packetCallback )
+{
+	s_oobDataCallbacks.push_back( packetCallback );
+}
+
+extern "C" void RemoveOobDataCallback( OobDataCallback packetCallback )
+{
+	s_oobDataCallbacks.erase( std::remove( s_oobDataCallbacks.begin(), s_oobDataCallbacks.end(), packetCallback ), s_oobDataCallbacks.end() );
+}
+
+void AugmentSocketAPI( PySocketModule_APIObject* apiObject )
+{
+	apiObject->dispatch = TickUvLoop;
+	apiObject->add_oob_data_callback = AddOobDataCallback;
+	apiObject->remove_oob_data_callback = RemoveOobDataCallback;
 }
