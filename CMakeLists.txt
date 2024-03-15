@@ -29,6 +29,9 @@ ccp_add_library(_socket SHARED
     src/carbonio.cpp
     src/socketmodule.cpp
 )
+target_precompile_headers(_socket PRIVATE
+    <CcpScopeGuard.h>
+)
 target_link_libraries(_socket
     PRIVATE
         Python
