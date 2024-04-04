@@ -65,6 +65,10 @@ void cleanup_uv_handle( uv_handle_t* uv_handle )
 		if ( data->request ) {
 			data->request->cancel();
 		}
+		if( data->receiveRequest )
+		{
+			data->receiveRequest->cancel();
+		}
 		delete data;
 	}
 	uv_handle->data = nullptr;
@@ -83,7 +87,7 @@ void cleanup_uv_handle( uv_handle_t* uv_handle )
 	}
 }
 
-HandleData::HandleData() : channel( PyChannel_New( nullptr ) ), request(nullptr)
+HandleData::HandleData() : channel( PyChannel_New( nullptr ) ), packetReceiveQueue( PyChannel_New( nullptr ) ), request( nullptr )
 {
 	buf = uv_buf_init( nullptr, 0 );
 }
@@ -92,6 +96,8 @@ HandleData::~HandleData()
 {
 	Py_XDECREF( channel );
 	channel = nullptr;
+	Py_XDECREF( packetReceiveQueue );
+	packetReceiveQueue = nullptr;
 	delete buf.base;
 	buf.base = nullptr;
 	buf.len = 0;
@@ -105,9 +111,18 @@ void* CreateHandleData()
 	auto* data = new HandleData;
 	if( data->channel == nullptr )
 	{
+		Py_XDECREF( data->packetReceiveQueue );
 		delete data;
 		return nullptr;
 	}
+	if( data->packetReceiveQueue == nullptr )
+	{
+		Py_DECREF( data->channel );
+		delete data;
+		return nullptr;
+	}
+
+	PyChannel_SetPreference( data->packetReceiveQueue, PREFER_SENDER );
 	return data;
 }
 
@@ -397,11 +412,11 @@ void alloc(uv_handle_t* handle, size_t size, uv_buf_t* buf)
 void StreamRecvRequest::readCallback( uv_stream_t* client, ssize_t nread, const uv_buf_t* buf )
 {
 	auto* data = reinterpret_cast<HandleData*>( client->data );
-	if( data->request )
+	if( data->receiveRequest )
 	{
-		auto _this = reinterpret_cast<StreamRecvRequest*>( data->request.get() );
-		auto params = std::make_unique<StreamRecvRequest::Params>(nread, buf);
-		_this->onCallback( params.get() );
+		auto _this = reinterpret_cast<StreamRecvRequest*>( data->receiveRequest.get() );
+		auto params = StreamRecvRequest::Params( nread, buf );
+		_this->onCallback( &params );
 	}
 }
 
@@ -425,6 +440,7 @@ StreamRecvRequest::StreamRecvRequest( PySocketSockObject* socket, Py_ssize_t len
 }
 int StreamRecvRequest::startRead()
 {
+	handleData()->receiveRequest = m_self;
 	return uv_read_start( handle(), StreamRecvRequest::alloc, StreamRecvRequest::readCallback );
 }
 
@@ -495,6 +511,7 @@ PyObject* UdpRecvRequest::execute()
 		return nullptr;
 	}
 
+	handleData()->receiveRequest = m_self;
 	auto status = uv_udp_recv_start( handle(), alloc, UdpRecvRequest::receiveCallback );
 	if ( status < 0 )
 	{
@@ -514,9 +531,9 @@ PyObject* UdpRecvRequest::execute()
 void UdpRecvRequest::receiveCallback( uv_udp_t* handle, ssize_t nread, const uv_buf_t* buf, const struct sockaddr* addr, unsigned int flags )
 {
 	auto* data = reinterpret_cast<HandleData*>( handle->data );
-	if( data->request )
+	if( data->receiveRequest )
 	{
-		auto _this = reinterpret_cast<UdpRecvRequest*>( data->request.get() );
+		auto _this = reinterpret_cast<UdpRecvRequest*>( data->receiveRequest.get() );
 		auto params = std::make_unique<UdpRecvRequest::Params>( nread, buf, addr, flags );
 		_this->onCallback( params.get() );
 	}
@@ -749,6 +766,7 @@ StreamRecvIntoRequest::StreamRecvIntoRequest( PySocketSockObject* s, char* buf, 
 }
 int StreamRecvIntoRequest::startRead()
 {
+	handleData()->receiveRequest = m_self;
 	return uv_read_start( handle(), StreamRecvIntoRequest::alloc, StreamRecvRequest::readCallback );
 }
 
@@ -864,6 +882,23 @@ PyObject* SendPacket( PySocketSockObject* socket, void* data, Py_ssize_t len )
 PyObject* ReceivePacket( PySocketSockObject* socket )
 {
 	auto* handleData = reinterpret_cast<HandleData*>( socket->uv_handle->data );
+
+	// Make sure only one tasklet is receiving packets at a time because:
+	// 1. We do 2 receives, and assume the first thing we receive is the length of a packet,
+	//    and the second thing is the contents of that package.
+	// 2. If we try to call uv_read_start twice in a row, we get error WSAEALREADY.
+	handleData->activePacketReceiveRequests += 1;
+	ON_BLOCK_EXIT( [&handleData] {
+		handleData->activePacketReceiveRequests -= 1;
+		if( PyChannel_GetBalance( handleData->packetReceiveQueue ) < 0 )
+		{
+			PyChannel_Send( handleData->packetReceiveQueue, Py_None );
+		}
+	} );
+	if( handleData->activePacketReceiveRequests > 1 )
+	{
+		PyChannel_Receive( handleData->packetReceiveQueue );
+	}
 
 	uint32_t header{0};
 	auto* request = new StreamRecvRequest(socket, sizeof(header), 0);

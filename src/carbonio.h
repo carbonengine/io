@@ -20,11 +20,21 @@ struct HandleData
 	HandleData();
 	~HandleData();
 
-	// This will always be the channel that we're looking for
+	// This channel is for sending/receiving notifications around asynchronous events.
+	// FIXME: This probably needs to live on the requests as multiple requests can be active from
+	// multiple tasklets (ie. sendpacket and receivepacketoob). It seems to work ok locally, but
+	// that could be because there's no network delay.
 	PyChannelObject* channel;
 
 	// This will always point to the associated request while there is one
 	std::shared_ptr<IRequest> request;
+
+	// We need to keep the receive-request around since another request can take over
+	// as the "active" request while we wait for it to complete.
+	std::shared_ptr<IRequest> receiveRequest;
+
+	// Receive from this when starting to receive macho packet, send to this when done.
+	PyChannelObject* packetReceiveQueue;
 
 	// This backing buffer needs to outlive any potential request so that
 	// we can correctly re-construct multiple `receive()` requests.
@@ -46,6 +56,9 @@ struct HandleData
 
 	// in case the socket deals with packets, it needs to keep track of a packet's sequence number.
 	size_t packetNumber{0};
+	// Keep track of active packet receive requests,
+	// since we need to know when to block on the channel.
+	int activePacketReceiveRequests{0};
 };
 
 enum ChannelPreference : int {
