@@ -918,11 +918,24 @@ PyObject* ReceivePacket( PySocketSockObject* socket )
 		return nullptr;
 	}
 
+	uint32_t remaining = payloadLen;
 	request = new StreamRecvRequest(socket, payloadLen, 0);
 	auto* pyPayload = request->execute();
 	if ( !pyPayload )
 	{
 		return nullptr;
+	}
+	remaining -= PyBytes_Size( pyPayload );
+	while( remaining > 0 )
+	{
+		request = new StreamRecvRequest( socket, remaining, 0 );
+		auto* chunk = request->execute();
+		if( !chunk )
+		{
+			return nullptr;
+		}
+		remaining -= PyBytes_Size( chunk );
+		PyBytes_ConcatAndDel( &pyPayload, chunk );
 	}
 
 	char* payload = PyBytes_AsString( pyPayload );
