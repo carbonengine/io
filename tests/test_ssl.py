@@ -3191,6 +3191,7 @@ class ThreadedTests(unittest.TestCase):
             connector()
         finally:
             t.join()
+            del t
 
     def test_ssl_cert_verify_error(self):
         if support.verbose:

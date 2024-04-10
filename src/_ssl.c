@@ -911,6 +911,109 @@ _ssl_configure_hostname(PySSLSocket *self, const char* server_hostname)
     return retval;
 }
 
+const int UNEXPECTED_BIO_READ_ERROR = -1;
+const int UNEXPECTED_BIO_WRITE_ERROR = -2;
+const int UNEXPECTED_BIO_MEMORY_LEAK = -3;
+const int UNEXPECTED_BIO_RESET_ERROR = -4;
+
+long bio_read_callback( BIO* b, int oper, const char* argp, size_t len, int argi, long argl, int ret, size_t* processed )
+{
+	if( ( oper & BIO_CB_READ ) != BIO_CB_READ )
+	{
+		return ret;
+	}
+	if( ( oper & BIO_CB_RETURN ) == BIO_CB_RETURN )
+	{
+		// Nothing to do after the read completes.
+		return ret;
+	}
+	PyGILState_STATE gstate = PyGILState_Ensure();
+	PySSLSocket* self = (PySSLSocket*)BIO_get_callback_arg( b );
+	PySocketSockObject* sock = GET_SOCKET( self );
+	if( !sock )
+	{
+		PyGILState_Release( gstate );
+		return ret;
+	}
+	Py_INCREF( sock );
+
+	PyTypeObject* baseSocketType = ( (PyObject*)sock )->ob_type->tp_base;
+	PyObject* readBytes = PyObject_CallMethod( (PyObject*)baseSocketType, "recv", "Ol", sock, len );
+	if( readBytes )
+	{
+		BIO_write( b, PyBytes_AsString( readBytes ), (int)PyBytes_Size( readBytes ) );
+		Py_DECREF( readBytes );
+	}
+	else if( PyErr_ExceptionMatches( PyExc_BlockingIOError ) )
+	{
+		PyErr_Clear();
+		ret = SSL_ERROR_WANT_READ;
+	}
+	else
+	{
+		ret = UNEXPECTED_BIO_READ_ERROR;
+	}
+
+	Py_DECREF( sock );
+	PyGILState_Release( gstate );
+	return ret;
+}
+
+
+long bio_write_callback( BIO* b, int oper, const char* argp, size_t len, int argi, long argl, int ret, size_t* processed )
+{
+	if( ( oper & BIO_CB_WRITE ) != BIO_CB_WRITE )
+	{
+		return ret;
+	}
+
+	if( ( oper & BIO_CB_RETURN ) == BIO_CB_RETURN )
+	{
+		// We got called after writing data to the buffer.
+		// Since we don't use the data, clear the buffer here.
+		int success = BIO_reset( b );
+		if( success <= 0 )
+		{
+			return UNEXPECTED_BIO_RESET_ERROR;
+		}
+
+		if( BIO_get_flags( b ) & BIO_FLAGS_NONCLEAR_RST )
+		{
+			// If BIO_FLAGS_NONCLEAR_RST is set, calling BIO_reset does not clear the memory.
+			return UNEXPECTED_BIO_MEMORY_LEAK;
+		}
+		return ret;
+	}
+
+	PyGILState_STATE gstate = PyGILState_Ensure();
+	PySSLSocket* self = (PySSLSocket*)BIO_get_callback_arg( b );
+	PySocketSockObject* sock = GET_SOCKET( self );
+	if( !sock )
+	{
+		PyGILState_Release( gstate );
+		return ret;
+	}
+	Py_INCREF( sock );
+	PyObject* baseSocketType = (PyObject*)( (PyObject*)sock )->ob_type->tp_base;
+	PyObject* sentBytes = PyObject_CallMethod( baseSocketType, "send", "Oy#", sock, argp, (Py_ssize_t)len);
+	if( sentBytes )
+	{
+		Py_DECREF( sentBytes );
+	}
+	else if( PyErr_ExceptionMatches( PyExc_BlockingIOError ) )
+	{
+		PyErr_Clear();
+		ret = SSL_ERROR_WANT_WRITE;
+	}
+	else
+	{
+		ret = UNEXPECTED_BIO_WRITE_ERROR;
+	}
+	Py_DECREF( sock );
+	PyGILState_Release( gstate );
+	return ret;
+}
+
 static PySSLSocket *
 newPySSLSocket(PySSLContext *sslctx, PySocketSockObject *sock,
                enum py_ssl_server_or_client socket_type,
@@ -951,8 +1054,14 @@ newPySSLSocket(PySSLContext *sslctx, PySocketSockObject *sock,
     }
     SSL_set_app_data(self->ssl, self);
     if (sock) {
-        SSL_set_fd(self->ssl, Py_SAFE_DOWNCAST(sock->sock_fd, SOCKET_T, int));
-    } else {
+		BIO* readbio = BIO_new( BIO_s_mem() );
+		BIO* writebio = BIO_new( BIO_s_mem() );
+		SSL_set_bio( self->ssl, readbio, writebio );
+		BIO_set_callback_ex( readbio, bio_read_callback );
+		BIO_set_callback_arg( readbio, (char*)self );
+		BIO_set_callback_ex( writebio, bio_write_callback );
+		BIO_set_callback_arg( writebio, (char*)self );
+	} else {
         /* BIOs are reference counted and SSL_set_bio borrows our reference.
          * To prevent a double free in memory_bio_dealloc() we need to take an
          * extra reference here. */
