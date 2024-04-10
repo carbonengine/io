@@ -181,14 +181,23 @@ IRequest::IRequest( PySocketSockObject* socket ) : m_handle( socket->uv_handle )
 {
 	handleData()->request.reset(this);
 	m_self = handleData()->request;
+	m_channel = PyChannel_New( nullptr );
+	if( !m_channel )
+	{
+		PyWriteUnraisable("Failed to create channel for request");
+	}
+	else
+	{
+		PyChannel_SetPreference( m_channel, PREFER_SENDER );
+	}
 }
 
 void IRequest::sendError(std::string_view msg)
 {
 	PyObject *exc, *val, *tb;
 	PyErr_Fetch( &exc, &val, &tb );
-	PyChannel_SetPreference(handleData()->channel, PREFER_SENDER );
-	auto ret = PyChannel_SendThrow( handleData()->channel, exc, val, tb);
+	PyChannel_SetPreference(m_channel, PREFER_SENDER );
+	auto ret = PyChannel_SendThrow( m_channel, exc, val, tb);
 	if( ret < 0 )
 	{
 		PyErr_Restore( exc, val, tb );
@@ -277,7 +286,7 @@ PyObject* StreamRecvRequest::execute()
 			PyErr_FromUvErr( status );
 			return nullptr;
 		}
-		auto sentinel = PyChannel_Receive( data->channel );
+		auto sentinel = PyChannel_Receive( m_channel );
 		if( !sentinel )
 		{
 			return nullptr;
@@ -307,14 +316,14 @@ void StreamRecvRequest::onCallback( ICallbackParams* callbackParams )
 		return;
 	}
 	ON_BLOCK_EXIT( [&] { clearTimeout(); finalize();} );
-	PyChannel_SetPreference(handleData()->channel, PREFER_SENDER );
+	PyChannel_SetPreference(m_channel, PREFER_SENDER );
 	if ( nread < 0 ) {
 		if (nread != UV_EOF) {
 			PyErr_FromUvErr( int( nread ) );
 			sendError("OnReceive failed to read data.");
 		}
 		else {
-			if ( PyChannel_Send( handleData()->channel, Py_None ) < 0 ) {
+			if ( PyChannel_Send( m_channel, Py_None ) < 0 ) {
 				PyWriteUnraisable( "StreamRecvRequest::onReceive failed to signal sentinel" );
 			}
 		}
@@ -322,7 +331,7 @@ void StreamRecvRequest::onCallback( ICallbackParams* callbackParams )
 	if ( nread > 0 ) {
 		m_received_len += nread;
 		uv_read_stop( handle() );
-		if ( PyChannel_Send( handleData()->channel, Py_None ) < 0 ) {
+		if ( PyChannel_Send( m_channel, Py_None ) < 0 ) {
 			PyWriteUnraisable( "StreamRecvRequest::onReceive failed to signal sentinel" );
 		}
 	}
@@ -424,9 +433,9 @@ void StreamRecvRequest::cancel()
 {
 	uv_read_stop( handle() );
 	// Check the balance, as this could be called after the request has finished executing.
-	if( PyChannel_GetBalance( handleData()->channel ) < 0 )
+	if( PyChannel_GetBalance( m_channel ) < 0 )
 	{
-		if( PyChannel_Send( handleData()->channel, Py_None ) < 0 )
+		if( PyChannel_Send( m_channel, Py_None ) < 0 )
 		{
 			PyWriteUnraisable( "StreamRecvRequest::cancel failed to signal sentinel" );
 		}
@@ -459,7 +468,7 @@ PyObject* StreamSendRequest::execute()
 
 	if( handleData()->blockingSend )
 	{
-		return PyChannel_Receive( handleData()->channel );
+		return PyChannel_Receive( m_channel );
 	}
 	return PyLong_FromLong(0);
 }
@@ -484,7 +493,7 @@ void StreamSendRequest::onCallback( ICallbackParams* callbackParams )
 	}
 	if( handleData()->blockingSend && !m_timedOut )
 	{
-		if( PyChannel_Send( handleData()->channel, py_status ) < 0 )
+		if( PyChannel_Send( m_channel, py_status ) < 0 )
 		{
 			PyWriteUnraisable( "StreamSendRequest::send Failed to send status over channel" );
 		}
@@ -519,7 +528,7 @@ PyObject* UdpRecvRequest::execute()
 		return nullptr;
 	}
 
-	auto sentinel = PyChannel_Receive( handleData()->channel );
+	auto sentinel = PyChannel_Receive( m_channel );
 	if( !sentinel )
 	{
 		return nullptr;
@@ -637,7 +646,7 @@ void UdpRecvRequest::onCallback( ICallbackParams* callbackParams )
 
 	// no more data, let's signal that we're done
 	if (nread == 0) {
-		if ( PyChannel_Send( handleData()->channel, Py_None ) < 0 )
+		if ( PyChannel_Send( m_channel, Py_None ) < 0 )
 		{
 			PyWriteUnraisable( "UdpRecvRequest::onRead failed sending sentinel value on channel" );
 			return;
@@ -661,9 +670,9 @@ void UdpRecvRequest::cancel()
 	uv_udp_recv_stop( handle() );
 	// Check the balance, as this could be called
 	// after the request has finished executing.
-	if( PyChannel_GetBalance( handleData()->channel ) < 0 )
+	if( PyChannel_GetBalance( m_channel ) < 0 )
 	{
-		if( PyChannel_Send( handleData()->channel, Py_None ) < 0 )
+		if( PyChannel_Send( m_channel, Py_None ) < 0 )
 		{
 			PyWriteUnraisable( "UdpRecvRequest::cancel failed sending sentinel value on channel" );
 		}
@@ -681,7 +690,7 @@ PyObject* UdpSendRequest::execute()
 	{
 		return PyLong_FromLong( status );
 	}
-	auto ret = PyChannel_Receive( handleData()->channel );
+	auto ret = PyChannel_Receive( m_channel );
 	status = PyLong_AsLong( ret );
 	if ( status < 0 ) {
 		if( !( status == -1 && PyErr_Occurred() ) )
@@ -716,7 +725,7 @@ void UdpSendRequest::onCallback( ICallbackParams* callbackParams )
 		sendError( "UdpSendRequest::send Failed to convert status to python int" );
 		return;
 	}
-	if( PyChannel_Send( handleData()->channel, py_status ) < 0 )
+	if( PyChannel_Send( m_channel, py_status ) < 0 )
 	{
 		PyWriteUnraisable( "UdpSendRequest::send Failed to send status over channel" );
 	}
@@ -732,7 +741,7 @@ PyObject* StreamAcceptRequest::execute()
 		return nullptr;
 	}
 
-	result = PyChannel_Receive( handleData()->channel );
+	result = PyChannel_Receive( m_channel );
 
 	if( !result )
 	{
@@ -817,7 +826,7 @@ PyObject* StreamConnectRequest::execute()
 		PyErr_FromUvErr( status );
 		return nullptr;
 	}
-	PyObject* connect_status = PyChannel_Receive(handleData()->channel);
+	PyObject* connect_status = PyChannel_Receive(m_channel);
 	if( connect_status == nullptr ) {
 		return nullptr;
 	}
@@ -852,7 +861,7 @@ void StreamConnectRequest::onCallback( ICallbackParams* callbackParams )
 	{
 		PyObject *exc, *val, *tb;
 		PyErr_Fetch( &exc, &val, &tb );
-		auto ret = PyChannel_SendThrow( handleData()->channel, exc, val, tb );
+		auto ret = PyChannel_SendThrow( m_channel, exc, val, tb );
 		if( ret < 0 )
 		{
 			PyErr_Restore( exc, val, tb );
@@ -860,7 +869,7 @@ void StreamConnectRequest::onCallback( ICallbackParams* callbackParams )
 		}
 		return;
 	}
-	int ret = PyChannel_Send( handleData()->channel, py_status );
+	int ret = PyChannel_Send( m_channel, py_status );
 	if( ret < 0 )
 	{
 		PyWriteUnraisable( "StreamConnectRequest::onConnect failed to send status" );

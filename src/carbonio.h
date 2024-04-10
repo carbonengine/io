@@ -20,10 +20,7 @@ struct HandleData
 	HandleData();
 	~HandleData();
 
-	// This channel is for sending/receiving notifications around asynchronous events.
-	// FIXME: This probably needs to live on the requests as multiple requests can be active from
-	// multiple tasklets (ie. sendpacket and receivepacketoob). It seems to work ok locally, but
-	// that could be because there's no network delay.
+	// This channel is for accepting connections.
 	PyChannelObject* channel;
 
 	// This will always point to the associated request while there is one
@@ -97,6 +94,7 @@ public:
 	virtual ~IRequest()
 	{
 		clearTimeout();
+		Py_XDECREF(m_channel);
 	}
 
 	virtual void cancel();
@@ -128,6 +126,10 @@ protected:
 	// Once no more libuv callbacks are expected for the request, `finalize()` needs to
 	// be called in order to avoid leaking requests.
 	std::shared_ptr<IRequest> m_self{nullptr};
+
+	// Requests wait by receiving on this channel as they wait for asynchronous
+	// operations to complete.
+	PyChannelObject* m_channel{nullptr};
 };
 
 class IStreamRequest : public IRequest
@@ -293,6 +295,9 @@ public:
 	StreamAcceptRequest( PySocketSockObject* socket ) :
 		IStreamRequest( socket )
 	{
+		Py_XDECREF( m_channel );
+		m_channel = handleData()->channel;
+		Py_INCREF( m_channel );
 	}
 
 	PyObject* execute() override;
