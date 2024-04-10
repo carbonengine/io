@@ -918,13 +918,13 @@ const int UNEXPECTED_BIO_RESET_ERROR = -4;
 
 long bio_read_callback( BIO* b, int oper, const char* argp, size_t len, int argi, long argl, int ret, size_t* processed )
 {
-	if( ( oper & BIO_CB_READ ) != BIO_CB_READ )
-	{
-		return ret;
-	}
-	if( ( oper & BIO_CB_RETURN ) == BIO_CB_RETURN )
+	if( BIO_cb_post( oper ) )
 	{
 		// Nothing to do after the read completes.
+		return ret;
+	}
+	if( oper != BIO_CB_READ )
+	{
 		return ret;
 	}
 	PyGILState_STATE gstate = PyGILState_Ensure();
@@ -967,7 +967,7 @@ long bio_write_callback( BIO* b, int oper, const char* argp, size_t len, int arg
 		return ret;
 	}
 
-	if( ( oper & BIO_CB_RETURN ) == BIO_CB_RETURN )
+	if( BIO_cb_post( oper ) )
 	{
 		// We got called after writing data to the buffer.
 		// Since we don't use the data, clear the buffer here.
