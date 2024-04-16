@@ -460,6 +460,8 @@ typedef struct {
     PyObject *exc_type;
     PyObject *exc_value;
     PyObject *exc_tb;
+	PyChannelObject *write_channel;
+	int active_writes;
 } PySSLSocket;
 
 typedef struct {
@@ -1205,6 +1207,13 @@ newPySSLSocket(PySSLContext *sslctx, PySocketSockObject *sock,
             return NULL;
         }
     }
+	self->write_channel = PyChannel_New( NULL );
+	if( !self->write_channel )
+	{
+		Py_DECREF(self);
+		return NULL;
+	}
+	self->active_writes = 0;
     return self;
 }
 
@@ -2538,6 +2547,32 @@ PySSL_select(PySocketSockObject *s, int writing, _PyTime_t timeout)
     return rc == 0 ? SOCKET_HAS_TIMED_OUT : SOCKET_OPERATION_OK;
 }
 
+void queue_write(PySSLSocket *self)
+{
+	self->active_writes += 1;
+	if( self->active_writes > 1 )
+	{
+		PyObject* ret = PyChannel_Receive( self->write_channel );
+		if( !ret )
+		{
+			PyWriteUnraisable("_ssl.c: queue_write failed to receive from write queue");
+		}
+	}
+}
+
+void complete_write(PySSLSocket *self)
+{
+	self->active_writes -= 1;
+	if( PyChannel_GetBalance( self->write_channel ) < 0 )
+	{
+		int ret = PyChannel_Send( self->write_channel, Py_None );
+		if( ret < 0 )
+		{
+			PyWriteUnraisable("_ssl.c: complete_write failed to send to write queue");
+		}
+	}
+}
+
 /*[clinic input]
 _ssl._SSLSocket.write
     b: Py_buffer
@@ -2600,12 +2635,10 @@ _ssl__SSLSocket_write_impl(PySSLSocket *self, Py_buffer *b)
         PyErr_SetString(PySSLErrorObject,
                         "Underlying socket too large for select().");
         goto error;
-    }
-
-    do {
     } else if( sockstate == SOCKET_IS_BLOCKING && PyErr_Occurred() ) {
 		goto error;
 	}
+	queue_write( self );
 	do {
         PySSL_BEGIN_ALLOW_THREADS
         len = SSL_write(self->ssl, b->buf, (int)b->len);
@@ -2614,7 +2647,7 @@ _ssl__SSLSocket_write_impl(PySSLSocket *self, Py_buffer *b)
         self->err = err;
 
         if (PyErr_CheckSignals())
-            goto error;
+            goto write_error;
 
         if (has_timeout)
             timeout = deadline - _PyTime_GetMonotonicClock();
@@ -2630,12 +2663,12 @@ _ssl__SSLSocket_write_impl(PySSLSocket *self, Py_buffer *b)
         if (sockstate == SOCKET_HAS_TIMED_OUT) {
             PyErr_SetString(PySocketModule.timeout_error,
                             "The write operation timed out");
-            goto error;
+            goto write_error;
         } else if (sockstate == SOCKET_HAS_BEEN_CLOSED) {
             PyErr_SetString(PySSLErrorObject,
                             "Underlying socket has been closed.");
-            goto error;
-        } else if (sockstate == SOCKET_IS_NONBLOCKING) {
+            goto write_error;
+        } else if (sockstate == SOCKET_IS_NONBLOCKING || sockstate == SOCKET_IS_BLOCKING) {
             break;
         }
     } while (err.ssl == SSL_ERROR_WANT_READ ||
@@ -2643,14 +2676,17 @@ _ssl__SSLSocket_write_impl(PySSLSocket *self, Py_buffer *b)
 
 	if( PyErr_Occurred() )
 	{
-		goto error;
+		goto write_error;
 	}
+	complete_write(self);
     Py_XDECREF(sock);
     if (len <= 0)
         return PySSL_SetError(self, len, __FILE__, __LINE__);
     if (PySSL_ChainExceptions(self) < 0)
         return NULL;
     return PyLong_FromLong(len);
+write_error:
+	complete_write(self);
 error:
     Py_XDECREF(sock);
     PySSL_ChainExceptions(self);
