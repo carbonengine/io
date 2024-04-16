@@ -916,6 +916,24 @@ const int UNEXPECTED_BIO_WRITE_ERROR = -2;
 const int UNEXPECTED_BIO_MEMORY_LEAK = -3;
 const int UNEXPECTED_BIO_RESET_ERROR = -4;
 
+
+void PyWriteUnraisable( const char* msg )
+{
+	PyObject *exc, *val, *tb;
+	PyObject* msg_obj;
+	PyErr_Fetch( &exc, &val, &tb );
+	msg_obj = PyUnicode_FromString( msg ? msg : "" );
+	PyErr_Restore( exc, val, tb );
+	if( !msg_obj )
+	{
+		msg_obj = Py_None;
+		Py_INCREF( Py_None );
+	}
+	PyErr_WriteUnraisable( msg_obj );
+	Py_DECREF( msg_obj );
+}
+
+
 long bio_read_callback( BIO* b, int oper, const char* argp, size_t len, int argi, long argl, int ret, size_t* processed )
 {
 	if( BIO_cb_post( oper ) )
@@ -951,7 +969,34 @@ long bio_read_callback( BIO* b, int oper, const char* argp, size_t len, int argi
 	}
 	else
 	{
-		ret = UNEXPECTED_BIO_READ_ERROR;
+		PyObject *exc, *val, *tb;
+		PyErr_Fetch( &exc, &val, &tb );
+		PyObject* pyErrno = NULL;
+		if( val )
+		{
+			pyErrno = PyObject_GetAttrString( val, "errno" );
+		}
+		PyErr_Restore( exc, val, tb );
+		if( pyErrno )
+		{
+			int err = PyLong_AsLong( pyErrno );
+			Py_DECREF(pyErrno);
+			if( err == -1 && PyErr_Occurred() )
+			{
+				PyWriteUnraisable("bio_read_callback failed to convert error code from exception");
+				ret = UNEXPECTED_BIO_READ_ERROR;
+			}
+			else
+			{
+				errno = err;
+				ret = SSL_ERROR_SYSCALL;
+			}
+		}
+		else
+		{
+			PyWriteUnraisable("bio_read_callback received exception without errno");
+			ret = UNEXPECTED_BIO_READ_ERROR;
+		}
 	}
 
 	Py_DECREF( sock );
@@ -1007,7 +1052,34 @@ long bio_write_callback( BIO* b, int oper, const char* argp, size_t len, int arg
 	}
 	else
 	{
-		ret = UNEXPECTED_BIO_WRITE_ERROR;
+		PyObject *exc, *val, *tb;
+		PyErr_Fetch( &exc, &val, &tb );
+		PyObject* pyErrno = NULL;
+		if( val )
+		{
+			pyErrno = PyObject_GetAttrString( val, "errno" );
+		}
+		PyErr_Restore( exc, val, tb );
+		if( pyErrno )
+		{
+			int err = PyLong_AsLong( pyErrno );
+			Py_DECREF(pyErrno);
+			if( err == -1 && PyErr_Occurred() )
+			{
+				PyWriteUnraisable("bio_write_callback failed to convert error code from exception");
+				ret = UNEXPECTED_BIO_WRITE_ERROR;
+			}
+			else
+			{
+				errno = err;
+				ret = SSL_ERROR_SYSCALL;
+			}
+		}
+		else
+		{
+			PyWriteUnraisable("bio_write_callback received exception without errno");
+			ret = UNEXPECTED_BIO_WRITE_ERROR;
+		}
 	}
 	Py_DECREF( sock );
 	PyGILState_Release( gstate );
@@ -1207,11 +1279,15 @@ _ssl__SSLSocket_do_handshake_impl(PySSLSocket *self)
             PyErr_SetString(PySSLErrorObject,
                             ERRSTR("Underlying socket too large for select()."));
             goto error;
-        } else if (sockstate == SOCKET_IS_NONBLOCKING) {
+        } else if (sockstate == SOCKET_IS_NONBLOCKING || sockstate == SOCKET_IS_BLOCKING) {
             break;
         }
     } while (err.ssl == SSL_ERROR_WANT_READ ||
              err.ssl == SSL_ERROR_WANT_WRITE);
+	if( PyErr_Occurred() )
+	{
+		goto error;
+	}
     Py_XDECREF(sock);
     if (ret < 1)
         return PySSL_SetError(self, ret, __FILE__, __LINE__);
@@ -2527,6 +2603,10 @@ _ssl__SSLSocket_write_impl(PySSLSocket *self, Py_buffer *b)
     }
 
     do {
+    } else if( sockstate == SOCKET_IS_BLOCKING && PyErr_Occurred() ) {
+		goto error;
+	}
+	do {
         PySSL_BEGIN_ALLOW_THREADS
         len = SSL_write(self->ssl, b->buf, (int)b->len);
         err = _PySSL_errno(len <= 0, self->ssl, len);
@@ -2561,6 +2641,10 @@ _ssl__SSLSocket_write_impl(PySSLSocket *self, Py_buffer *b)
     } while (err.ssl == SSL_ERROR_WANT_READ ||
              err.ssl == SSL_ERROR_WANT_WRITE);
 
+	if( PyErr_Occurred() )
+	{
+		goto error;
+	}
     Py_XDECREF(sock);
     if (len <= 0)
         return PySSL_SetError(self, len, __FILE__, __LINE__);
@@ -2706,11 +2790,15 @@ _ssl__SSLSocket_read_impl(PySSLSocket *self, int len, int group_right_1,
             PyErr_SetString(PySocketModule.timeout_error,
                             "The read operation timed out");
             goto error;
-        } else if (sockstate == SOCKET_IS_NONBLOCKING) {
+        } else if (sockstate == SOCKET_IS_NONBLOCKING || sockstate == SOCKET_IS_BLOCKING) {
             break;
         }
     } while (err.ssl == SSL_ERROR_WANT_READ ||
              err.ssl == SSL_ERROR_WANT_WRITE);
+	if( PyErr_Occurred() )
+	{
+		goto error;
+	}
 
     if (count <= 0) {
         PySSL_SetError(self, count, __FILE__, __LINE__);
@@ -2839,7 +2927,7 @@ _ssl__SSLSocket_shutdown_impl(PySSLSocket *self)
         PySSL_SetError(self, ret, __FILE__, __LINE__);
         return NULL;
     }
-    if (self->exc_type != NULL)
+    if (self->exc_type != NULL || PyErr_Occurred())
         goto error;
     if (sock)
         /* It's already INCREF'ed */
