@@ -4636,7 +4636,8 @@ static int
 
 PyObject* uv_sendall_impl(PySocketSockObject* s, char* buf, Py_ssize_t len, int flags)
 {
-	auto* request = new StreamSendRequest(s, buf, len, flags);
+	auto handleData = reinterpret_cast<HandleData*>(s->uv_handle->data);
+	auto* request = new StreamSendRequest(s, buf, len, flags, handleData->blockingSend);
 	auto status = request->execute();
 	return status;
 }

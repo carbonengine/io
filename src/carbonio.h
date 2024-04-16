@@ -202,11 +202,12 @@ private:
 class StreamSendRequest : public IStreamRequest
 {
 public:
-	StreamSendRequest( PySocketSockObject* socket, char* buf, Py_ssize_t len, int flags ) :
+	StreamSendRequest( PySocketSockObject* socket, char* buf, Py_ssize_t len, int flags, bool blockingSend ) :
 		IStreamRequest( socket ), m_flags( flags )
 	{
 		m_sendBuffer.base = buf;
 		m_sendBuffer.len = len;
+		m_blockingSend = blockingSend;
 	}
 	PyObject* execute() override;
 	static void sendCallback( uv_write_t* request, int status );
@@ -221,6 +222,7 @@ private:
 		int m_flags;
 		uv_write_t m_writeRequest;
 		uv_buf_t m_sendBuffer;
+		bool m_blockingSend;
 };
 
 class IUdpRequest : public IRequest

@@ -466,7 +466,7 @@ PyObject* StreamSendRequest::execute()
 	}
 	s_bytesSent += m_sendBuffer.len;
 
-	if( handleData()->blockingSend )
+	if( m_blockingSend )
 	{
 		return PyChannel_Receive( m_channel );
 	}
@@ -883,7 +883,8 @@ PyObject* SendPacket( PySocketSockObject* socket, void* data, Py_ssize_t len )
 	*reinterpret_cast<uint32_t*>(buf) = len;
 	memcpy_s( buf + sizeof(uint32_t), len, data, len );
 
-	auto req = new StreamSendRequest( socket, buf, bufsize, 0 );
+	auto handleData = reinterpret_cast<HandleData*>(socket->uv_handle->data);
+	auto req = new StreamSendRequest( socket, buf, bufsize, 0, handleData->blockingSend );
 	s_packetsSent += 1;
 	return req->execute();
 }
