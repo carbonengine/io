@@ -5562,6 +5562,13 @@ static PyObject *sock_recvpacketoob(PySocketSockObject *s, PyObject *args)
 	if (!PyArg_ParseTuple(args, ":recvpacket"))
 		return nullptr;
 
+	if( s->sock_fd == INVALID_SOCKET || !is_valid_uv_handle( s->uv_handle ) )
+	{
+		errno = EBADF;
+		PyErr_SetFromErrno( PyExc_OSError );
+		return nullptr;
+	}
+
 	return ReceivePacket( s );
 }
 PyDoc_STRVAR( recvpacketoob_doc,
@@ -5578,6 +5585,13 @@ static PyObject *sock_sendpacket(PySocketSockObject *s, PyObject *args)
 
 	if (!PyArg_ParseTuple( args, "y*:sendpacket", &pbuf ))
 	{
+		return nullptr;
+	}
+
+	if( s->sock_fd == INVALID_SOCKET || !is_valid_uv_handle( s->uv_handle ) )
+	{
+		errno = EBADF;
+		PyErr_SetFromErrno( PyExc_OSError );
 		return nullptr;
 	}
 
