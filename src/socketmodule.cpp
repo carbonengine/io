@@ -2781,12 +2781,6 @@ static int
 #endif
 }
 
-
-bool is_valid_uv_handle( uv_handle_t* handle )
-{
-	return handle && !uv_is_closing(handle);
-}
-
 /* s._accept() -> (fd, address) */
 
 static PyObject*

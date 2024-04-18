@@ -10,6 +10,7 @@
 #include <socketmodule.h>
 
 void cleanup_uv_handle( uv_handle_t* uv_handle );
+bool is_valid_uv_handle( uv_handle_t* handle );
 
 void PyErr_FromUvErr( int error );
 void PyLogError( const char* msg );

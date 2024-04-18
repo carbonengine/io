@@ -90,6 +90,16 @@ void cleanup_uv_handle( uv_handle_t* uv_handle )
 	}
 }
 
+bool is_valid_uv_handle( uv_handle_t* handle )
+{
+	return handle && !uv_is_closing( handle );
+}
+
+bool is_valid_socket( PySocketSockObject* socket )
+{
+	return socket->sock_fd != INVALID_SOCKET && is_valid_uv_handle( socket->uv_handle );
+}
+
 HandleData::HandleData() : channel( PyChannel_New( nullptr ) ), packetReceiveQueue( PyChannel_New( nullptr ) ), request( nullptr )
 {
 	buf = uv_buf_init( nullptr, 0 );
@@ -891,11 +901,14 @@ PyObject* ReceivePacket( PySocketSockObject* socket )
 	//    and the second thing is the contents of that package.
 	// 2. If we try to call uv_read_start twice in a row, we get error WSAEALREADY.
 	handleData->activePacketReceiveRequests += 1;
-	ON_BLOCK_EXIT( [&handleData] {
-		handleData->activePacketReceiveRequests -= 1;
-		if( PyChannel_GetBalance( handleData->packetReceiveQueue ) < 0 )
+	ON_BLOCK_EXIT( [&socket, &handleData] {
+		if ( is_valid_socket( socket ) )
 		{
-			PyChannel_Send( handleData->packetReceiveQueue, Py_None );
+			handleData->activePacketReceiveRequests -= 1;
+			if( PyChannel_GetBalance( handleData->packetReceiveQueue ) < 0 )
+			{
+				PyChannel_Send( handleData->packetReceiveQueue, Py_None );
+			}
 		}
 	} );
 	if( handleData->activePacketReceiveRequests > 1 )
@@ -911,6 +924,15 @@ PyObject* ReceivePacket( PySocketSockObject* socket )
 		return nullptr;
 	}
 	ON_BLOCK_EXIT([pyHeader]{ Py_DecRef( pyHeader ); });
+	if( !is_valid_socket( socket ) )
+	{
+		// The request completed successfully, but there is still
+		// room for the socket to have closed between the sending
+		// tasklet sending the data and this tasklet getting run
+		// after the data is made available on the channel.
+		PyErr_SetString(PyExc_OSError, "Socket closed while receiving packet");
+		return nullptr;
+	}
 
 	header = *reinterpret_cast<decltype(header)*>(PyBytes_AsString( pyHeader ) );
 	uint32_t payloadLen = header & ceHeaderSizeMask;
@@ -939,6 +961,10 @@ PyObject* ReceivePacket( PySocketSockObject* socket )
 		}
 		remaining -= PyBytes_Size( chunk );
 		PyBytes_ConcatAndDel( &pyPayload, chunk );
+		if( !pyPayload )
+		{
+			return nullptr;
+		}
 	}
 
 	char* payload = PyBytes_AsString( pyPayload );
