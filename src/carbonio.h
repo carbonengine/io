@@ -144,6 +144,7 @@ class StreamConnectRequest : public IStreamRequest
 {
 public:
 	StreamConnectRequest( PySocketSockObject* socket, struct sockaddr* address );
+	~StreamConnectRequest();
 	PyObject* execute() override;
 
 	static void connectCallback(uv_connect_t* connection, int status);
@@ -157,6 +158,7 @@ private:
 	void onCallback (ICallbackParams* status) override;
 
 	struct sockaddr* m_address{ nullptr };
+	uv_connect_t* m_connect{ nullptr };
 };
 
 class StreamRecvRequest : public IStreamRequest

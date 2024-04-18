@@ -816,14 +816,22 @@ PyObject* StreamRecvIntoRequest::constructResult( HandleData* data ) const
 StreamConnectRequest::StreamConnectRequest( PySocketSockObject* socket, struct sockaddr* address ) :
 	IStreamRequest( socket ), m_address( address )
 {
+	m_connect = new uv_connect_t;
+}
+StreamConnectRequest::~StreamConnectRequest()
+{
+	delete m_connect;
 }
 
 PyObject* StreamConnectRequest::execute()
 {
-	auto* connect = new uv_connect_t;
-	ON_BLOCK_EXIT( [&connect] { delete connect; } );
-	Py_XDECREF(startTimeout());
-	int status = uv_tcp_connect(connect, reinterpret_cast<uv_tcp_t*>( handle() ), m_address, &StreamConnectRequest::connectCallback);
+	auto ret = startTimeout();
+	if( !ret )
+	{
+		return nullptr;
+	}
+	Py_DecRef(ret);
+	int status = uv_tcp_connect(m_connect, reinterpret_cast<uv_tcp_t*>( handle() ), m_address, &StreamConnectRequest::connectCallback);
 	if ( status < 0 )
 	{
 		PyErr_FromUvErr( status );
@@ -839,7 +847,10 @@ PyObject* StreamConnectRequest::execute()
 	}
 	status = PyLong_AsLong( connect_status );
 	if( status < 0 ) {
-		PyErr_FromUvErr( status );
+		if( !PyErr_Occurred() )
+		{
+			PyErr_FromUvErr( status );
+		}
 		return nullptr;
 	}
 
