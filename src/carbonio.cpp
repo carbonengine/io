@@ -7,9 +7,12 @@
 #include "socketmodule.h"
 #include "protocol.h"
 
+// This is the module name that shows up in loglite.
+const char* g_moduleName = "_socket";
+
 static_assert( sizeof( SOCKET_T ) == sizeof( uv_os_fd_t ), "Mismatching size between SOCKET_T and uv_os_fd_t" );
 
-#ifdef __APPLE__
+#if __APPLE__
 // AppleClang doesn't know the _s versions yet, so we are forced to do the unsafe thing
 #ifndef __STDC_LIB_EXT1_
 #define memcpy_s(dst, dstsize, src, srcsize) memcpy(dst, src, srcsize)
@@ -138,20 +141,10 @@ void PyErr_FromUvErr( int uv_status )
 	PyErr_SetFromErrno( exc_type );
 }
 
-void PyWriteUnraisable( const char* msg )
+void PyLogError( const char* msg )
 {
-	PyObject *exc, *val, *tb;
-	PyObject* msg_obj;
-	PyErr_Fetch( &exc, &val, &tb );
-	msg_obj = PyUnicode_FromString( msg ? msg : "" );
-	PyErr_Restore( exc, val, tb );
-	if( !msg_obj )
-	{
-		msg_obj = Py_None;
-		Py_INCREF( Py_None );
-	}
-	PyErr_WriteUnraisable( msg_obj );
-	Py_DECREF( msg_obj );
+	CCP_LOGERR(msg);
+	PyErr_Clear();
 }
 
 uv_loop_t * GetUvLoop()
@@ -184,7 +177,7 @@ IRequest::IRequest( PySocketSockObject* socket ) : m_handle( socket->uv_handle )
 	m_channel = PyChannel_New( nullptr );
 	if( !m_channel )
 	{
-		PyWriteUnraisable("Failed to create channel for request");
+		PyLogError( "Failed to create channel for request" );
 	}
 	else
 	{
@@ -201,7 +194,7 @@ void IRequest::sendError(std::string_view msg)
 	if( ret < 0 )
 	{
 		PyErr_Restore( exc, val, tb );
-		PyWriteUnraisable( msg.data() );
+		PyLogError( msg.data() );
 	}
 }
 
@@ -324,7 +317,7 @@ void StreamRecvRequest::onCallback( ICallbackParams* callbackParams )
 		}
 		else {
 			if ( PyChannel_Send( m_channel, Py_None ) < 0 ) {
-				PyWriteUnraisable( "StreamRecvRequest::onReceive failed to signal sentinel" );
+				PyLogError( "StreamRecvRequest::onReceive failed to signal sentinel" );
 			}
 		}
 	}
@@ -332,7 +325,7 @@ void StreamRecvRequest::onCallback( ICallbackParams* callbackParams )
 		m_received_len += nread;
 		uv_read_stop( handle() );
 		if ( PyChannel_Send( m_channel, Py_None ) < 0 ) {
-			PyWriteUnraisable( "StreamRecvRequest::onReceive failed to signal sentinel" );
+			PyLogError( "StreamRecvRequest::onReceive failed to signal sentinel" );
 		}
 	}
 }
@@ -437,7 +430,7 @@ void StreamRecvRequest::cancel()
 	{
 		if( PyChannel_Send( m_channel, Py_None ) < 0 )
 		{
-			PyWriteUnraisable( "StreamRecvRequest::cancel failed to signal sentinel" );
+			PyLogError( "StreamRecvRequest::cancel failed to signal sentinel" );
 		}
 	}
 	IRequest::cancel();
@@ -495,7 +488,7 @@ void StreamSendRequest::onCallback( ICallbackParams* callbackParams )
 	{
 		if( PyChannel_Send( m_channel, py_status ) < 0 )
 		{
-			PyWriteUnraisable( "StreamSendRequest::send Failed to send status over channel" );
+			PyLogError( "StreamSendRequest::send Failed to send status over channel" );
 		}
 	}
 }
@@ -508,7 +501,7 @@ void SendError(PyChannelObject* channel, std::string_view msg)
 	if( ret < 0 )
 	{
 		PyErr_Restore( exc, val, tb );
-		PyWriteUnraisable( msg.data() );
+		PyLogError( msg.data() );
 	}
 }
 
@@ -648,7 +641,7 @@ void UdpRecvRequest::onCallback( ICallbackParams* callbackParams )
 	if (nread == 0) {
 		if ( PyChannel_Send( m_channel, Py_None ) < 0 )
 		{
-			PyWriteUnraisable( "UdpRecvRequest::onRead failed sending sentinel value on channel" );
+			PyLogError( "UdpRecvRequest::onRead failed sending sentinel value on channel" );
 			return;
 		}
 	}
@@ -674,7 +667,7 @@ void UdpRecvRequest::cancel()
 	{
 		if( PyChannel_Send( m_channel, Py_None ) < 0 )
 		{
-			PyWriteUnraisable( "UdpRecvRequest::cancel failed sending sentinel value on channel" );
+			PyLogError( "UdpRecvRequest::cancel failed sending sentinel value on channel" );
 		}
 	}
 	IRequest::cancel();
@@ -727,7 +720,7 @@ void UdpSendRequest::onCallback( ICallbackParams* callbackParams )
 	}
 	if( PyChannel_Send( m_channel, py_status ) < 0 )
 	{
-		PyWriteUnraisable( "UdpSendRequest::send Failed to send status over channel" );
+		PyLogError( "UdpSendRequest::send Failed to send status over channel" );
 	}
 }
 
@@ -865,14 +858,14 @@ void StreamConnectRequest::onCallback( ICallbackParams* callbackParams )
 		if( ret < 0 )
 		{
 			PyErr_Restore( exc, val, tb );
-			PyWriteUnraisable( "StreamConnectRequest::onConnect failed to send exception" );
+			PyLogError( "StreamConnectRequest::onConnect failed to send exception" );
 		}
 		return;
 	}
 	int ret = PyChannel_Send( m_channel, py_status );
 	if( ret < 0 )
 	{
-		PyWriteUnraisable( "StreamConnectRequest::onConnect failed to send status" );
+		PyLogError( "StreamConnectRequest::onConnect failed to send status" );
 	}
 }
 

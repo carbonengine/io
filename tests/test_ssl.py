@@ -3191,6 +3191,8 @@ class ThreadedTests(unittest.TestCase):
             connector()
         finally:
             t.join()
+            # Delete the thread explicitly to make sure it gets removed from the threading._dangling weakset.
+            # If the thread is not deleted, dangling thread warnings get logged in support.threading_cleanup()
             del t
 
     def test_ssl_cert_verify_error(self):

@@ -12,7 +12,7 @@
 void cleanup_uv_handle( uv_handle_t* uv_handle );
 
 void PyErr_FromUvErr( int error );
-void PyWriteUnraisable( const char* msg );
+void PyLogError( const char* msg );
 
 struct IRequest;
 struct HandleData

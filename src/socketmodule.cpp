@@ -3315,7 +3315,7 @@ void on_accept(uv_stream_t *handle, int status)
     if( !channel )
 	{
 		PyErr_BadInternalCall();
-		PyWriteUnraisable("on_accept received null channel pointer" );
+		PyLogError( "on_accept received null channel pointer" );
 		return;
     }
 	auto *client = new uv_tcp_t;
@@ -3388,7 +3388,7 @@ void on_accept(uv_stream_t *handle, int status)
 	int ret = PyChannel_Send(channel, tuple);
 	if( ret < 0 )
 	{
-		PyWriteUnraisable( "on_accept failed to send status" );
+		PyLogError( "on_accept failed to send status" );
 	}
 	guard.Dismiss();
 }
@@ -4666,7 +4666,7 @@ static PyObject*
 		if( status == -1 && PyErr_Occurred() )
 		{
 			PyErr_BadInternalCall();
-			PyWriteUnraisable("StreamSendRequest::send failed to convert Python status");
+			PyLogError( "StreamSendRequest::send failed to convert Python status" );
 		}
 		if( status < 0 )
 		{
@@ -4730,7 +4730,7 @@ static PyObject*
 		if( status == -1 && PyErr_Occurred() )
 		{
 			PyErr_BadInternalCall();
-			PyWriteUnraisable("StreamSendRequest::send failed to convert Python status");
+			PyLogError( "StreamSendRequest::send failed to convert Python status" );
 		}
 		if( status < 0 )
 		{
