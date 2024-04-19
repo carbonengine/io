@@ -987,13 +987,22 @@ PyObject* ReceivePacket( PySocketSockObject* socket )
 			handleData->activePacketReceiveRequests -= 1;
 			if( PyChannel_GetBalance( handleData->packetReceiveQueue ) < 0 )
 			{
-				PyChannel_Send( handleData->packetReceiveQueue, Py_None );
+				int ret = PyChannel_Send( handleData->packetReceiveQueue, Py_None );
+				if( ret == -1 )
+				{
+					LogError("ReceivePacket failed to send sentinel");
+					PyErr_Clear();
+				}
 			}
 		}
 	} );
 	if( handleData->activePacketReceiveRequests > 1 )
 	{
-		PyChannel_Receive( handleData->packetReceiveQueue );
+		PyObject* ret = PyChannel_Receive( handleData->packetReceiveQueue );
+		if( !ret )
+		{
+			return nullptr;
+		}
 	}
 
 	uint32_t header{0};
