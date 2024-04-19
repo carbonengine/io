@@ -941,9 +941,51 @@ extern "C" void RemoveOobDataCallback( OobDataCallback packetCallback )
 	s_oobDataCallbacks.erase( std::remove( s_oobDataCallbacks.begin(), s_oobDataCallbacks.end(), packetCallback ), s_oobDataCallbacks.end() );
 }
 
+// Below methods are used by BlueNet and therefore avoid usage of Python
+
+extern "C" int SendPacket( long long fd, const char* data, unsigned int len, const char* OOBData, unsigned int OOBLen )
+{
+	return 0;
+}
+
+extern "C" int SendFormattedPacket( long long fd, const char* data, unsigned int len )
+{
+	return 0;
+}
+
+extern "C" int FormatPacket( char* buf, size_t* outLen, const char* data, unsigned int dataLen, const char* OOBData, unsigned int OOBLen )
+{
+	if ( !buf || !data || !outLen )
+	{
+		return 0;
+	}
+
+	size_t pos;
+	if ( OOBData && OOBLen )
+	{
+		*(unsigned int *)buf = (dataLen + OOBLen + sizeof(unsigned int)) | ceHeaderExpectPayloadOffset;
+		*(unsigned int *)(buf + sizeof(unsigned int)) = OOBLen;
+		memcpy( buf + sizeof(unsigned int)*2, OOBData, OOBLen );
+		pos = OOBLen + sizeof(unsigned int)*2;
+	}
+	else
+	{
+		*(unsigned int *)buf = dataLen;
+		pos = sizeof(unsigned int);
+	}
+
+	memcpy( buf + pos, data, dataLen );
+	*outLen = dataLen + pos;
+
+	return 1;
+}
+
 void AugmentSocketAPI( PySocketModule_APIObject* apiObject )
 {
 	apiObject->dispatch = TickUvLoop;
 	apiObject->add_oob_data_callback = AddOobDataCallback;
 	apiObject->remove_oob_data_callback = RemoveOobDataCallback;
+	apiObject->format_packet = FormatPacket;
+	apiObject->send_formatted_packet = SendFormattedPacket;
+	apiObject->send_packet = SendPacket;
 }

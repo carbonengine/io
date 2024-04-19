@@ -299,6 +299,10 @@ typedef struct {
     void (*dispatch)();
     void (*add_oob_data_callback)(OobDataCallback);
     void (*remove_oob_data_callback)(OobDataCallback);
+	// these are supposed to bypass Python!
+    int (*format_packet)(char* buf, size_t* len, const char* data, const unsigned int dataLen, const char* OOBData, const unsigned int OOBLen);
+    int (*send_formatted_packet)(const long long fd, const char* data, const unsigned int len);
+    int (*send_packet)(const long long fd, const char* data, const unsigned int len, const char* OOBData, const unsigned int OOBLen);
 } PySocketModule_APIObject;
 
 #define PySocketModule_ImportModuleAndAPI() PyCapsule_Import(PySocket_CAPSULE_NAME, 1)
