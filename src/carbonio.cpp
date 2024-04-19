@@ -866,7 +866,12 @@ void StreamConnectRequest::connectCallback( uv_connect_t* connection, int status
 
 void StreamConnectRequest::onCallback( ICallbackParams* callbackParams )
 {
-	ON_BLOCK_EXIT( [this] { clearTimeout(); finalize();} );
+	ON_BLOCK_EXIT( [this] { finalize(); } );
+	if( m_timedOut ) // If we have timed out, the execute method has already been unblocked.
+	{
+		return;
+	}
+	ON_BLOCK_EXIT( [this] { clearTimeout(); } );
 	Ccp::PyGilEnsure gil;
 	auto *params = dynamic_cast<StreamConnectRequest::Params*>(callbackParams);
 
