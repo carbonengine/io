@@ -22,7 +22,7 @@ include(CcpPackageConfigHelpers)
 find_package(libuv CONFIG REQUIRED)
 find_package(Python CONFIG REQUIRED)
 find_package(OpenSSL CONFIG REQUIRED)
-find_package(CcpCore CONFIG REQUIRED)
+find_package(Blue CONFIG REQUIRED)
 
 # --- _socket ---
 ccp_add_library(_socket SHARED
@@ -36,7 +36,7 @@ target_link_libraries(_socket
     PRIVATE
         Python
         libuv::uv_a
-        CcpCore
+        Blue
 )
 set_target_properties(_socket
         PROPERTIES
@@ -56,6 +56,16 @@ source_group("_socket" FILES
     src/carbonio.h
     include/socketmodule.h
 )
+
+# The following variable is defined only on DLL systems
+if (CMAKE_IMPORT_LIBRARY_SUFFIX)
+    add_custom_command(
+        TARGET _socket POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_RUNTIME_DLLS:_socket> $<TARGET_FILE_DIR:_socket>
+        COMMAND_EXPAND_LISTS
+    )
+endif ()
+
 
 # Define an alias target so we can export a target with the expected project name
 add_library(carbonio ALIAS _socket)
