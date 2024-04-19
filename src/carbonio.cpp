@@ -392,6 +392,7 @@ void StreamRecvRequest::onCallback( ICallbackParams* callbackParams )
 		else {
 			if ( PyChannel_Send( m_channel, Py_None ) < 0 ) {
 				LogError( "StreamRecvRequest::onReceive failed to signal sentinel" );
+				PyErr_Clear();
 			}
 		}
 	}
@@ -400,6 +401,7 @@ void StreamRecvRequest::onCallback( ICallbackParams* callbackParams )
 		uv_read_stop( handle() );
 		if ( PyChannel_Send( m_channel, Py_None ) < 0 ) {
 			LogError( "StreamRecvRequest::onReceive failed to signal sentinel" );
+			PyErr_Clear();
 		}
 	}
 }
@@ -563,6 +565,7 @@ void StreamSendRequest::onCallback( ICallbackParams* callbackParams )
 		if( PyChannel_Send( m_channel, py_status ) < 0 )
 		{
 			LogError( "StreamSendRequest::send Failed to send status over channel" );
+			PyErr_Clear();
 		}
 	}
 }
@@ -716,6 +719,7 @@ void UdpRecvRequest::onCallback( ICallbackParams* callbackParams )
 		if ( PyChannel_Send( m_channel, Py_None ) < 0 )
 		{
 			LogError( "UdpRecvRequest::onRead failed sending sentinel value on channel" );
+			PyErr_Clear();
 			return;
 		}
 	}
@@ -795,6 +799,7 @@ void UdpSendRequest::onCallback( ICallbackParams* callbackParams )
 	if( PyChannel_Send( m_channel, py_status ) < 0 )
 	{
 		LogError( "UdpSendRequest::send Failed to send status over channel" );
+		PyErr_Clear();
 	}
 }
 
@@ -949,6 +954,7 @@ void StreamConnectRequest::onCallback( ICallbackParams* callbackParams )
 		{
 			PyErr_Restore( exc, val, tb );
 			LogError( "StreamConnectRequest::onConnect failed to send exception" );
+			PyErr_Clear();
 		}
 		return;
 	}
@@ -956,6 +962,7 @@ void StreamConnectRequest::onCallback( ICallbackParams* callbackParams )
 	if( ret < 0 )
 	{
 		LogError( "StreamConnectRequest::onConnect failed to send status" );
+		PyErr_Clear();
 	}
 }
 

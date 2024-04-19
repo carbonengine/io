@@ -3310,6 +3310,7 @@ void on_accept(uv_stream_t *handle, int status)
 	{
 		PyErr_BadInternalCall();
 		LogError( "on_accept received null channel pointer" );
+		PyErr_Clear();
 		return;
     }
 	auto *client = new uv_tcp_t;
@@ -3383,6 +3384,7 @@ void on_accept(uv_stream_t *handle, int status)
 	if( ret < 0 )
 	{
 		LogError( "on_accept failed to send status" );
+		PyErr_Clear();
 	}
 	guard.Dismiss();
 }
