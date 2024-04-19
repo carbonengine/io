@@ -151,10 +151,74 @@ void PyErr_FromUvErr( int uv_status )
 	PyErr_SetFromErrno( exc_type );
 }
 
-void PyLogError( const char* msg )
+static std::string FormatTraceback(PyObject* tb)
 {
-	CCP_LOGERR(msg);
+	std::string result = "Traceback (most recent call first):\n";
+	while (tb && PyObject_IsTrue(tb) ){
+		std::string filename = "<none>";
+		PyObjectPtr frame(PyObject_GetAttrString(tb, "tb_frame"));
+		if (frame) {
+			PyObjectPtr code(PyObject_GetAttrString(frame.get(), "f_code"));
+			if (code) {
+				PyObjectPtr fname(PyObject_GetAttrString(code.get(), "co_filename"));
+				if (fname)
+					filename = std::string(PyUnicode_AsUTF8(fname.get()));
+			}
+		}
+		PyErr_Clear();
+		int line = 0;
+		PyObjectPtr lineno(PyObject_GetAttrString(tb, "tb_lineno"));
+		if (lineno)
+		{
+			line = int( PyLong_AsLong( lineno.get() ) );
+		}
+		PyErr_Clear();
+		char clineno[16];
+		sprintf_s(clineno, "%i\n", line);
+		result += filename+":"+clineno;
+		tb = PyObject_GetAttrString(tb, "tb_next");
+	}
+	result += "Traceback end\n";
 	PyErr_Clear();
+	return result;
+}
+
+std::string FormatException(PyObject* exc, PyObject* val, PyObject* tb)
+{
+	std::string result = "Exception start:\n";
+	PyObjectPtr typeString( PyObject_Repr(exc) );
+	if (exc)
+	{
+		result += std::string( "Type: " ) + PyUnicode_AsUTF8( typeString.get() ) + "\n";
+	}
+	if (val) {
+		PyObjectPtr valueString( PyObject_Repr(val) );
+		if (valueString)
+		{
+			result += std::string( "Value: " ) + PyUnicode_AsUTF8( valueString.get() ) + "\n";
+		}
+	}
+	if (tb)
+	{
+		result += FormatTraceback( tb );
+	}
+	result += "Exception end\n";
+	PyErr_Clear();
+	return result;
+}
+
+void LogError( const char* msg )
+{
+	if( !PyErr_Occurred() )
+	{
+		CCP_LOGERR(msg);
+		return;
+	}
+	PyObject *exc, *val, *tb;
+	PyErr_Fetch( &exc, &val, &tb );
+	auto errorString = std::string(msg) + "\n\n" + FormatException(exc, val, tb);
+	CCP_LOGERR(errorString.c_str());
+	PyErr_Restore(exc, val, tb);
 }
 
 uv_loop_t * GetUvLoop()
@@ -187,7 +251,7 @@ IRequest::IRequest( PySocketSockObject* socket ) : m_handle( socket->uv_handle )
 	m_channel = PyChannel_New( nullptr );
 	if( !m_channel )
 	{
-		PyLogError( "Failed to create channel for request" );
+		LogError( "Failed to create channel for request" );
 	}
 	else
 	{
@@ -204,7 +268,7 @@ void IRequest::sendError(std::string_view msg)
 	if( ret < 0 )
 	{
 		PyErr_Restore( exc, val, tb );
-		PyLogError( msg.data() );
+		LogError( msg.data() );
 	}
 }
 
@@ -327,7 +391,7 @@ void StreamRecvRequest::onCallback( ICallbackParams* callbackParams )
 		}
 		else {
 			if ( PyChannel_Send( m_channel, Py_None ) < 0 ) {
-				PyLogError( "StreamRecvRequest::onReceive failed to signal sentinel" );
+				LogError( "StreamRecvRequest::onReceive failed to signal sentinel" );
 			}
 		}
 	}
@@ -335,7 +399,7 @@ void StreamRecvRequest::onCallback( ICallbackParams* callbackParams )
 		m_received_len += nread;
 		uv_read_stop( handle() );
 		if ( PyChannel_Send( m_channel, Py_None ) < 0 ) {
-			PyLogError( "StreamRecvRequest::onReceive failed to signal sentinel" );
+			LogError( "StreamRecvRequest::onReceive failed to signal sentinel" );
 		}
 	}
 }
@@ -440,7 +504,7 @@ void StreamRecvRequest::cancel()
 	{
 		if( PyChannel_Send( m_channel, Py_None ) < 0 )
 		{
-			PyLogError( "StreamRecvRequest::cancel failed to signal sentinel" );
+			LogError( "StreamRecvRequest::cancel failed to signal sentinel" );
 		}
 	}
 	IRequest::cancel();
@@ -498,7 +562,7 @@ void StreamSendRequest::onCallback( ICallbackParams* callbackParams )
 	{
 		if( PyChannel_Send( m_channel, py_status ) < 0 )
 		{
-			PyLogError( "StreamSendRequest::send Failed to send status over channel" );
+			LogError( "StreamSendRequest::send Failed to send status over channel" );
 		}
 	}
 }
@@ -511,7 +575,7 @@ void SendError(PyChannelObject* channel, std::string_view msg)
 	if( ret < 0 )
 	{
 		PyErr_Restore( exc, val, tb );
-		PyLogError( msg.data() );
+		LogError( msg.data() );
 	}
 }
 
@@ -651,7 +715,7 @@ void UdpRecvRequest::onCallback( ICallbackParams* callbackParams )
 	if (nread == 0) {
 		if ( PyChannel_Send( m_channel, Py_None ) < 0 )
 		{
-			PyLogError( "UdpRecvRequest::onRead failed sending sentinel value on channel" );
+			LogError( "UdpRecvRequest::onRead failed sending sentinel value on channel" );
 			return;
 		}
 	}
@@ -677,7 +741,7 @@ void UdpRecvRequest::cancel()
 	{
 		if( PyChannel_Send( m_channel, Py_None ) < 0 )
 		{
-			PyLogError( "UdpRecvRequest::cancel failed sending sentinel value on channel" );
+			LogError( "UdpRecvRequest::cancel failed sending sentinel value on channel" );
 		}
 	}
 	IRequest::cancel();
@@ -730,7 +794,7 @@ void UdpSendRequest::onCallback( ICallbackParams* callbackParams )
 	}
 	if( PyChannel_Send( m_channel, py_status ) < 0 )
 	{
-		PyLogError( "UdpSendRequest::send Failed to send status over channel" );
+		LogError( "UdpSendRequest::send Failed to send status over channel" );
 	}
 }
 
@@ -884,14 +948,14 @@ void StreamConnectRequest::onCallback( ICallbackParams* callbackParams )
 		if( ret < 0 )
 		{
 			PyErr_Restore( exc, val, tb );
-			PyLogError( "StreamConnectRequest::onConnect failed to send exception" );
+			LogError( "StreamConnectRequest::onConnect failed to send exception" );
 		}
 		return;
 	}
 	int ret = PyChannel_Send( m_channel, py_status );
 	if( ret < 0 )
 	{
-		PyLogError( "StreamConnectRequest::onConnect failed to send status" );
+		LogError( "StreamConnectRequest::onConnect failed to send status" );
 	}
 }
 

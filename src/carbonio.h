@@ -1,6 +1,7 @@
 #ifndef CARBONIO_H
 #define CARBONIO_H
 
+#include <functional>
 #include <Python.h>
 #include <stackless_api.h>
 
@@ -13,7 +14,18 @@ void cleanup_uv_handle( uv_handle_t* uv_handle );
 bool is_valid_uv_handle( uv_handle_t* handle );
 
 void PyErr_FromUvErr( int error );
-void PyLogError( const char* msg );
+void LogError( const char* msg );
+
+struct PyObjectDeleter
+{
+	void operator()( PyObject* obj )
+	{
+		Py_DecRef( obj );
+	}
+};
+
+typedef std::unique_ptr<PyObject, PyObjectDeleter> PyObjectPtr;
+
 
 struct IRequest;
 struct HandleData
