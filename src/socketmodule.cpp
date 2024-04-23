@@ -2781,12 +2781,6 @@ static int
 #endif
 }
 
-
-bool is_valid_uv_handle( uv_handle_t* handle )
-{
-	return handle && !uv_is_closing(handle);
-}
-
 /* s._accept() -> (fd, address) */
 
 static PyObject*
@@ -3315,7 +3309,8 @@ void on_accept(uv_stream_t *handle, int status)
     if( !channel )
 	{
 		PyErr_BadInternalCall();
-		PyWriteUnraisable("on_accept received null channel pointer" );
+		LogError( "on_accept received null channel pointer" );
+		PyErr_Clear();
 		return;
     }
 	auto *client = new uv_tcp_t;
@@ -3388,7 +3383,8 @@ void on_accept(uv_stream_t *handle, int status)
 	int ret = PyChannel_Send(channel, tuple);
 	if( ret < 0 )
 	{
-		PyWriteUnraisable( "on_accept failed to send status" );
+		LogError( "on_accept failed to send status" );
+		PyErr_Clear();
 	}
 	guard.Dismiss();
 }
@@ -4636,7 +4632,8 @@ static int
 
 PyObject* uv_sendall_impl(PySocketSockObject* s, char* buf, Py_ssize_t len, int flags)
 {
-	auto* request = new StreamSendRequest(s, buf, len, flags);
+	auto handleData = reinterpret_cast<HandleData*>(s->uv_handle->data);
+	auto* request = new StreamSendRequest(s, buf, len, flags, handleData->blockingSend);
 	auto status = request->execute();
 	return status;
 }
@@ -4665,7 +4662,7 @@ static PyObject*
 		if( status == -1 && PyErr_Occurred() )
 		{
 			PyErr_BadInternalCall();
-			PyWriteUnraisable("StreamSendRequest::send failed to convert Python status");
+			LogError( "StreamSendRequest::send failed to convert Python status" );
 		}
 		if( status < 0 )
 		{
@@ -4729,7 +4726,7 @@ static PyObject*
 		if( status == -1 && PyErr_Occurred() )
 		{
 			PyErr_BadInternalCall();
-			PyWriteUnraisable("StreamSendRequest::send failed to convert Python status");
+			LogError( "StreamSendRequest::send failed to convert Python status" );
 		}
 		if( status < 0 )
 		{
@@ -5561,6 +5558,13 @@ static PyObject *sock_recvpacketoob(PySocketSockObject *s, PyObject *args)
 	if (!PyArg_ParseTuple(args, ":recvpacket"))
 		return nullptr;
 
+	if( s->sock_fd == INVALID_SOCKET || !is_valid_uv_handle( s->uv_handle ) )
+	{
+		errno = EBADF;
+		PyErr_SetFromErrno( PyExc_OSError );
+		return nullptr;
+	}
+
 	return ReceivePacket( s );
 }
 PyDoc_STRVAR( recvpacketoob_doc,
@@ -5577,6 +5581,13 @@ static PyObject *sock_sendpacket(PySocketSockObject *s, PyObject *args)
 
 	if (!PyArg_ParseTuple( args, "y*:sendpacket", &pbuf ))
 	{
+		return nullptr;
+	}
+
+	if( s->sock_fd == INVALID_SOCKET || !is_valid_uv_handle( s->uv_handle ) )
+	{
+		errno = EBADF;
+		PyErr_SetFromErrno( PyExc_OSError );
 		return nullptr;
 	}
 

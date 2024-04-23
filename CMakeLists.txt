@@ -22,7 +22,7 @@ include(CcpPackageConfigHelpers)
 find_package(libuv CONFIG REQUIRED)
 find_package(Python CONFIG REQUIRED)
 find_package(OpenSSL CONFIG REQUIRED)
-find_package(CcpCore CONFIG REQUIRED)
+find_package(Blue CONFIG REQUIRED)
 
 # --- _socket ---
 ccp_add_library(_socket SHARED
@@ -30,13 +30,13 @@ ccp_add_library(_socket SHARED
     src/socketmodule.cpp
 )
 target_precompile_headers(_socket PRIVATE
+    <CcpLog.h>
     <CcpScopeGuard.h>
 )
 target_link_libraries(_socket
     PRIVATE
-        Python
         libuv::uv_a
-        CcpCore
+        Blue
 )
 set_target_properties(_socket
         PROPERTIES
@@ -49,6 +49,15 @@ target_include_directories(_socket
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
+
+# The following variable is defined only on DLL systems
+if(CMAKE_IMPORT_LIBRARY_SUFFIX)
+    add_custom_command(
+            TARGET _socket POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_RUNTIME_DLLS:_socket> $<TARGET_FILE_DIR:_socket>
+            COMMAND_EXPAND_LISTS
+    )
+endif()
 
 get_target_property(_SOURCES _socket SOURCES)
 source_group("_socket" FILES
