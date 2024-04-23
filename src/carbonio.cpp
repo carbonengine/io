@@ -378,10 +378,10 @@ void StreamRecvRequest::onCallback( ICallbackParams* callbackParams )
 {
 	auto params = dynamic_cast<StreamRecvRequest::Params*>(callbackParams);
 	ssize_t nread = params->nread;
-	Ccp::PyGilEnsure gil;
 	if( nread == 0 ) {
 		return;
 	}
+	Ccp::PyGilEnsure gil;
 	ON_BLOCK_EXIT( [&] { clearTimeout(); finalize();} );
 	PyChannel_SetPreference(m_channel, PREFER_SENDER );
 	if ( nread < 0 ) {
@@ -551,7 +551,12 @@ void StreamSendRequest::sendCallback( uv_write_t* request, int status )
 
 void StreamSendRequest::onCallback( ICallbackParams* callbackParams )
 {
-	ON_BLOCK_EXIT( [&] { clearTimeout(); finalize();} );
+	ON_BLOCK_EXIT( [this] { finalize(); } );
+	if( m_timedOut ) // If we have timed out, the execute method has already been unblocked.
+	{
+		return;
+	}
+	ON_BLOCK_EXIT( [&] { clearTimeout(); } );
 	auto *params = dynamic_cast<StreamSendRequest::Params*>(callbackParams);
 	Ccp::PyGilEnsure gil;
 
@@ -788,7 +793,11 @@ void UdpSendRequest::sendCallback( uv_udp_send_t* request, int status )
 
 void UdpSendRequest::onCallback( ICallbackParams* callbackParams )
 {
-	ON_BLOCK_EXIT( [&] { finalize();} );
+	ON_BLOCK_EXIT( [this] { finalize(); } );
+	if( m_timedOut ) // If we have timed out, the execute method has already been unblocked.
+	{
+		return;
+	}
 	auto *params = dynamic_cast<UdpSendRequest::Params*>(callbackParams);
 	auto py_status = PyLong_FromLong( params->status );
 	if( !py_status )
