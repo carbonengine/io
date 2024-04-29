@@ -849,14 +849,21 @@ void StreamConnectRequest::onCallback( ICallbackParams* callbackParams )
 	}
 }
 
+extern "C" int FormatPacket( char* buf, size_t* outLen, const char* data, unsigned int dataLen, const char* OOBData, unsigned int OOBLen );
+
 PyObject* SendPacket( PySocketSockObject* socket, void* data, Py_ssize_t len )
 {
 	Py_ssize_t bufsize = len + sizeof(uint32_t);
 	char* buf = new char[bufsize];
-	*reinterpret_cast<uint32_t*>(buf) = len;
-	memcpy_s( buf + sizeof(uint32_t), len, data, len );
+	size_t outlen = 0;
 
-	auto req = new StreamSendRequest( socket, buf, bufsize, 0 );
+	if ( FormatPacket( buf, &outlen, static_cast<const char*>( data ), len, nullptr, 0 ) == 0 )
+	{
+		PyErr_SetString( PyExc_MemoryError, "Failed formatting packet data" );
+		return nullptr;
+	}
+
+	auto req = new StreamSendRequest( socket, buf, outlen, 0 );
 	s_packetsSent += 1;
 	return req->execute();
 }
