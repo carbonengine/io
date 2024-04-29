@@ -3337,6 +3337,7 @@ void on_accept(uv_stream_t *handle, int status)
 		SendError(channel, "on_accept: Failed to create client channel");
 		return;
 	}
+	AddToLookupTable( newfd, reinterpret_cast<uv_handle_t*>( client ) );
 
 	auto py_fd = PyLong_FromSocket_t( newfd );
 	if( !py_fd )
@@ -3416,6 +3417,7 @@ static PyObject*
 				res = -1;
 			} else {
 				uv_close( s->uv_handle, cleanup_uv_handle );
+				RemoveFromLookupTable( fd );
 				res = 0;
 			}
 		}
@@ -5816,6 +5818,7 @@ static void
 			if ( is_valid_uv_handle( s->uv_handle ) )
 			{
 				uv_close( s->uv_handle, cleanup_uv_handle );
+				RemoveFromLookupTable( fd );
 			}
 		} else
 		{
@@ -5926,6 +5929,7 @@ uv_tcp_t* create_uv_tcp_handle( SOCKET_T* fd, int family )
 		// create_handle_data should have set an error.
 		return nullptr;
 	}
+	AddToLookupTable( *fd, reinterpret_cast<uv_handle_t*>( handle ) );
 	return handle;
 }
 
@@ -5960,6 +5964,7 @@ uv_udp_t* create_uv_udp_handle(SOCKET_T* fd, int family)
 		// create_handle_data should have set an error.
 		return nullptr;
 	}
+	AddToLookupTable( *fd, reinterpret_cast<uv_handle_t*>( handle ) );
 	return handle;
 }
 
@@ -6138,7 +6143,7 @@ static int
 					return -1;
 				}
 
-				uv_walk( loop, find_handle_for_fd, (void*)s );
+				s->uv_handle = LookupHandle( s->sock_fd );
 				if( s->uv_handle == nullptr )
 				{
 					// No handle found for re-use, must create one.
@@ -6280,8 +6285,7 @@ static int
 			}
 #endif
 			s->sock_fd = fd;
-			s->uv_handle = nullptr;
-			uv_walk( GetUvLoop(), find_handle_for_fd, (void*)s );
+			s->uv_handle = LookupHandle( fd );
 			if ( ! s->uv_handle && is_managed_by_libuv( type, family ) )
 			{
 				if( type == SOCK_STREAM )
@@ -6950,14 +6954,12 @@ static PyObject*
 	type = SOCK_STREAM;
 #endif
 
-	PySocketSockObject s;
-	s.sock_fd = fd;
-	s.uv_handle = nullptr;
-	uv_walk( GetUvLoop(), find_handle_for_fd, &s );
-	if( s.uv_handle && !uv_is_closing( s.uv_handle ) )
+	auto uv_handle = LookupHandle( fd );
+	if( uv_handle && !uv_is_closing( uv_handle ) )
 	{
-		  uv_close( s.uv_handle, cleanup_uv_handle );
-		  res = 0;
+		uv_close( uv_handle, cleanup_uv_handle );
+		res = 0;
+		RemoveFromLookupTable( fd );
 	} else {
         Py_BEGIN_ALLOW_THREADS
         res = SOCKETCLOSE( fd );
@@ -7040,6 +7042,7 @@ uv_tcp_t* dup_uv_tcp_handle( SOCKET_T newfd )
 		// create_handle_data should have set an error.
 		return nullptr;
 	}
+	AddToLookupTable( newfd, reinterpret_cast<uv_handle_t*>( handle ) );
 	return handle;
 }
 
@@ -7070,6 +7073,7 @@ uv_udp_t* dup_uv_udp_handle( SOCKET_T newfd )
 		// create_handle_data should have set an error.
 		return nullptr;
 	}
+	AddToLookupTable( newfd, reinterpret_cast<uv_handle_t*>( handle ) );
 	return handle;
 }
 /* dup() function for socket fds */

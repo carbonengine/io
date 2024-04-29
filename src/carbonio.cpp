@@ -4,6 +4,8 @@
 #include <atomic>
 #include <vector>
 
+#include <CcpMutex.h>
+
 #include "socketmodule.h"
 #include "protocol.h"
 
@@ -32,6 +34,37 @@ static std::atomic_size_t s_packetsReceived{0};
 static std::atomic_size_t s_packetsSent{0};
 
 static std::vector<OobDataCallback> s_oobDataCallbacks{};
+
+static std::unordered_map<SOCKET_T, uv_handle_t*> s_uvHandleLookup;
+static CcpMutex s_uvHandleLookupLock{"carbon-io", "handleLookup"};
+
+void AddToLookupTable( SOCKET_T fileDescriptor, uv_handle_t* uvHandle )
+{
+	CcpAutoMutex mutex( s_uvHandleLookupLock );
+	s_uvHandleLookup[fileDescriptor] = uvHandle;
+}
+
+uv_handle_t* LookupHandle( SOCKET_T fileDescriptor )
+{
+	CcpAutoMutex mutex( s_uvHandleLookupLock );
+	auto iter = s_uvHandleLookup.find( fileDescriptor );
+	if ( iter != s_uvHandleLookup.cend() )
+	{
+		return iter->second;
+	}
+
+	return nullptr;
+}
+
+void RemoveFromLookupTable( SOCKET_T fileDescriptor )
+{
+	CcpAutoMutex mutex( s_uvHandleLookupLock );
+	auto iter = s_uvHandleLookup.find( fileDescriptor );
+	if ( iter != s_uvHandleLookup.cend() )
+	{
+		s_uvHandleLookup.erase( iter );
+	}
+}
 
 PyObject* GetStatistics()
 {
