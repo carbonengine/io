@@ -1,6 +1,7 @@
 #ifndef CARBONIO_H
 #define CARBONIO_H
 
+#include <functional>
 #include <Python.h>
 #include <stackless_api.h>
 
@@ -10,9 +11,21 @@
 #include <socketmodule.h>
 
 void cleanup_uv_handle( uv_handle_t* uv_handle );
+bool is_valid_uv_handle( uv_handle_t* handle );
 
 void PyErr_FromUvErr( int error );
-void PyWriteUnraisable( const char* msg );
+void LogError( const char* msg );
+
+struct PyObjectDeleter
+{
+	void operator()( PyObject* obj )
+	{
+		Py_DecRef( obj );
+	}
+};
+
+typedef std::unique_ptr<PyObject, PyObjectDeleter> PyObjectPtr;
+
 
 struct IRequest;
 struct HandleData
@@ -20,11 +33,18 @@ struct HandleData
 	HandleData();
 	~HandleData();
 
-	// This will always be the channel that we're looking for
+	// This channel is for accepting connections.
 	PyChannelObject* channel;
 
 	// This will always point to the associated request while there is one
 	std::shared_ptr<IRequest> request;
+
+	// We need to keep the receive-request around since another request can take over
+	// as the "active" request while we wait for it to complete.
+	std::shared_ptr<IRequest> receiveRequest;
+
+	// Receive from this when starting to receive macho packet, send to this when done.
+	PyChannelObject* packetReceiveQueue;
 
 	// This backing buffer needs to outlive any potential request so that
 	// we can correctly re-construct multiple `receive()` requests.
@@ -46,6 +66,9 @@ struct HandleData
 
 	// in case the socket deals with packets, it needs to keep track of a packet's sequence number.
 	size_t packetNumber{0};
+	// Keep track of active packet receive requests,
+	// since we need to know when to block on the channel.
+	int activePacketReceiveRequests{0};
 };
 
 enum ChannelPreference : int {
@@ -84,6 +107,7 @@ public:
 	virtual ~IRequest()
 	{
 		clearTimeout();
+		Py_XDECREF(m_channel);
 	}
 
 	virtual void cancel();
@@ -115,6 +139,10 @@ protected:
 	// Once no more libuv callbacks are expected for the request, `finalize()` needs to
 	// be called in order to avoid leaking requests.
 	std::shared_ptr<IRequest> m_self{nullptr};
+
+	// Requests wait by receiving on this channel as they wait for asynchronous
+	// operations to complete.
+	PyChannelObject* m_channel{nullptr};
 };
 
 class IStreamRequest : public IRequest
@@ -128,6 +156,7 @@ class StreamConnectRequest : public IStreamRequest
 {
 public:
 	StreamConnectRequest( PySocketSockObject* socket, struct sockaddr* address );
+	~StreamConnectRequest();
 	PyObject* execute() override;
 
 	static void connectCallback(uv_connect_t* connection, int status);
@@ -141,6 +170,7 @@ private:
 	void onCallback (ICallbackParams* status) override;
 
 	struct sockaddr* m_address{ nullptr };
+	uv_connect_t* m_connect{ nullptr };
 };
 
 class StreamRecvRequest : public IStreamRequest
@@ -187,11 +217,12 @@ private:
 class StreamSendRequest : public IStreamRequest
 {
 public:
-	StreamSendRequest( PySocketSockObject* socket, char* buf, Py_ssize_t len, int flags ) :
+	StreamSendRequest( PySocketSockObject* socket, char* buf, Py_ssize_t len, int flags, bool blockingSend ) :
 		IStreamRequest( socket ), m_flags( flags )
 	{
 		m_sendBuffer.base = buf;
 		m_sendBuffer.len = len;
+		m_blockingSend = blockingSend;
 	}
 	PyObject* execute() override;
 	static void sendCallback( uv_write_t* request, int status );
@@ -206,6 +237,7 @@ private:
 		int m_flags;
 		uv_write_t m_writeRequest;
 		uv_buf_t m_sendBuffer;
+		bool m_blockingSend;
 };
 
 class IUdpRequest : public IRequest
@@ -280,6 +312,9 @@ public:
 	StreamAcceptRequest( PySocketSockObject* socket ) :
 		IStreamRequest( socket )
 	{
+		Py_XDECREF( m_channel );
+		m_channel = handleData()->channel;
+		Py_INCREF( m_channel );
 	}
 
 	PyObject* execute() override;

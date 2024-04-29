@@ -6303,6 +6303,44 @@ class CarbonIoTest(SocketPairTest):
         with self.assertRaises(OSError):
             _ = self.serv.recvpacketoob()
 
+    def test_recvpacket_async(self):
+        numPackets = 10
+        headerSize = 4
+        expected_stats_per_module = {
+            'BytesReceived': (len(MSG) + headerSize) * numPackets,
+            'BytesSent': (len(MSG) + headerSize) * numPackets,
+            'PacketsReceived': numPackets,
+            'PacketsSent': numPackets,
+        }
+        channel = stackless.channel()
+
+        def send():
+            self.cli.sendpacket(MSG)
+
+        def receive(i):
+            msg, _, sequence = self.serv.recvpacketoob()
+            self.assertEqual(i, sequence)
+            self.assertEqual(MSG, msg)
+            channel.send(None)
+
+        old_stats = socket.getstats()
+        for _ in range(numPackets):
+            stackless.tasklet(send)()
+        for i in range(numPackets):
+            stackless.tasklet(receive)(i)
+        for _ in range(numPackets):
+            channel.receive()
+
+        new_stats = socket.getstats()
+        delta_stats = { k: new_stats[k] - old_stats[k] for k in old_stats }
+        self.assertDictEqual(expected_stats_per_module, delta_stats)
+
+        self.assertGreater(len(MSG), 1)
+        self.serv.setmaxpacketsize(len(MSG)-1)
+        self.cli.sendpacket(MSG)
+        with self.assertRaises(OSError):
+            _ = self.serv.recvpacketoob()
+
     def test_recvpacket_with_oob_data(self):
         # Hand-crafted payload, setting `ceHeaderExpectPayloadOffset` to indicate existence of OOB data
         oobData = b'foobar'

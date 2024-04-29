@@ -460,6 +460,8 @@ typedef struct {
     PyObject *exc_type;
     PyObject *exc_value;
     PyObject *exc_tb;
+	PyChannelObject *write_channel;
+	int active_writes;
 } PySSLSocket;
 
 typedef struct {
@@ -911,6 +913,181 @@ _ssl_configure_hostname(PySSLSocket *self, const char* server_hostname)
     return retval;
 }
 
+const int UNEXPECTED_BIO_READ_ERROR = -1;
+const int UNEXPECTED_BIO_WRITE_ERROR = -2;
+const int UNEXPECTED_BIO_MEMORY_LEAK = -3;
+const int UNEXPECTED_BIO_RESET_ERROR = -4;
+
+
+void PyWriteUnraisable( const char* msg )
+{
+	PyObject *exc, *val, *tb;
+	PyObject* msg_obj;
+	PyErr_Fetch( &exc, &val, &tb );
+	msg_obj = PyUnicode_FromString( msg ? msg : "" );
+	PyErr_Restore( exc, val, tb );
+	if( !msg_obj )
+	{
+		msg_obj = Py_None;
+		Py_INCREF( Py_None );
+	}
+	PyErr_WriteUnraisable( msg_obj );
+	Py_DECREF( msg_obj );
+}
+
+
+long bio_read_callback( BIO* b, int oper, const char* argp, size_t len, int argi, long argl, int ret, size_t* processed )
+{
+	if( BIO_cb_post( oper ) )
+	{
+		// Nothing to do after the read completes.
+		return ret;
+	}
+	if( oper != BIO_CB_READ )
+	{
+		return ret;
+	}
+	PyGILState_STATE gstate = PyGILState_Ensure();
+	PySSLSocket* self = (PySSLSocket*)BIO_get_callback_arg( b );
+	PySocketSockObject* sock = GET_SOCKET( self );
+	if( !sock )
+	{
+		PyGILState_Release( gstate );
+		return ret;
+	}
+	Py_INCREF( sock );
+
+	PyTypeObject* baseSocketType = ( (PyObject*)sock )->ob_type->tp_base;
+	PyObject* readBytes = PyObject_CallMethod( (PyObject*)baseSocketType, "recv", "Ol", sock, len );
+	if( readBytes )
+	{
+		BIO_write( b, PyBytes_AsString( readBytes ), (int)PyBytes_Size( readBytes ) );
+		Py_DECREF( readBytes );
+	}
+	else if( PyErr_ExceptionMatches( PyExc_BlockingIOError ) )
+	{
+		PyErr_Clear();
+		ret = SSL_ERROR_WANT_READ;
+	}
+	else
+	{
+		PyObject *exc, *val, *tb;
+		PyErr_Fetch( &exc, &val, &tb );
+		PyObject* pyErrno = NULL;
+		if( val )
+		{
+			pyErrno = PyObject_GetAttrString( val, "errno" );
+		}
+		PyErr_Restore( exc, val, tb );
+		if( pyErrno )
+		{
+			int err = PyLong_AsLong( pyErrno );
+			Py_DECREF(pyErrno);
+			if( err == -1 && PyErr_Occurred() )
+			{
+				PyWriteUnraisable("bio_read_callback failed to convert error code from exception");
+				ret = UNEXPECTED_BIO_READ_ERROR;
+			}
+			else
+			{
+				errno = err;
+				ret = SSL_ERROR_SYSCALL;
+			}
+		}
+		else
+		{
+			PyWriteUnraisable("bio_read_callback received exception without errno");
+			ret = UNEXPECTED_BIO_READ_ERROR;
+		}
+	}
+
+	Py_DECREF( sock );
+	PyGILState_Release( gstate );
+	return ret;
+}
+
+
+long bio_write_callback( BIO* b, int oper, const char* argp, size_t len, int argi, long argl, int ret, size_t* processed )
+{
+	if( ( oper & BIO_CB_WRITE ) != BIO_CB_WRITE )
+	{
+		return ret;
+	}
+
+	if( BIO_cb_post( oper ) )
+	{
+		// We got called after writing data to the buffer.
+		// Since we don't use the data, clear the buffer here.
+		int success = BIO_reset( b );
+		if( success <= 0 )
+		{
+			return UNEXPECTED_BIO_RESET_ERROR;
+		}
+
+		if( BIO_get_flags( b ) & BIO_FLAGS_NONCLEAR_RST )
+		{
+			// If BIO_FLAGS_NONCLEAR_RST is set, calling BIO_reset does not clear the memory.
+			return UNEXPECTED_BIO_MEMORY_LEAK;
+		}
+		return ret;
+	}
+
+	PyGILState_STATE gstate = PyGILState_Ensure();
+	PySSLSocket* self = (PySSLSocket*)BIO_get_callback_arg( b );
+	PySocketSockObject* sock = GET_SOCKET( self );
+	if( !sock )
+	{
+		PyGILState_Release( gstate );
+		return ret;
+	}
+	Py_INCREF( sock );
+	PyObject* baseSocketType = (PyObject*)( (PyObject*)sock )->ob_type->tp_base;
+	PyObject* sentBytes = PyObject_CallMethod( baseSocketType, "send", "Oy#", sock, argp, (Py_ssize_t)len);
+	if( sentBytes )
+	{
+		Py_DECREF( sentBytes );
+	}
+	else if( PyErr_ExceptionMatches( PyExc_BlockingIOError ) )
+	{
+		PyErr_Clear();
+		ret = SSL_ERROR_WANT_WRITE;
+	}
+	else
+	{
+		PyObject *exc, *val, *tb;
+		PyErr_Fetch( &exc, &val, &tb );
+		PyObject* pyErrno = NULL;
+		if( val )
+		{
+			pyErrno = PyObject_GetAttrString( val, "errno" );
+		}
+		PyErr_Restore( exc, val, tb );
+		if( pyErrno )
+		{
+			int err = PyLong_AsLong( pyErrno );
+			Py_DECREF(pyErrno);
+			if( err == -1 && PyErr_Occurred() )
+			{
+				PyWriteUnraisable("bio_write_callback failed to convert error code from exception");
+				ret = UNEXPECTED_BIO_WRITE_ERROR;
+			}
+			else
+			{
+				errno = err;
+				ret = SSL_ERROR_SYSCALL;
+			}
+		}
+		else
+		{
+			PyWriteUnraisable("bio_write_callback received exception without errno");
+			ret = UNEXPECTED_BIO_WRITE_ERROR;
+		}
+	}
+	Py_DECREF( sock );
+	PyGILState_Release( gstate );
+	return ret;
+}
+
 static PySSLSocket *
 newPySSLSocket(PySSLContext *sslctx, PySocketSockObject *sock,
                enum py_ssl_server_or_client socket_type,
@@ -951,8 +1128,14 @@ newPySSLSocket(PySSLContext *sslctx, PySocketSockObject *sock,
     }
     SSL_set_app_data(self->ssl, self);
     if (sock) {
-        SSL_set_fd(self->ssl, Py_SAFE_DOWNCAST(sock->sock_fd, SOCKET_T, int));
-    } else {
+		BIO* readbio = BIO_new( BIO_s_mem() );
+		BIO* writebio = BIO_new( BIO_s_mem() );
+		SSL_set_bio( self->ssl, readbio, writebio );
+		BIO_set_callback_ex( readbio, bio_read_callback );
+		BIO_set_callback_arg( readbio, (char*)self );
+		BIO_set_callback_ex( writebio, bio_write_callback );
+		BIO_set_callback_arg( writebio, (char*)self );
+	} else {
         /* BIOs are reference counted and SSL_set_bio borrows our reference.
          * To prevent a double free in memory_bio_dealloc() we need to take an
          * extra reference here. */
@@ -1024,6 +1207,13 @@ newPySSLSocket(PySSLContext *sslctx, PySocketSockObject *sock,
             return NULL;
         }
     }
+	self->write_channel = PyChannel_New( NULL );
+	if( !self->write_channel )
+	{
+		Py_DECREF(self);
+		return NULL;
+	}
+	self->active_writes = 0;
     return self;
 }
 
@@ -1098,11 +1288,15 @@ _ssl__SSLSocket_do_handshake_impl(PySSLSocket *self)
             PyErr_SetString(PySSLErrorObject,
                             ERRSTR("Underlying socket too large for select()."));
             goto error;
-        } else if (sockstate == SOCKET_IS_NONBLOCKING) {
+        } else if (sockstate == SOCKET_IS_NONBLOCKING || sockstate == SOCKET_IS_BLOCKING) {
             break;
         }
     } while (err.ssl == SSL_ERROR_WANT_READ ||
              err.ssl == SSL_ERROR_WANT_WRITE);
+	if( PyErr_Occurred() )
+	{
+		goto error;
+	}
     Py_XDECREF(sock);
     if (ret < 1)
         return PySSL_SetError(self, ret, __FILE__, __LINE__);
@@ -2353,6 +2547,32 @@ PySSL_select(PySocketSockObject *s, int writing, _PyTime_t timeout)
     return rc == 0 ? SOCKET_HAS_TIMED_OUT : SOCKET_OPERATION_OK;
 }
 
+void queue_write(PySSLSocket *self)
+{
+	self->active_writes += 1;
+	if( self->active_writes > 1 )
+	{
+		PyObject* ret = PyChannel_Receive( self->write_channel );
+		if( !ret )
+		{
+			PyWriteUnraisable("_ssl.c: queue_write failed to receive from write queue");
+		}
+	}
+}
+
+void complete_write(PySSLSocket *self)
+{
+	self->active_writes -= 1;
+	if( PyChannel_GetBalance( self->write_channel ) < 0 )
+	{
+		int ret = PyChannel_Send( self->write_channel, Py_None );
+		if( ret < 0 )
+		{
+			PyWriteUnraisable("_ssl.c: complete_write failed to send to write queue");
+		}
+	}
+}
+
 /*[clinic input]
 _ssl._SSLSocket.write
     b: Py_buffer
@@ -2415,9 +2635,11 @@ _ssl__SSLSocket_write_impl(PySSLSocket *self, Py_buffer *b)
         PyErr_SetString(PySSLErrorObject,
                         "Underlying socket too large for select().");
         goto error;
-    }
-
-    do {
+    } else if( sockstate == SOCKET_IS_BLOCKING && PyErr_Occurred() ) {
+		goto error;
+	}
+	queue_write( self );
+	do {
         PySSL_BEGIN_ALLOW_THREADS
         len = SSL_write(self->ssl, b->buf, (int)b->len);
         err = _PySSL_errno(len <= 0, self->ssl, len);
@@ -2425,7 +2647,7 @@ _ssl__SSLSocket_write_impl(PySSLSocket *self, Py_buffer *b)
         self->err = err;
 
         if (PyErr_CheckSignals())
-            goto error;
+            goto write_error;
 
         if (has_timeout)
             timeout = deadline - _PyTime_GetMonotonicClock();
@@ -2441,23 +2663,30 @@ _ssl__SSLSocket_write_impl(PySSLSocket *self, Py_buffer *b)
         if (sockstate == SOCKET_HAS_TIMED_OUT) {
             PyErr_SetString(PySocketModule.timeout_error,
                             "The write operation timed out");
-            goto error;
+            goto write_error;
         } else if (sockstate == SOCKET_HAS_BEEN_CLOSED) {
             PyErr_SetString(PySSLErrorObject,
                             "Underlying socket has been closed.");
-            goto error;
-        } else if (sockstate == SOCKET_IS_NONBLOCKING) {
+            goto write_error;
+        } else if (sockstate == SOCKET_IS_NONBLOCKING || sockstate == SOCKET_IS_BLOCKING) {
             break;
         }
     } while (err.ssl == SSL_ERROR_WANT_READ ||
              err.ssl == SSL_ERROR_WANT_WRITE);
 
+	if( PyErr_Occurred() )
+	{
+		goto write_error;
+	}
+	complete_write(self);
     Py_XDECREF(sock);
     if (len <= 0)
         return PySSL_SetError(self, len, __FILE__, __LINE__);
     if (PySSL_ChainExceptions(self) < 0)
         return NULL;
     return PyLong_FromLong(len);
+write_error:
+	complete_write(self);
 error:
     Py_XDECREF(sock);
     PySSL_ChainExceptions(self);
@@ -2597,11 +2826,15 @@ _ssl__SSLSocket_read_impl(PySSLSocket *self, int len, int group_right_1,
             PyErr_SetString(PySocketModule.timeout_error,
                             "The read operation timed out");
             goto error;
-        } else if (sockstate == SOCKET_IS_NONBLOCKING) {
+        } else if (sockstate == SOCKET_IS_NONBLOCKING || sockstate == SOCKET_IS_BLOCKING) {
             break;
         }
     } while (err.ssl == SSL_ERROR_WANT_READ ||
              err.ssl == SSL_ERROR_WANT_WRITE);
+	if( PyErr_Occurred() )
+	{
+		goto error;
+	}
 
     if (count <= 0) {
         PySSL_SetError(self, count, __FILE__, __LINE__);
@@ -2730,7 +2963,7 @@ _ssl__SSLSocket_shutdown_impl(PySSLSocket *self)
         PySSL_SetError(self, ret, __FILE__, __LINE__);
         return NULL;
     }
-    if (self->exc_type != NULL)
+    if (self->exc_type != NULL || PyErr_Occurred())
         goto error;
     if (sock)
         /* It's already INCREF'ed */
