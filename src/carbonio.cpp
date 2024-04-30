@@ -1209,7 +1209,7 @@ extern "C" int SendFormattedPacket( long long fd, const char* data, unsigned int
 
 extern "C" int SendPacket( long long fd, const char* data, unsigned int len, const char* OOBData, unsigned int OOBLen )
 {
-	size_t bufsize = sizeof(uint32_t) + len + OOBLen;
+	size_t bufsize = sizeof(uint32_t) * 2 + len + OOBLen;
 	auto buf = new char[bufsize];
 	size_t outlen = FormatPacket( buf, data, len, OOBData, OOBLen );
 	if ( outlen == 0 )
