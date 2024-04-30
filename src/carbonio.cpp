@@ -1195,7 +1195,7 @@ extern "C" int SendFormattedPacket( long long fd, const char* data, unsigned int
 	auto* bufs = new uv_buf_t[1];
 	bufs[0] = uv_buf_init( (char*)data, len );
 	auto* write_req = new uv_write_t;
-	write_req->data = bufs; //
+	write_req->data = bufs;
 	int status = uv_write( write_req, reinterpret_cast<uv_stream_t*>( uv_handle ), bufs, 1, SendFormattedPacketWriteCallback );
 
 	if ( status != 0 )
