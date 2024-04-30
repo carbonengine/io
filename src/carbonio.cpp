@@ -1196,9 +1196,15 @@ extern "C" int SendFormattedPacket( long long fd, const char* data, unsigned int
 	bufs[0] = uv_buf_init( (char*)data, len );
 	auto* write_req = new uv_write_t;
 	write_req->data = bufs; //
-	uv_write( write_req, reinterpret_cast<uv_stream_t*>( uv_handle ), bufs, 1, SendFormattedPacketWriteCallback );
+	int status = uv_write( write_req, reinterpret_cast<uv_stream_t*>( uv_handle ), bufs, 1, SendFormattedPacketWriteCallback );
 
-	return 0;
+	if ( status != 0 )
+	{
+		CCP_LOGERR( "libuv failed writing packet: %s", uv_err_name( status ) );
+		return 0;
+	}
+
+	return 1;
 }
 
 extern "C" int SendPacket( long long fd, const char* data, unsigned int len, const char* OOBData, unsigned int OOBLen )
