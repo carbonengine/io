@@ -322,5 +322,10 @@ private:
 	void onCallback(ICallbackParams *params) override {};
 };
 
+void AddToLookupTable(SOCKET_T fileDescriptor, uv_handle_t* uvHandle);
+uv_handle_t* LookupHandle( SOCKET_T fileDescriptor );
+void RemoveFromLookupTable( SOCKET_T fileDescriptor );
+
+extern "C" int SendPacket( long long fd, const char* data, unsigned int len, const char* OOBData, unsigned int OOBLen );
 
 #endif // CARBONIO_H

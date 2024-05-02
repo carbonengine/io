@@ -4,6 +4,8 @@
 #include <atomic>
 #include <vector>
 
+#include <CcpMutex.h>
+
 #include "socketmodule.h"
 #include "protocol.h"
 
@@ -32,6 +34,37 @@ static std::atomic_size_t s_packetsReceived{0};
 static std::atomic_size_t s_packetsSent{0};
 
 static std::vector<OobDataCallback> s_oobDataCallbacks{};
+
+static std::unordered_map<SOCKET_T, uv_handle_t*> s_uvHandleLookup;
+static CcpMutex s_uvHandleLookupLock{"carbon-io", "handleLookup"};
+
+void AddToLookupTable( SOCKET_T fileDescriptor, uv_handle_t* uvHandle )
+{
+	CcpAutoMutex mutex( s_uvHandleLookupLock );
+	s_uvHandleLookup[fileDescriptor] = uvHandle;
+}
+
+uv_handle_t* LookupHandle( SOCKET_T fileDescriptor )
+{
+	CcpAutoMutex mutex( s_uvHandleLookupLock );
+	auto iter = s_uvHandleLookup.find( fileDescriptor );
+	if ( iter != s_uvHandleLookup.cend() )
+	{
+		return iter->second;
+	}
+
+	return nullptr;
+}
+
+void RemoveFromLookupTable( SOCKET_T fileDescriptor )
+{
+	CcpAutoMutex mutex( s_uvHandleLookupLock );
+	auto iter = s_uvHandleLookup.find( fileDescriptor );
+	if ( iter != s_uvHandleLookup.cend() )
+	{
+		s_uvHandleLookup.erase( iter );
+	}
+}
 
 PyObject* GetStatistics()
 {
@@ -975,15 +1008,21 @@ void StreamConnectRequest::onCallback( ICallbackParams* callbackParams )
 	}
 }
 
+extern "C" int FormatPacket( char* buf, const char* data, unsigned int dataLen, const char* OOBData, unsigned int OOBLen );
+
 PyObject* SendPacket( PySocketSockObject* socket, void* data, Py_ssize_t len )
 {
 	Py_ssize_t bufsize = len + sizeof(uint32_t);
 	char* buf = new char[bufsize];
-	*reinterpret_cast<uint32_t*>(buf) = len;
-	memcpy_s( buf + sizeof(uint32_t), len, data, len );
+	size_t outlen = FormatPacket( buf, static_cast<const char*>( data ), len, nullptr, 0 );
+	if ( outlen == 0 )
+	{
+		PyErr_SetString( PyExc_MemoryError, "Failed formatting packet data" );
+		return nullptr;
+	}
 
 	auto handleData = reinterpret_cast<HandleData*>(socket->uv_handle->data);
-	auto req = new StreamSendRequest( socket, buf, bufsize, 0, handleData->blockingSend );
+	auto req = new StreamSendRequest( socket, buf, outlen, 0, handleData->blockingSend );
 	s_packetsSent += 1;
 	return req->execute();
 }
@@ -1123,9 +1162,96 @@ extern "C" void RemoveOobDataCallback( OobDataCallback packetCallback )
 	s_oobDataCallbacks.erase( std::remove( s_oobDataCallbacks.begin(), s_oobDataCallbacks.end(), packetCallback ), s_oobDataCallbacks.end() );
 }
 
+// Below methods are used by BlueNet and therefore avoid usage of Python
+
+void SendFormattedPacketWriteCallback(uv_write_t* request, int status)
+{
+	if (status < 0)
+	{
+		CCP_LOGERR( "Failed writing data: %s", uv_err_name( status ) );
+	}
+
+	auto* bufs = static_cast<uv_buf_t*>( request->data );
+	delete bufs; // clean up the buffer array
+	delete request; // clean up the request
+}
+
+extern "C" int SendFormattedPacket( long long fd, const char* data, unsigned int len )
+{
+	// Assumes the packet is already formatted according to FormatPacket
+	auto uv_handle = LookupHandle( fd );
+	if ( !uv_handle )
+	{
+		CCP_LOGERR( "Cannot send data for socket %lld because there's no matching libuv handle", fd );
+		return 0;
+	}
+
+	if ( uv_handle_get_type( uv_handle ) != UV_TCP )
+	{
+		CCP_LOGERR( "BlueNet only supports TCP sockets" );
+		return 0;
+	}
+
+	auto* bufs = new uv_buf_t[1];
+	bufs[0] = uv_buf_init( (char*)data, len );
+	auto* write_req = new uv_write_t;
+	write_req->data = bufs;
+	int status = uv_write( write_req, reinterpret_cast<uv_stream_t*>( uv_handle ), bufs, 1, SendFormattedPacketWriteCallback );
+
+	if ( status != 0 )
+	{
+		CCP_LOGERR( "libuv failed writing packet: %s", uv_err_name( status ) );
+		return 0;
+	}
+
+	return 1;
+}
+
+extern "C" int SendPacket( long long fd, const char* data, unsigned int len, const char* OOBData, unsigned int OOBLen )
+{
+	size_t bufsize = sizeof(uint32_t) * 2 + len + OOBLen;
+	auto buf = new char[bufsize];
+	size_t outlen = FormatPacket( buf, data, len, OOBData, OOBLen );
+	if ( outlen == 0 )
+	{
+		delete buf;
+		return 0;
+	}
+	// SendFormattedPacket takes ownership of `buf` at this point
+	return SendFormattedPacket( fd, buf, outlen );
+}
+
+extern "C" int FormatPacket( char* buf, const char* data, unsigned int dataLen, const char* OOBData, unsigned int OOBLen )
+{
+	if ( !buf || !data )
+	{
+		return 0;
+	}
+
+	size_t pos;
+	if ( OOBData && OOBLen )
+	{
+		*(unsigned int *)buf = (dataLen + OOBLen + sizeof(unsigned int)) | ceHeaderExpectPayloadOffset;
+		*(unsigned int *)(buf + sizeof(unsigned int)) = OOBLen;
+		memcpy( buf + sizeof(unsigned int)*2, OOBData, OOBLen );
+		pos = OOBLen + sizeof(unsigned int)*2;
+	}
+	else
+	{
+		*(unsigned int *)buf = dataLen;
+		pos = sizeof(unsigned int);
+	}
+
+	memcpy( buf + pos, data, dataLen );
+	return dataLen + pos;
+}
+
 void AugmentSocketAPI( PySocketModule_APIObject* apiObject )
 {
 	apiObject->dispatch = TickUvLoop;
 	apiObject->add_oob_data_callback = AddOobDataCallback;
 	apiObject->remove_oob_data_callback = RemoveOobDataCallback;
+	apiObject->format_packet = FormatPacket;
+	apiObject->send_formatted_packet = SendFormattedPacket;
+	apiObject->send_packet = SendPacket;
 }

@@ -66,6 +66,16 @@ source_group("_socket" FILES
     include/socketmodule.h
 )
 
+# The following variable is defined only on DLL systems
+if (CMAKE_IMPORT_LIBRARY_SUFFIX)
+    add_custom_command(
+        TARGET _socket POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_RUNTIME_DLLS:_socket> $<TARGET_FILE_DIR:_socket>
+        COMMAND_EXPAND_LISTS
+    )
+endif ()
+
+
 # Define an alias target so we can export a target with the expected project name
 add_library(carbonio ALIAS _socket)
 
@@ -127,6 +137,9 @@ if(CMAKE_PROJECT_NAME STREQUAL io)
     option(BUILD_TESTING "Build tests. Enabled by default." ON)
     include(CTest)
     if(BUILD_TESTING)
+        # include the C++ test suite
+        add_subdirectory(tests)
+        # add the python tests
         list(APPEND PYTHON_TESTS test_socket.py)
         list(APPEND PYTHON_TESTS test_ssl.py)
         list(APPEND PYTHON_TESTS test_select.py)
