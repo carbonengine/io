@@ -9,6 +9,10 @@
 #include "socketmodule.h"
 #include "protocol.h"
 
+#ifndef INVALID_SOCKET /* MS defines this */
+#define INVALID_SOCKET ( -1 )
+#endif
+
 // This is the module name that shows up in loglite.
 const char* g_moduleName = "_socket";
 
