@@ -22,7 +22,8 @@ include(CcpPackageConfigHelpers)
 find_package(libuv CONFIG REQUIRED)
 find_package(Python CONFIG REQUIRED)
 find_package(OpenSSL CONFIG REQUIRED)
-find_package(Blue CONFIG REQUIRED)
+find_package(CcpLog CONFIG REQUIRED)
+find_package(CcpCore CONFIG REQUIRED)
 
 # --- _socket ---
 ccp_add_library(_socket SHARED
@@ -36,7 +37,9 @@ target_precompile_headers(_socket PRIVATE
 target_link_libraries(_socket
     PRIVATE
         libuv::uv_a
-        Blue
+        ccp::log
+        CcpCore
+        Python
 )
 set_target_properties(_socket
         PROPERTIES

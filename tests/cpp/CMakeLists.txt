@@ -18,7 +18,9 @@ target_include_directories(SocketCppUnitTests
 target_link_libraries(SocketCppUnitTests
         GTest::GTest
         libuv::uv_a
-        Blue
+        Python
+        ccp::log
+        CcpCore
 )
 
 if(CMAKE_IMPORT_LIBRARY_SUFFIX)
