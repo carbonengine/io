@@ -3633,9 +3633,46 @@ static PyObject*
 		return NULL;
 	}
 
-	res = internal_connect( s, SAS2SA( &addrbuf ), addrlen, 0 );
-	if( res < 0 )
-		return NULL;
+	if( is_managed_by_libuv( s ) )
+	{
+		if( s->sock_type != SOCK_STREAM )
+		{
+			PyErr_SetString(PyExc_NotImplementedError, "Unsupported libuv connection type");
+			return nullptr;
+
+		}
+
+		if( !is_valid_uv_handle( s->uv_handle ) )
+		{
+			errno = EBADF;
+			PyErr_SetFromErrno(PyExc_OSError);
+			return nullptr;
+		}
+
+		auto* request = new StreamConnectRequest( s, SAS2SA( &addrbuf ) );
+		PyObject* result = request->execute();
+		if( result )
+		{
+			return 0;
+		}
+		PyObject *exc, *val, *tb;
+		PyErr_Fetch( &exc, &val, &tb );
+		if( val && PyObject_HasAttrString( val, "errno" ) )
+		{
+			auto err = PyObject_GetAttrString( val, "errno" );
+			PyErr_Restore(exc, val, tb);
+			PyErr_Clear();
+			return err;
+		}
+		PyErr_Restore(exc, val, tb);
+		return nullptr;
+	}
+	else
+	{
+		res = internal_connect( s, SAS2SA( &addrbuf ), addrlen, 0 );
+		if( res < 0 )
+			return NULL;
+	}
 
 	return PyLong_FromLong( (long)res );
 }
