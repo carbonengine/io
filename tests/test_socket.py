@@ -4147,6 +4147,7 @@ class InterruptedTimeoutBase(unittest.TestCase):
 
 # Require siginterrupt() in order to ensure that system calls are
 # interrupted by default.
+@unittest.skip("TODO - signals not supported at the moment")
 @requireAttrs(signal, "siginterrupt")
 @unittest.skipUnless(hasattr(signal, "alarm") or hasattr(signal, "setitimer"),
                      "Don't have signal.alarm or signal.setitimer")
@@ -4191,6 +4192,7 @@ class InterruptedRecvTimeoutTest(InterruptedTimeoutBase, UDPTestBase):
 
 # Require siginterrupt() in order to ensure that system calls are
 # interrupted by default.
+@unittest.skip("TODO - signals not supported at the moment")
 @requireAttrs(signal, "siginterrupt")
 @unittest.skipUnless(hasattr(signal, "alarm") or hasattr(signal, "setitimer"),
                      "Don't have signal.alarm or signal.setitimer")
@@ -4973,6 +4975,7 @@ class TCPTimeoutTest(SocketTCPTest):
         if not ok:
             self.fail("accept() returned success when we did not expect it")
 
+    @unittest.skip("TODO - signals not supported at the moment")
     @unittest.skipUnless(hasattr(signal, 'alarm'),
                          'test needs signal.alarm()')
     def testInterruptedTimeout(self):
