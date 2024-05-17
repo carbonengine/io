@@ -7266,13 +7266,13 @@ static PyObject*
 	}
 	else
 #endif
+	Py_END_ALLOW_THREADS
 	if( !is_managed_by_libuv(type, family) )
 	{
 		PyErr_Format(PyExc_NotImplementedError, "Unsupported socket type %d", type);
 		goto finally;
 	}
 	ret = uv_socketpair( type, proto, sv, UV_NONBLOCK_PIPE, UV_NONBLOCK_PIPE );
-	Py_END_ALLOW_THREADS
 
 	if( ret < 0 )
 	{
