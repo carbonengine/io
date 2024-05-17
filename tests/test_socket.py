@@ -4036,7 +4036,7 @@ class RecvmsgIntoTCPTest(RecvmsgIntoTests, RecvmsgGenericStreamTests,
                          SendrecvmsgTCPTestBase):
     pass
 
-
+@unittest.skip("CCP: Protocol not supported")
 class SendrecvmsgSCTPStreamTestBase(SendrecvmsgSCTPFlagsBase,
                                     SendrecvmsgConnectedBase,
                                     ConnectedStreamTestMixin, SCTPStreamBase):
