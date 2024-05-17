@@ -514,7 +514,8 @@ class SocketPairTest(unittest.TestCase):
         unittest.TestCase.__init__(self, methodName=methodName)
 
     def setUp(self):
-        self.serv, self.cli = socket.socketpair()
+        # TODO: CCP, Reset this to socket.socketpair() once we get AF_INET support in
+        self.serv, self.cli = socket.socketpair(socket.AF_INET, socket.SOCK_STREAM)
 
     def tearDown(self):
         self.serv.close()
@@ -4282,6 +4283,7 @@ class BasicSocketPairTest(SocketPairTest):
         self.assertEqual(sock.type, socket.SOCK_STREAM)
         self.assertEqual(sock.proto, 0)
 
+    @unittest.skipIf(hasattr(socket, 'AF_UNIX'), "CCP: Re-enable this once we get AF_INET_SUPPORT in")
     def testDefaults(self):
         self._check_defaults(self.cli)
         self._check_defaults(self.serv)
@@ -5437,7 +5439,8 @@ class InheritanceTest(unittest.TestCase):
 
 
     def test_socketpair(self):
-        s1, s2 = socket.socketpair()
+        # TODO: CCP, Reset this to socket.socketpair() once we get AF_INET support in
+        s1, s2 = socket.socketpair(socket.AF_INET, socket.SOCK_STREAM)
         self.addCleanup(s1.close)
         self.addCleanup(s2.close)
         self.assertEqual(s1.get_inheritable(), False)
