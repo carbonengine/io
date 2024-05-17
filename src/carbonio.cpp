@@ -565,6 +565,17 @@ PyObject* StreamSendRequest::execute()
 	{
 		return nullptr;
 	}
+	auto currentTasklet = reinterpret_cast<PyTaskletObject*>( PyStackless_GetCurrent() );
+	if( m_blockingSend && PyTasklet_GetBlockTrap( currentTasklet ) )
+	{
+		PyErr_SetString(PyExc_RuntimeError, "Can't perform blocking send on a block trapped tasklet");
+		return nullptr;
+	}
+	if( PyTasklet_IsMain( currentTasklet ) )
+	{
+		PyErr_SetString(PyExc_RuntimeError, "Can't perform blocking send on the main tasklet");
+		return nullptr;
+	}
 	m_writeRequest.data = this;
 	int status = uv_write(&m_writeRequest, handle(), &m_sendBuffer, 1, StreamSendRequest::sendCallback );
 	if( status < 0 ){
@@ -602,7 +613,7 @@ void StreamSendRequest::onCallback( ICallbackParams* callbackParams )
 		sendError("StreamSendRequest::send Failed to convert status to python int");
 		return;
 	}
-	if( handleData()->blockingSend && !m_timedOut )
+	if( m_blockingSend && !m_timedOut )
 	{
 		if( PyChannel_Send( m_channel, py_status ) < 0 )
 		{
