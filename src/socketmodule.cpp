@@ -3380,12 +3380,17 @@ void on_accept(uv_stream_t *handle, int status)
 		return;
 	}
 
+	// If the socket gets a connection, but accept() hasn't been called, then sending on the channel
+	// would block the dispatch loop.
 	PyChannel_SetPreference( channel, PREFER_SENDER );
-	int ret = PyChannel_Send(channel, tuple);
-	if( ret < 0 )
+	if( PyChannel_GetBalance( channel ) < 0 )
 	{
-		LogError( "on_accept failed to send status" );
-		PyErr_Clear();
+		int ret = PyChannel_Send( channel, tuple );
+		if( ret < 0 )
+		{
+			LogError( "on_accept failed to send status" );
+			PyErr_Clear();
+		}
 	}
 	guard.Dismiss();
 }
