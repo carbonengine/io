@@ -209,9 +209,7 @@ static std::string FormatTraceback(PyObject* tb)
 			line = int( PyLong_AsLong( lineno.get() ) );
 		}
 		PyErr_Clear();
-		char clineno[16];
-		sprintf_s(clineno, "%i\n", line);
-		result += filename+":"+clineno;
+		result += filename + ":" + std::to_string( line ) + "\n";
 		tb = PyObject_GetAttrString(tb, "tb_next");
 	}
 	result += "Traceback end\n";
