@@ -25,8 +25,6 @@ find_package(OpenSSL CONFIG REQUIRED)
 find_package(CcpLog CONFIG REQUIRED)
 find_package(CcpCore CONFIG REQUIRED)
 
-add_compile_definitions(BLUEBUILD)
-
 # --- _socket ---
 ccp_add_library(_socket SHARED
     src/carbonio.cpp

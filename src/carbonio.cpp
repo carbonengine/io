@@ -2,9 +2,8 @@
 
 #include <algorithm>
 #include <atomic>
+#include <mutex>
 #include <vector>
-
-#include <CcpMutex.h>
 
 #include "socketmodule.h"
 #include "protocol.h"
@@ -40,17 +39,17 @@ static std::atomic_size_t s_packetsSent{0};
 static std::vector<OobDataCallback> s_oobDataCallbacks{};
 
 static std::unordered_map<SOCKET_T, uv_handle_t*> s_uvHandleLookup;
-static CcpMutex s_uvHandleLookupLock{"carbon-io", "handleLookup"};
+static std::mutex s_uvHandleLookupLock;
 
 void AddToLookupTable( SOCKET_T fileDescriptor, uv_handle_t* uvHandle )
 {
-	CcpAutoMutex mutex( s_uvHandleLookupLock );
+	std::scoped_lock mutex( s_uvHandleLookupLock );
 	s_uvHandleLookup[fileDescriptor] = uvHandle;
 }
 
 uv_handle_t* LookupHandle( SOCKET_T fileDescriptor )
 {
-	CcpAutoMutex mutex( s_uvHandleLookupLock );
+	std::scoped_lock mutex( s_uvHandleLookupLock );
 	auto iter = s_uvHandleLookup.find( fileDescriptor );
 	if ( iter != s_uvHandleLookup.cend() )
 	{
@@ -62,7 +61,7 @@ uv_handle_t* LookupHandle( SOCKET_T fileDescriptor )
 
 void RemoveFromLookupTable( SOCKET_T fileDescriptor )
 {
-	CcpAutoMutex mutex( s_uvHandleLookupLock );
+	std::scoped_lock mutex( s_uvHandleLookupLock );
 	auto iter = s_uvHandleLookup.find( fileDescriptor );
 	if ( iter != s_uvHandleLookup.cend() )
 	{
