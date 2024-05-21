@@ -514,8 +514,7 @@ class SocketPairTest(unittest.TestCase):
         unittest.TestCase.__init__(self, methodName=methodName)
 
     def setUp(self):
-        # TODO: CCP, Reset this to socket.socketpair() once we get AF_INET support in
-        self.serv, self.cli = socket.socketpair(socket.AF_INET, socket.SOCK_STREAM)
+        self.serv, self.cli = socket.socketpair()
 
     def tearDown(self):
         self.serv.close()
@@ -5442,8 +5441,7 @@ class InheritanceTest(unittest.TestCase):
 
 
     def test_socketpair(self):
-        # TODO: CCP, Reset this to socket.socketpair() once we get AF_INET support in
-        s1, s2 = socket.socketpair(socket.AF_INET, socket.SOCK_STREAM)
+        s1, s2 = socket.socketpair()
         self.addCleanup(s1.close)
         self.addCleanup(s2.close)
         self.assertEqual(s1.get_inheritable(), False)
