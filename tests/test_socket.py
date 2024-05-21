@@ -6280,7 +6280,7 @@ class CarbonIoTest(SocketPairTest):
 
         data = self.serv.recv(1024)
         self.assertEqual(len(MSG) + 4, len(data))
-        size = struct.unpack("=L", data[:4])[0]
+        size = struct.unpack("<L", data[:4])[0]
         self.assertEqual(len(MSG), size)
         self.assertEqual(MSG, data[4:])
 
@@ -6351,7 +6351,7 @@ class CarbonIoTest(SocketPairTest):
         # Hand-crafted payload, setting `ceHeaderExpectPayloadOffset` to indicate existence of OOB data
         oobData = b'foobar'
         oobDataLen = len(oobData)
-        payload = struct.pack("=ll", (len(MSG) + oobDataLen + 4) | 1<<28, oobDataLen)
+        payload = struct.pack("<ll", (len(MSG) + oobDataLen + 4) | 1<<28, oobDataLen)
         payload += oobData
         payload += MSG
         self.serv.send(payload)
