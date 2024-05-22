@@ -8521,6 +8521,9 @@ PyMODINIT_FUNC
 	PyModule_AddIntMacro( m, AF_UNSPEC );
 #endif
 	PyModule_AddIntMacro( m, AF_INET );
+#if defined( AF_UNIX )
+	PyModule_AddIntMacro( m, AF_UNIX );
+#endif /* AF_UNIX */
 #ifdef AF_AX25
 	/* Amateur Radio AX.25 */
 	PyModule_AddIntMacro( m, AF_AX25 );
