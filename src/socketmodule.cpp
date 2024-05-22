@@ -7311,8 +7311,16 @@ static PyObject*
 	Py_END_ALLOW_THREADS
 	if( !is_managed_by_libuv(type, family) )
 	{
-		PyErr_Format(PyExc_NotImplementedError, "Unsupported socket type %d", type);
-		goto finally;
+		if( socketpair(family, type, proto, sv) < 0)
+			return set_error();
+		s0 = new_sockobject(sv[0], family, type, proto);
+		if( s0 == NULL )
+			goto finally;
+		s1 = new_sockobject(sv[1], family, type, proto);
+		if( s1 == NULL )
+			goto finally;
+		res = PyTuple_Pack(2, s0, s1);
+		goto socketpair_created;
 	}
 	ret = uv_socketpair( type, proto, sv, UV_NONBLOCK_PIPE, UV_NONBLOCK_PIPE );
 
@@ -7352,7 +7360,7 @@ static PyObject*
 	{
 		PyErr_Format( PyExc_NotImplementedError, "Unsupported socket type: %d", type );
 	}
-
+socketpair_created:
 #ifdef MS_WINDOWS
 	// PEP 446 states all newly created file descriptors should be non-inheritable https://peps.python.org/pep-0446/
 	// The Windows API creates non-inheritable handles by default, so we don't need to do anything here.
