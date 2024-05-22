@@ -4332,8 +4332,26 @@ static int
 	sock_recvmsg_impl( PySocketSockObject* s, void* data )
 {
 	struct sock_recvmsg* ctx = reinterpret_cast<struct sock_recvmsg*>( data );
-
+	if( is_managed_by_libuv( s ) && s->sock_timeout >= 0 )
+	{
+		Ccp::PyGilEnsure gil;
+		// Sockets managed to libuv operate in non-blocking mode.
+		// Since libuv doesn't expose recvmsg functionality,
+		// set the socket to blocking mode while the operation is in progress.
+		if( internal_setblocking( s, true ) == -1 )
+		{
+			return false;
+		}
+	}
 	ctx->result = recvmsg( s->sock_fd, ctx->msg, ctx->flags );
+	if( is_managed_by_libuv( s ) && s->sock_timeout >= 0 )
+	{
+		Ccp::PyGilEnsure gil;
+		if( internal_setblocking( s, false ) == -1 )
+		{
+			return false;
+		}
+	}
 	return ( ctx->result >= 0 );
 }
 
