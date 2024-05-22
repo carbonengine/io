@@ -7311,6 +7311,7 @@ static PyObject*
 	Py_END_ALLOW_THREADS
 	if( !is_managed_by_libuv(type, family) )
 	{
+#ifdef HAVE_SOCKETPAIR
 		if( socketpair(family, type, proto, sv) < 0)
 			return set_error();
 		s0 = new_sockobject(sv[0], family, type, proto);
@@ -7321,6 +7322,10 @@ static PyObject*
 			goto finally;
 		res = PyTuple_Pack(2, s0, s1);
 		goto socketpair_created;
+#else
+		PyErr_Format(PyExc_NotImplementedError, "Unsupported socket type %d", type);
+		goto finally;
+#endif
 	}
 	ret = uv_socketpair( type, proto, sv, UV_NONBLOCK_PIPE, UV_NONBLOCK_PIPE );
 
