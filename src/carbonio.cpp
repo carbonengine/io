@@ -1020,7 +1020,7 @@ void StreamConnectRequest::onCallback( ICallbackParams* callbackParams )
 	}
 }
 
-extern "C" int FormatPacket( char* buf, const char* data, unsigned int dataLen, const char* OOBData, unsigned int OOBLen );
+extern "C" int FormatPacket( char* buf, const char* data, uint32_t dataLen, const char* OOBData, uint32_t OOBLen );
 
 PyObject* SendPacket( PySocketSockObject* socket, void* data, Py_ssize_t len )
 {
