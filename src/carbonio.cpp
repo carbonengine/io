@@ -1090,7 +1090,7 @@ PyObject* ReceivePacket( PySocketSockObject* socket )
 		return nullptr;
 	}
 
-	header = *reinterpret_cast<decltype(header)*>(PyBytes_AsString( pyHeader ) );
+	header = ntohl( *reinterpret_cast<decltype( header )*>( PyBytes_AsString( pyHeader ) ) );
 	uint32_t payloadLen = header & ceHeaderSizeMask;
 
 	if ( payloadLen > handleData->maxPacketSize )
@@ -1129,7 +1129,7 @@ PyObject* ReceivePacket( PySocketSockObject* socket )
 
 	if ( (header & ceHeaderExpectPayloadOffset) == ceHeaderExpectPayloadOffset)
 	{
-		oobDataLen = *reinterpret_cast<decltype(oobDataLen)*>( payload );
+		oobDataLen = ntohl( *reinterpret_cast<decltype( oobDataLen )*>( payload ) );
 
 		if ( oobDataLen > handleData->maxPacketSize )
 		{
@@ -1233,7 +1233,7 @@ extern "C" int SendPacket( long long fd, const char* data, unsigned int len, con
 	return SendFormattedPacket( fd, buf, outlen );
 }
 
-extern "C" int FormatPacket( char* buf, const char* data, unsigned int dataLen, const char* OOBData, unsigned int OOBLen )
+extern "C" int FormatPacket( char* buf, const char* data, uint32_t dataLen, const char* OOBData, uint32_t OOBLen )
 {
 	if ( !buf || !data )
 	{
@@ -1243,15 +1243,15 @@ extern "C" int FormatPacket( char* buf, const char* data, unsigned int dataLen, 
 	size_t pos;
 	if ( OOBData && OOBLen )
 	{
-		*(unsigned int *)buf = (dataLen + OOBLen + sizeof(unsigned int)) | ceHeaderExpectPayloadOffset;
-		*(unsigned int *)(buf + sizeof(unsigned int)) = OOBLen;
-		memcpy( buf + sizeof(unsigned int)*2, OOBData, OOBLen );
-		pos = OOBLen + sizeof(unsigned int)*2;
+		*(uint32_t *)buf = htonl( dataLen + OOBLen + sizeof(uint32_t)) | htonl( ceHeaderExpectPayloadOffset );
+		*(uint32_t *)(buf + sizeof(uint32_t )) = htonl( OOBLen );
+		memcpy( buf + sizeof(uint32_t) * 2, OOBData, OOBLen );
+		pos = OOBLen + sizeof(uint32_t) * 2;
 	}
 	else
 	{
-		*(unsigned int *)buf = dataLen;
-		pos = sizeof(unsigned int);
+		*(uint32_t *)buf = htonl( dataLen );
+		pos = sizeof(uint32_t);
 	}
 
 	memcpy( buf + pos, data, dataLen );
