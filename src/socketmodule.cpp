@@ -1593,8 +1593,7 @@ static PyObject*
 		}
 #endif /* SYSPROTO_CONTROL */
 		default:
-			PyErr_SetString( PyExc_ValueError,
-							 "Invalid address type" );
+			PyErr_Format( PyExc_ValueError, "Invalid address type ( family=%d proto=%d )", addr->sa_family, proto );
 			return 0;
 		}
 #endif /* PF_SYSTEM */
