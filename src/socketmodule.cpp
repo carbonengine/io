@@ -4347,16 +4347,21 @@ static int
 	if( is_managed_by_libuv( s ) )
 	{
 		Ccp::PyGilEnsure gil;
-		bool success = false;
-		for( int tries = 10; tries > 0; --tries )
+		bool failed = false;
+		while( internal_setblocking( s, false ) == -1 )
 		{
-			if( internal_setblocking( s, false ) != -1 )
+			PyErr_Clear();
+			if( CHECK_ERRNO( EAGAIN ) )
 			{
-				success = true;
+				continue;
+			}
+			else
+			{
+				failed = true;
 				break;
 			}
 		}
-		if( !success )
+		if( failed )
 		{
 			LogError( "sock_recvmsg_impl: Failed to recover non-blocking state for socket" );
 		}
