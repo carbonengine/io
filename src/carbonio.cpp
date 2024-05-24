@@ -2,12 +2,15 @@
 
 #include <algorithm>
 #include <atomic>
+#include <mutex>
 #include <vector>
-
-#include <CcpMutex.h>
 
 #include "socketmodule.h"
 #include "protocol.h"
+
+#ifndef INVALID_SOCKET /* MS defines this */
+#define INVALID_SOCKET ( -1 )
+#endif
 
 // This is the module name that shows up in loglite.
 const char* g_moduleName = "_socket";
@@ -36,17 +39,17 @@ static std::atomic_size_t s_packetsSent{0};
 static std::vector<OobDataCallback> s_oobDataCallbacks{};
 
 static std::unordered_map<SOCKET_T, uv_handle_t*> s_uvHandleLookup;
-static CcpMutex s_uvHandleLookupLock{"carbon-io", "handleLookup"};
+static std::mutex s_uvHandleLookupLock;
 
 void AddToLookupTable( SOCKET_T fileDescriptor, uv_handle_t* uvHandle )
 {
-	CcpAutoMutex mutex( s_uvHandleLookupLock );
+	std::scoped_lock mutex( s_uvHandleLookupLock );
 	s_uvHandleLookup[fileDescriptor] = uvHandle;
 }
 
 uv_handle_t* LookupHandle( SOCKET_T fileDescriptor )
 {
-	CcpAutoMutex mutex( s_uvHandleLookupLock );
+	std::scoped_lock mutex( s_uvHandleLookupLock );
 	auto iter = s_uvHandleLookup.find( fileDescriptor );
 	if ( iter != s_uvHandleLookup.cend() )
 	{
@@ -58,7 +61,7 @@ uv_handle_t* LookupHandle( SOCKET_T fileDescriptor )
 
 void RemoveFromLookupTable( SOCKET_T fileDescriptor )
 {
-	CcpAutoMutex mutex( s_uvHandleLookupLock );
+	std::scoped_lock mutex( s_uvHandleLookupLock );
 	auto iter = s_uvHandleLookup.find( fileDescriptor );
 	if ( iter != s_uvHandleLookup.cend() )
 	{
@@ -206,9 +209,7 @@ static std::string FormatTraceback(PyObject* tb)
 			line = int( PyLong_AsLong( lineno.get() ) );
 		}
 		PyErr_Clear();
-		char clineno[16];
-		sprintf_s(clineno, "%i\n", line);
-		result += filename+":"+clineno;
+		result += filename + ":" + std::to_string( line ) + "\n";
 		tb = PyObject_GetAttrString(tb, "tb_next");
 	}
 	result += "Traceback end\n";
@@ -561,6 +562,17 @@ PyObject* StreamSendRequest::execute()
 	{
 		return nullptr;
 	}
+	auto currentTasklet = reinterpret_cast<PyTaskletObject*>( PyStackless_GetCurrent() );
+	if( m_blockingSend && PyTasklet_GetBlockTrap( currentTasklet ) )
+	{
+		PyErr_SetString(PyExc_RuntimeError, "Can't perform blocking send on a block trapped tasklet");
+		return nullptr;
+	}
+	if( PyTasklet_IsMain( currentTasklet ) )
+	{
+		PyErr_SetString(PyExc_RuntimeError, "Can't perform blocking send on the main tasklet");
+		return nullptr;
+	}
 	m_writeRequest.data = this;
 	int status = uv_write(&m_writeRequest, handle(), &m_sendBuffer, 1, StreamSendRequest::sendCallback );
 	if( status < 0 ){
@@ -598,7 +610,7 @@ void StreamSendRequest::onCallback( ICallbackParams* callbackParams )
 		sendError("StreamSendRequest::send Failed to convert status to python int");
 		return;
 	}
-	if( handleData()->blockingSend && !m_timedOut )
+	if( m_blockingSend && !m_timedOut )
 	{
 		if( PyChannel_Send( m_channel, py_status ) < 0 )
 		{
@@ -1008,7 +1020,7 @@ void StreamConnectRequest::onCallback( ICallbackParams* callbackParams )
 	}
 }
 
-extern "C" int FormatPacket( char* buf, const char* data, unsigned int dataLen, const char* OOBData, unsigned int OOBLen );
+extern "C" int FormatPacket( char* buf, const char* data, const uint32_t dataLen, const char* OOBData, const uint32_t OOBLen );
 
 PyObject* SendPacket( PySocketSockObject* socket, void* data, Py_ssize_t len )
 {
@@ -1078,7 +1090,7 @@ PyObject* ReceivePacket( PySocketSockObject* socket )
 		return nullptr;
 	}
 
-	header = *reinterpret_cast<decltype(header)*>(PyBytes_AsString( pyHeader ) );
+	header = ntohl( *reinterpret_cast<decltype( header )*>( PyBytes_AsString( pyHeader ) ) );
 	uint32_t payloadLen = header & ceHeaderSizeMask;
 
 	if ( payloadLen > handleData->maxPacketSize )
@@ -1117,7 +1129,7 @@ PyObject* ReceivePacket( PySocketSockObject* socket )
 
 	if ( (header & ceHeaderExpectPayloadOffset) == ceHeaderExpectPayloadOffset)
 	{
-		oobDataLen = *reinterpret_cast<decltype(oobDataLen)*>( payload );
+		oobDataLen = ntohl( *reinterpret_cast<decltype( oobDataLen )*>( payload ) );
 
 		if ( oobDataLen > handleData->maxPacketSize )
 		{
@@ -1221,7 +1233,7 @@ extern "C" int SendPacket( long long fd, const char* data, unsigned int len, con
 	return SendFormattedPacket( fd, buf, outlen );
 }
 
-extern "C" int FormatPacket( char* buf, const char* data, unsigned int dataLen, const char* OOBData, unsigned int OOBLen )
+extern "C" int FormatPacket( char* buf, const char* data, const uint32_t dataLen, const char* OOBData, const uint32_t OOBLen )
 {
 	if ( !buf || !data )
 	{
@@ -1231,15 +1243,15 @@ extern "C" int FormatPacket( char* buf, const char* data, unsigned int dataLen, 
 	size_t pos;
 	if ( OOBData && OOBLen )
 	{
-		*(unsigned int *)buf = (dataLen + OOBLen + sizeof(unsigned int)) | ceHeaderExpectPayloadOffset;
-		*(unsigned int *)(buf + sizeof(unsigned int)) = OOBLen;
-		memcpy( buf + sizeof(unsigned int)*2, OOBData, OOBLen );
-		pos = OOBLen + sizeof(unsigned int)*2;
+		*(uint32_t *)buf = htonl( dataLen + OOBLen + sizeof(uint32_t)) | htonl( ceHeaderExpectPayloadOffset );
+		*(uint32_t *)(buf + sizeof(uint32_t )) = htonl( OOBLen );
+		memcpy( buf + sizeof(uint32_t) * 2, OOBData, OOBLen );
+		pos = OOBLen + sizeof(uint32_t) * 2;
 	}
 	else
 	{
-		*(unsigned int *)buf = dataLen;
-		pos = sizeof(unsigned int);
+		*(uint32_t *)buf = htonl( dataLen );
+		pos = sizeof(uint32_t);
 	}
 
 	memcpy( buf + pos, data, dataLen );

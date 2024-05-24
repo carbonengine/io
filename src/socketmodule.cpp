@@ -1593,8 +1593,7 @@ static PyObject*
 		}
 #endif /* SYSPROTO_CONTROL */
 		default:
-			PyErr_SetString( PyExc_ValueError,
-							 "Invalid address type" );
+			PyErr_Format( PyExc_ValueError, "Invalid address type ( family=%d proto=%d )", addr->sa_family, proto );
 			return 0;
 		}
 #endif /* PF_SYSTEM */
@@ -3380,12 +3379,17 @@ void on_accept(uv_stream_t *handle, int status)
 		return;
 	}
 
+	// If the socket gets a connection, but accept() hasn't been called, then sending on the channel
+	// would block the dispatch loop.
 	PyChannel_SetPreference( channel, PREFER_SENDER );
-	int ret = PyChannel_Send(channel, tuple);
-	if( ret < 0 )
+	if( PyChannel_GetBalance( channel ) < 0 )
 	{
-		LogError( "on_accept failed to send status" );
-		PyErr_Clear();
+		int ret = PyChannel_Send( channel, tuple );
+		if( ret < 0 )
+		{
+			LogError( "on_accept failed to send status" );
+			PyErr_Clear();
+		}
 	}
 	guard.Dismiss();
 }
@@ -3628,9 +3632,46 @@ static PyObject*
 		return NULL;
 	}
 
-	res = internal_connect( s, SAS2SA( &addrbuf ), addrlen, 0 );
-	if( res < 0 )
-		return NULL;
+	if( is_managed_by_libuv( s ) )
+	{
+		if( s->sock_type != SOCK_STREAM )
+		{
+			PyErr_SetString(PyExc_NotImplementedError, "Unsupported libuv connection type");
+			return nullptr;
+
+		}
+
+		if( !is_valid_uv_handle( s->uv_handle ) )
+		{
+			errno = EBADF;
+			PyErr_SetFromErrno(PyExc_OSError);
+			return nullptr;
+		}
+
+		auto* request = new StreamConnectRequest( s, SAS2SA( &addrbuf ) );
+		PyObject* result = request->execute();
+		if( result )
+		{
+			return 0;
+		}
+		PyObject *exc, *val, *tb;
+		PyErr_Fetch( &exc, &val, &tb );
+		if( val && PyObject_HasAttrString( val, "errno" ) )
+		{
+			auto err = PyObject_GetAttrString( val, "errno" );
+			PyErr_Restore(exc, val, tb);
+			PyErr_Clear();
+			return err;
+		}
+		PyErr_Restore(exc, val, tb);
+		return nullptr;
+	}
+	else
+	{
+		res = internal_connect( s, SAS2SA( &addrbuf ), addrlen, 0 );
+		if( res < 0 )
+			return NULL;
+	}
 
 	return PyLong_FromLong( (long)res );
 }
@@ -4290,8 +4331,40 @@ static int
 	sock_recvmsg_impl( PySocketSockObject* s, void* data )
 {
 	struct sock_recvmsg* ctx = reinterpret_cast<struct sock_recvmsg*>( data );
-
+	if( is_managed_by_libuv( s ) )
+	{
+		Ccp::PyGilEnsure gil;
+		// Sockets managed to libuv operate in non-blocking mode.
+		// Since libuv doesn't expose recvmsg functionality,
+		// set the socket to blocking mode while the operation is in progress.
+		if( internal_setblocking( s, true ) == -1 )
+		{
+			return false;
+		}
+	}
 	ctx->result = recvmsg( s->sock_fd, ctx->msg, ctx->flags );
+	if( is_managed_by_libuv( s ) )
+	{
+		Ccp::PyGilEnsure gil;
+		bool failed = false;
+		while( internal_setblocking( s, false ) == -1 )
+		{
+			PyErr_Clear();
+			if( CHECK_ERRNO( EAGAIN ) )
+			{
+				continue;
+			}
+			else
+			{
+				failed = true;
+				break;
+			}
+		}
+		if( failed )
+		{
+			LogError( "sock_recvmsg_impl: Failed to recover non-blocking state for socket" );
+		}
+	}
 	return ( ctx->result >= 0 );
 }
 
@@ -7266,13 +7339,26 @@ static PyObject*
 	}
 	else
 #endif
+	Py_END_ALLOW_THREADS
 	if( !is_managed_by_libuv(type, family) )
 	{
+#ifdef HAVE_SOCKETPAIR
+		if( socketpair(family, type, proto, sv) < 0)
+			return set_error();
+		s0 = new_sockobject(sv[0], family, type, proto);
+		if( s0 == NULL )
+			goto finally;
+		s1 = new_sockobject(sv[1], family, type, proto);
+		if( s1 == NULL )
+			goto finally;
+		res = PyTuple_Pack(2, s0, s1);
+		goto socketpair_created;
+#else
 		PyErr_Format(PyExc_NotImplementedError, "Unsupported socket type %d", type);
 		goto finally;
+#endif
 	}
 	ret = uv_socketpair( type, proto, sv, UV_NONBLOCK_PIPE, UV_NONBLOCK_PIPE );
-	Py_END_ALLOW_THREADS
 
 	if( ret < 0 )
 	{
@@ -7310,7 +7396,7 @@ static PyObject*
 	{
 		PyErr_Format( PyExc_NotImplementedError, "Unsupported socket type: %d", type );
 	}
-
+socketpair_created:
 #ifdef MS_WINDOWS
 	// PEP 446 states all newly created file descriptors should be non-inheritable https://peps.python.org/pep-0446/
 	// The Windows API creates non-inheritable handles by default, so we don't need to do anything here.

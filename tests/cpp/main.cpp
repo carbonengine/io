@@ -15,7 +15,7 @@ void cb_read( uv_stream_t* client, ssize_t nread, const uv_buf_t* buf )
 	} );
 
 	ASSERT_EQ( 18, nread );
-	ASSERT_STREQ( "\x0E\x00\x00\x10\x05\x00\x00\x00WorldHello", buf->base );
+	ASSERT_STREQ( "\x10\x00\x00\x0E\x00\x00\x00\x05WorldHello", buf->base );
 }
 
 TEST( Socket, SendPacket )

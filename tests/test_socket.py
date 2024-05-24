@@ -514,7 +514,9 @@ class SocketPairTest(unittest.TestCase):
         unittest.TestCase.__init__(self, methodName=methodName)
 
     def setUp(self):
-        self.serv, self.cli = socket.socketpair()
+        # CCP Modification
+        # Prefer AF_INET sockets since these exercise the non-blocking behavior
+        self.serv, self.cli = socket.socketpair(socket.AF_INET, socket.SOCK_STREAM)
 
     def tearDown(self):
         self.serv.close()
@@ -4035,7 +4037,7 @@ class RecvmsgIntoTCPTest(RecvmsgIntoTests, RecvmsgGenericStreamTests,
                          SendrecvmsgTCPTestBase):
     pass
 
-
+@unittest.skip("CCP: Protocol not supported")
 class SendrecvmsgSCTPStreamTestBase(SendrecvmsgSCTPFlagsBase,
                                     SendrecvmsgConnectedBase,
                                     ConnectedStreamTestMixin, SCTPStreamBase):
@@ -4146,6 +4148,7 @@ class InterruptedTimeoutBase(unittest.TestCase):
 
 # Require siginterrupt() in order to ensure that system calls are
 # interrupted by default.
+@unittest.skip("TODO - signals not supported at the moment")
 @requireAttrs(signal, "siginterrupt")
 @unittest.skipUnless(hasattr(signal, "alarm") or hasattr(signal, "setitimer"),
                      "Don't have signal.alarm or signal.setitimer")
@@ -4190,6 +4193,7 @@ class InterruptedRecvTimeoutTest(InterruptedTimeoutBase, UDPTestBase):
 
 # Require siginterrupt() in order to ensure that system calls are
 # interrupted by default.
+@unittest.skip("TODO - signals not supported at the moment")
 @requireAttrs(signal, "siginterrupt")
 @unittest.skipUnless(hasattr(signal, "alarm") or hasattr(signal, "setitimer"),
                      "Don't have signal.alarm or signal.setitimer")
@@ -4282,6 +4286,7 @@ class BasicSocketPairTest(SocketPairTest):
         self.assertEqual(sock.type, socket.SOCK_STREAM)
         self.assertEqual(sock.proto, 0)
 
+    @unittest.skipIf(hasattr(socket, 'AF_UNIX'), "CCP: Re-enable this once we get AF_INET_SUPPORT in")
     def testDefaults(self):
         self._check_defaults(self.cli)
         self._check_defaults(self.serv)
@@ -4971,6 +4976,7 @@ class TCPTimeoutTest(SocketTCPTest):
         if not ok:
             self.fail("accept() returned success when we did not expect it")
 
+    @unittest.skip("TODO - signals not supported at the moment")
     @unittest.skipUnless(hasattr(signal, 'alarm'),
                          'test needs signal.alarm()')
     def testInterruptedTimeout(self):
@@ -6274,7 +6280,7 @@ class CarbonIoTest(SocketPairTest):
 
         data = self.serv.recv(1024)
         self.assertEqual(len(MSG) + 4, len(data))
-        size = struct.unpack("L", data[:4])[0]
+        size = struct.unpack("!L", data[:4])[0]
         self.assertEqual(len(MSG), size)
         self.assertEqual(MSG, data[4:])
 
@@ -6345,7 +6351,7 @@ class CarbonIoTest(SocketPairTest):
         # Hand-crafted payload, setting `ceHeaderExpectPayloadOffset` to indicate existence of OOB data
         oobData = b'foobar'
         oobDataLen = len(oobData)
-        payload = struct.pack("ll", (len(MSG) + oobDataLen + 4) | 1<<28, oobDataLen)
+        payload = struct.pack("!ll", (len(MSG) + oobDataLen + 4) | 1<<28, oobDataLen)
         payload += oobData
         payload += MSG
         self.serv.send(payload)

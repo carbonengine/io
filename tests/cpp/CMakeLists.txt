@@ -18,15 +18,24 @@ target_include_directories(SocketCppUnitTests
 target_link_libraries(SocketCppUnitTests
         GTest::GTest
         libuv::uv_a
-        Blue
+        Python
+        ccp::log
+        CcpCore
 )
 
 if(CMAKE_IMPORT_LIBRARY_SUFFIX)
-add_custom_command(TARGET SocketCppUnitTests POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_RUNTIME_DLLS:SocketCppUnitTests> $<TARGET_FILE_DIR:SocketCppUnitTests>
-        COMMAND_EXPAND_LISTS
-        VERBATIM
-)
+    add_custom_command(TARGET SocketCppUnitTests POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_RUNTIME_DLLS:SocketCppUnitTests> $<TARGET_FILE_DIR:SocketCppUnitTests>
+            COMMAND_EXPAND_LISTS
+            VERBATIM
+    )
+elseif(APPLE)
+    add_custom_command(
+            TARGET SocketCppUnitTests POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            $<TARGET_FILE_DIR:Python>/libpython3.8.dylib $<TARGET_FILE_DIR:SocketCppUnitTests>
+            COMMAND_EXPAND_LISTS
+    )
 endif()
 
 # Test discovery needs to be delayed until we are about to run tests as otherwise the above post-build step won't have
