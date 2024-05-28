@@ -167,6 +167,7 @@ if(CMAKE_PROJECT_NAME STREQUAL io)
             EXPORT ioTarget
             CONFIGURATIONS Release
             RUNTIME DESTINATION bin/${CCP_PLATFORM}/${CCP_ARCHITECTURE}/${CCP_TOOLSET}/
+            LIBRARY DESTINATION bin/${CCP_PLATFORM}/${CCP_ARCHITECTURE}/${CCP_TOOLSET}/
     )
 
     # Install rule for available public headers
@@ -175,7 +176,7 @@ if(CMAKE_PROJECT_NAME STREQUAL io)
     configure_ccp_vendor_config_file(
             TARGET carbonio
             DESTINATION "${CMAKE_CURRENT_BINARY_DIR}/CarbonIOConfig.cmake"
-            DEPENDENCIES "Python;OpenSSL;CcpCore;libuv"
+            DEPENDENCIES "Python;OpenSSL;CcpCore;CcpLog;libuv"
             CONFIGURATIONS Release
     )
     install(FILES ${CMAKE_CURRENT_BINARY_DIR}/CarbonIOConfig.cmake DESTINATION .)
