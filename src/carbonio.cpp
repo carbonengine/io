@@ -136,7 +136,7 @@ bool is_valid_socket( PySocketSockObject* socket )
 	return socket->sock_fd != INVALID_SOCKET && is_valid_uv_handle( socket->uv_handle );
 }
 
-HandleData::HandleData() : channel( PyChannel_New( nullptr ) ), packetReceiveQueue( PyChannel_New( nullptr ) ), request( nullptr )
+HandleData::HandleData() : channel( SchedulerAPI()->PyChannel_New( nullptr ) ), packetReceiveQueue( SchedulerAPI()->PyChannel_New( nullptr ) ), request( nullptr )
 {
 	buf = uv_buf_init( nullptr, 0 );
 }
@@ -171,7 +171,7 @@ void* CreateHandleData()
 		return nullptr;
 	}
 
-	PyChannel_SetPreference( data->packetReceiveQueue, PREFER_SENDER );
+	SchedulerAPI()->PyChannel_SetPreference( data->packetReceiveQueue, PREFER_SENDER );
 	return data;
 }
 
@@ -282,14 +282,14 @@ IRequest::IRequest( PySocketSockObject* socket ) : m_handle( socket->uv_handle )
 {
 	handleData()->request.reset(this);
 	m_self = handleData()->request;
-	m_channel = PyChannel_New( nullptr );
+	m_channel = SchedulerAPI()->PyChannel_New( nullptr );
 	if( !m_channel )
 	{
 		LogError( "Failed to create channel for request" );
 	}
 	else
 	{
-		PyChannel_SetPreference( m_channel, PREFER_SENDER );
+		SchedulerAPI()->PyChannel_SetPreference( m_channel, PREFER_SENDER );
 	}
 }
 
@@ -297,8 +297,8 @@ void IRequest::sendError(std::string_view msg)
 {
 	PyObject *exc, *val, *tb;
 	PyErr_Fetch( &exc, &val, &tb );
-	PyChannel_SetPreference(m_channel, PREFER_SENDER );
-	auto ret = PyChannel_SendThrow( m_channel, exc, val, tb);
+	SchedulerAPI()->PyChannel_SetPreference(m_channel, PREFER_SENDER );
+	auto ret = SchedulerAPI()->PyChannel_SendThrow( m_channel, exc, val, tb);
 	if( ret < 0 )
 	{
 		PyErr_Restore( exc, val, tb );
@@ -387,7 +387,7 @@ PyObject* StreamRecvRequest::execute()
 			PyErr_FromUvErr( status );
 			return nullptr;
 		}
-		auto sentinel = PyChannel_Receive( m_channel );
+		auto sentinel = SchedulerAPI()->PyChannel_Receive( m_channel );
 		if( !sentinel )
 		{
 			return nullptr;
@@ -417,14 +417,14 @@ void StreamRecvRequest::onCallback( ICallbackParams* callbackParams )
 	}
 	Ccp::PyGilEnsure gil;
 	ON_BLOCK_EXIT( [&] { clearTimeout(); finalize();} );
-	PyChannel_SetPreference(m_channel, PREFER_SENDER );
+	SchedulerAPI()->PyChannel_SetPreference(m_channel, PREFER_SENDER );
 	if ( nread < 0 ) {
 		if (nread != UV_EOF) {
 			PyErr_FromUvErr( int( nread ) );
 			sendError("OnReceive failed to read data.");
 		}
 		else {
-			if ( PyChannel_Send( m_channel, Py_None ) < 0 ) {
+			if ( SchedulerAPI()->PyChannel_Send( m_channel, Py_None ) < 0 ) {
 				LogError( "StreamRecvRequest::onReceive failed to signal sentinel" );
 				PyErr_Clear();
 			}
@@ -433,7 +433,7 @@ void StreamRecvRequest::onCallback( ICallbackParams* callbackParams )
 	if ( nread > 0 ) {
 		m_received_len += nread;
 		uv_read_stop( handle() );
-		if ( PyChannel_Send( m_channel, Py_None ) < 0 ) {
+		if ( SchedulerAPI()->PyChannel_Send( m_channel, Py_None ) < 0 ) {
 			LogError( "StreamRecvRequest::onReceive failed to signal sentinel" );
 			PyErr_Clear();
 		}
@@ -536,9 +536,9 @@ void StreamRecvRequest::cancel()
 {
 	uv_read_stop( handle() );
 	// Check the balance, as this could be called after the request has finished executing.
-	if( PyChannel_GetBalance( m_channel ) < 0 )
+	if( SchedulerAPI()->PyChannel_GetBalance( m_channel ) < 0 )
 	{
-		if( PyChannel_Send( m_channel, Py_None ) < 0 )
+		if( SchedulerAPI()->PyChannel_Send( m_channel, Py_None ) < 0 )
 		{
 			LogError( "StreamRecvRequest::cancel failed to signal sentinel" );
 		}
@@ -562,13 +562,13 @@ PyObject* StreamSendRequest::execute()
 	{
 		return nullptr;
 	}
-	auto currentTasklet = reinterpret_cast<PyTaskletObject*>( PyStackless_GetCurrent() );
-	if( m_blockingSend && PyTasklet_GetBlockTrap( currentTasklet ) )
+	auto currentTasklet = reinterpret_cast<PyTaskletObject*>( SchedulerAPI()->PyScheduler_GetCurrent() );
+	if( m_blockingSend && SchedulerAPI()->PyTasklet_GetBlockTrap( currentTasklet ) )
 	{
 		PyErr_SetString(PyExc_RuntimeError, "Can't perform blocking send on a block trapped tasklet");
 		return nullptr;
 	}
-	if( PyTasklet_IsMain( currentTasklet ) )
+	if( SchedulerAPI()->PyTasklet_IsMain( currentTasklet ) )
 	{
 		PyErr_SetString(PyExc_RuntimeError, "Can't perform blocking send on the main tasklet");
 		return nullptr;
@@ -582,7 +582,7 @@ PyObject* StreamSendRequest::execute()
 
 	if( m_blockingSend )
 	{
-		return PyChannel_Receive( m_channel );
+		return SchedulerAPI()->PyChannel_Receive( m_channel );
 	}
 	return PyLong_FromLong(0);
 }
@@ -612,7 +612,7 @@ void StreamSendRequest::onCallback( ICallbackParams* callbackParams )
 	}
 	if( m_blockingSend && !m_timedOut )
 	{
-		if( PyChannel_Send( m_channel, py_status ) < 0 )
+		if( SchedulerAPI()->PyChannel_Send( m_channel, py_status ) < 0 )
 		{
 			LogError( "StreamSendRequest::send Failed to send status over channel" );
 			PyErr_Clear();
@@ -624,7 +624,7 @@ void SendError(PyChannelObject* channel, std::string_view msg)
 {
 	PyObject *exc, *val, *tb;
 	PyErr_Fetch( &exc, &val, &tb );
-	auto ret = PyChannel_SendThrow( channel, exc, val, tb);
+	auto ret = SchedulerAPI()->PyChannel_SendThrow( channel, exc, val, tb);
 	if( ret < 0 )
 	{
 		PyErr_Restore( exc, val, tb );
@@ -648,7 +648,7 @@ PyObject* UdpRecvRequest::execute()
 		return nullptr;
 	}
 
-	auto sentinel = PyChannel_Receive( m_channel );
+	auto sentinel = SchedulerAPI()->PyChannel_Receive( m_channel );
 	if( !sentinel )
 	{
 		return nullptr;
@@ -766,7 +766,7 @@ void UdpRecvRequest::onCallback( ICallbackParams* callbackParams )
 
 	// no more data, let's signal that we're done
 	if (nread == 0) {
-		if ( PyChannel_Send( m_channel, Py_None ) < 0 )
+		if ( SchedulerAPI()->PyChannel_Send( m_channel, Py_None ) < 0 )
 		{
 			LogError( "UdpRecvRequest::onRead failed sending sentinel value on channel" );
 			PyErr_Clear();
@@ -791,9 +791,9 @@ void UdpRecvRequest::cancel()
 	uv_udp_recv_stop( handle() );
 	// Check the balance, as this could be called
 	// after the request has finished executing.
-	if( PyChannel_GetBalance( m_channel ) < 0 )
+	if( SchedulerAPI()->PyChannel_GetBalance( m_channel ) < 0 )
 	{
-		if( PyChannel_Send( m_channel, Py_None ) < 0 )
+		if( SchedulerAPI()->PyChannel_Send( m_channel, Py_None ) < 0 )
 		{
 			LogError( "UdpRecvRequest::cancel failed sending sentinel value on channel" );
 		}
@@ -811,7 +811,7 @@ PyObject* UdpSendRequest::execute()
 	{
 		return PyLong_FromLong( status );
 	}
-	auto ret = PyChannel_Receive( m_channel );
+	auto ret = SchedulerAPI()->PyChannel_Receive( m_channel );
 	status = PyLong_AsLong( ret );
 	if ( status < 0 ) {
 		if( !( status == -1 && PyErr_Occurred() ) )
@@ -850,7 +850,7 @@ void UdpSendRequest::onCallback( ICallbackParams* callbackParams )
 		sendError( "UdpSendRequest::send Failed to convert status to python int" );
 		return;
 	}
-	if( PyChannel_Send( m_channel, py_status ) < 0 )
+	if( SchedulerAPI()->PyChannel_Send( m_channel, py_status ) < 0 )
 	{
 		LogError( "UdpSendRequest::send Failed to send status over channel" );
 		PyErr_Clear();
@@ -867,7 +867,7 @@ PyObject* StreamAcceptRequest::execute()
 		return nullptr;
 	}
 
-	result = PyChannel_Receive( m_channel );
+	result = SchedulerAPI()->PyChannel_Receive( m_channel );
 
 	if( !result )
 	{
@@ -960,7 +960,7 @@ PyObject* StreamConnectRequest::execute()
 		PyErr_FromUvErr( status );
 		return nullptr;
 	}
-	PyObject* connect_status = PyChannel_Receive(m_channel);
+	PyObject* connect_status = SchedulerAPI()->PyChannel_Receive(m_channel);
 	if( connect_status == nullptr ) {
 		return nullptr;
 	}
@@ -1003,7 +1003,7 @@ void StreamConnectRequest::onCallback( ICallbackParams* callbackParams )
 	{
 		PyObject *exc, *val, *tb;
 		PyErr_Fetch( &exc, &val, &tb );
-		auto ret = PyChannel_SendThrow( m_channel, exc, val, tb );
+		auto ret = SchedulerAPI()->PyChannel_SendThrow( m_channel, exc, val, tb );
 		if( ret < 0 )
 		{
 			PyErr_Restore( exc, val, tb );
@@ -1012,7 +1012,7 @@ void StreamConnectRequest::onCallback( ICallbackParams* callbackParams )
 		}
 		return;
 	}
-	int ret = PyChannel_Send( m_channel, py_status );
+	int ret = SchedulerAPI()->PyChannel_Send( m_channel, py_status );
 	if( ret < 0 )
 	{
 		LogError( "StreamConnectRequest::onConnect failed to send status" );
@@ -1052,9 +1052,9 @@ PyObject* ReceivePacket( PySocketSockObject* socket )
 		if ( is_valid_socket( socket ) )
 		{
 			handleData->activePacketReceiveRequests -= 1;
-			if( PyChannel_GetBalance( handleData->packetReceiveQueue ) < 0 )
+			if( SchedulerAPI()->PyChannel_GetBalance( handleData->packetReceiveQueue ) < 0 )
 			{
-				int ret = PyChannel_Send( handleData->packetReceiveQueue, Py_None );
+				int ret = SchedulerAPI()->PyChannel_Send( handleData->packetReceiveQueue, Py_None );
 				if( ret == -1 )
 				{
 					LogError("ReceivePacket failed to send sentinel");
@@ -1065,7 +1065,7 @@ PyObject* ReceivePacket( PySocketSockObject* socket )
 	} );
 	if( handleData->activePacketReceiveRequests > 1 )
 	{
-		PyObject* ret = PyChannel_Receive( handleData->packetReceiveQueue );
+		PyObject* ret = SchedulerAPI()->PyChannel_Receive( handleData->packetReceiveQueue );
 		if( !ret )
 		{
 			return nullptr;

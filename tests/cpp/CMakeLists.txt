@@ -14,6 +14,7 @@ target_include_directories(SocketCppUnitTests
         PRIVATE
         ${CMAKE_CURRENT_LIST_DIR}/../../src
         ${CMAKE_CURRENT_LIST_DIR}/../../include
+        ${SCHEDULER_INCLUDE_DIR}
 )
 target_link_libraries(SocketCppUnitTests
         GTest::GTest

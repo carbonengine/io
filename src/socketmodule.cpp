@@ -825,7 +825,7 @@ static int
 #else
 	if( interval >= 0 )
 	{
-		_PyTime_AsTimeval_noraise( interval, &tv, _PyTime_ROUND_CEILING );
+		//_PyTime_AsTimeval_noraise( interval, &tv, _PyTime_ROUND_CEILING );
 		tvp = &tv;
 	}
 	else
@@ -3381,10 +3381,10 @@ void on_accept(uv_stream_t *handle, int status)
 
 	// If the socket gets a connection, but accept() hasn't been called, then sending on the channel
 	// would block the dispatch loop.
-	PyChannel_SetPreference( channel, PREFER_SENDER );
-	if( PyChannel_GetBalance( channel ) < 0 )
+	SchedulerAPI()->PyChannel_SetPreference( channel, PREFER_SENDER );
+	if( SchedulerAPI()->PyChannel_GetBalance( channel ) < 0 )
 	{
-		int ret = PyChannel_Send( channel, tuple );
+		int ret = SchedulerAPI()->PyChannel_Send( channel, tuple );
 		if( ret < 0 )
 		{
 			LogError( "on_accept failed to send status" );
@@ -8512,7 +8512,7 @@ PyMODINIT_FUNC
 	}
 #endif
 
-	Py_TYPE( &sock_type ) = &PyType_Type;
+	//Py_TYPE( &sock_type ) = &PyType_Type;
 	m = PyModule_Create( &socketmodule );
 	if( m == NULL )
 		return NULL;

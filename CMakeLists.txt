@@ -24,33 +24,44 @@ find_package(Python CONFIG REQUIRED)
 find_package(OpenSSL CONFIG REQUIRED)
 find_package(CcpLog CONFIG REQUIRED)
 find_package(CcpCore CONFIG REQUIRED)
+find_package(Scheduler CONFIG REQUIRED)
 
 # --- _socket ---
 ccp_add_library(_socket SHARED
-    src/carbonio.cpp
-    src/socketmodule.cpp
+        # src/carbonio.cpp
+        src/socketmodule.c
 )
 target_precompile_headers(_socket PRIVATE
-    <CcpLog.h>
-    <CcpScopeGuard.h>
+        #<CcpLog.h>
+        #<CcpScopeGuard.h>
 )
 target_link_libraries(_socket
-    PRIVATE
+        PRIVATE
         libuv::uv_a
         ccp::log
         CcpCore
         Python
 )
+if(WIN32)
+    target_link_libraries(_socket
+            PRIVATE
+            Rpcrt4
+    )
+endif()
 set_target_properties(_socket
         PROPERTIES
         DEBUG_POSTFIX ""
         INTERNAL_POSTFIX ""
 )
+
+get_target_property(SCHEDULER_INCLUDE_DIR Scheduler INTERFACE_INCLUDE_DIRECTORIES)
+
 target_include_directories(_socket
-    PUBLIC
+        PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}/include
-    PRIVATE
+        PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src
+        ${SCHEDULER_INCLUDE_DIR}
 )
 
 # The following variable is defined only on DLL systems
@@ -64,19 +75,20 @@ endif()
 
 get_target_property(_SOURCES _socket SOURCES)
 source_group("_socket" FILES
-    ${_SOURCES}
-    src/carbonio.h
-    include/socketmodule.h
+        ${_SOURCES}
+        src/carbonio.h
+        include/socketmodule.h
 )
 
 # The following variable is defined only on DLL systems
 if (CMAKE_IMPORT_LIBRARY_SUFFIX)
     add_custom_command(
-        TARGET _socket POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_RUNTIME_DLLS:_socket> $<TARGET_FILE_DIR:_socket>
-        COMMAND_EXPAND_LISTS
+            TARGET _socket POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_RUNTIME_DLLS:_socket> $<TARGET_FILE_DIR:_socket>
+            COMMAND_EXPAND_LISTS
     )
 endif ()
+
 
 
 # Define an alias target so we can export a target with the expected project name
@@ -84,19 +96,20 @@ add_library(carbonio ALIAS _socket)
 
 # --- _ssl ---
 ccp_add_library(_ssl SHARED
-    src/_ssl.c
+        src/_ssl.h
+        src/_ssl.c
 )
 get_target_property(_SOURCES _ssl SOURCES)
 source_group("_ssl" FILES
-    ${_SOURCES}
-    src/_ssl_data.h
-    src/_ssl/debughelpers.c
-    src/clinic/_ssl.c.h
+        ${_SOURCES}
+        src/_ssl_data.h
+        src/_ssl/debughelpers.c
+        src/clinic/_ssl.c.h
 )
 target_link_libraries(_ssl
-    PRIVATE
+        PRIVATE
         Python
-    PUBLIC
+        PUBLIC
         OpenSSL::Crypto
         OpenSSL::SSL
 )
@@ -106,15 +119,16 @@ set_target_properties(_ssl
         INTERNAL_POSTFIX ""
 )
 target_include_directories(_ssl
-    PUBLIC
+        PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}/include
-    PRIVATE
+        PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src
+        ${SCHEDULER_INCLUDE_DIR}
 )
 
 # --- _select ---
 ccp_add_library(_select SHARED
-    src/selectmodule.c
+        src/selectmodule.c
 )
 set_target_properties(_select
         PROPERTIES
@@ -124,11 +138,11 @@ set_target_properties(_select
 )
 get_target_property(_SOURCES _select SOURCES)
 source_group("_select" FILES
-    ${_SOURCES}
-    src/clinic/selectmodule.c.h
+        ${_SOURCES}
+        src/clinic/selectmodule.c.h
 )
 target_link_libraries(_select
-    PRIVATE
+        PRIVATE
         Python
 )
 if(WIN32)
@@ -152,9 +166,9 @@ if(CMAKE_PROJECT_NAME STREQUAL io)
                     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/tests
             )
             if(WIN32)
-                set_tests_properties(${PYTHON_TEST} PROPERTIES ENVIRONMENT "PYTHONPATH=$<TARGET_FILE_DIR:_socket>\;${BRANCH_ROOT_DIR}/carbon/common/stdlib\;${BRANCH_ROOT_DIR}/vendor/python/3.8.1+ccp-stackless/${CCP_VENDOR_BIN_PATH};BUILDFLAVOR=$<LOWER_CASE:$<CONFIG>>")
+                set_tests_properties(${PYTHON_TEST} PROPERTIES ENVIRONMENT "PYTHONPATH=$<TARGET_FILE_DIR:_socket>\;${BRANCH_ROOT_DIR}/carbon/common/stdlib\;${Python_ROOT}/${CCP_VENDOR_BIN_PATH}\;${Greenlet_ROOT}/python\;${Greenlet_ROOT}/${CCP_VENDOR_BIN_PATH}\;${Scheduler_ROOT}/${CCP_VENDOR_BIN_PATH};BUILDFLAVOR=$<LOWER_CASE:$<CONFIG>>")
             elseif (APPLE)
-                set_tests_properties(${PYTHON_TEST} PROPERTIES ENVIRONMENT "PYTHONPATH=$<TARGET_FILE_DIR:_socket>:${BRANCH_ROOT_DIR}/carbon/common/stdlib:${BRANCH_ROOT_DIR}/vendor/python/3.8.1+ccp-stackless/${CCP_VENDOR_BIN_PATH};BUILDFLAVOR=$<LOWER_CASE:$<CONFIG>>")
+                set_tests_properties(${PYTHON_TEST} PROPERTIES ENVIRONMENT "PYTHONPATH=$<TARGET_FILE_DIR:_socket>:${BRANCH_ROOT_DIR}/carbon/common/stdlib:${Python_ROOT}/${CCP_VENDOR_BIN_PATH}:${Greenlet_ROOT}/python:${Greenlet_ROOT}/${CCP_VENDOR_BIN_PATH}:${Scheduler_ROOT}/${CCP_VENDOR_BIN_PATH};BUILDFLAVOR=$<LOWER_CASE:$<CONFIG>>")
             else()
                 message(FATAL_ERROR "Unsupported platform")
             endif ()
@@ -163,7 +177,7 @@ if(CMAKE_PROJECT_NAME STREQUAL io)
 
     # Install rule to ensure that our runtime and linker files are in the expected, platform-specific folders
     install(
-            TARGETS _socket _ssl _select
+            TARGETS _socket# _ssl _select
             EXPORT ioTarget
             CONFIGURATIONS Release
             RUNTIME DESTINATION bin/${CCP_PLATFORM}/${CCP_ARCHITECTURE}/${CCP_TOOLSET}/

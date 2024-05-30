@@ -3,7 +3,7 @@
 
 #include <functional>
 #include <Python.h>
-#include <stackless_api.h>
+#include <Scheduler.h>
 
 #include <uv.h>
 
