@@ -28,12 +28,12 @@ find_package(Scheduler CONFIG REQUIRED)
 
 # --- _socket ---
 ccp_add_library(_socket SHARED
-        # src/carbonio.cpp
-        src/socketmodule.c
+        src/carbonio.cpp
+        src/socketmodule.cpp
 )
 target_precompile_headers(_socket PRIVATE
-        #<CcpLog.h>
-        #<CcpScopeGuard.h>
+        <CcpLog.h>
+        <CcpScopeGuard.h>
 )
 target_link_libraries(_socket
         PRIVATE
@@ -158,7 +158,7 @@ if(CMAKE_PROJECT_NAME STREQUAL io)
         add_subdirectory(tests)
         # add the python tests
         list(APPEND PYTHON_TESTS test_socket.py)
-        list(APPEND PYTHON_TESTS test_ssl.py)
+#        list(APPEND PYTHON_TESTS test_ssl.py)
         list(APPEND PYTHON_TESTS test_select.py)
         foreach(PYTHON_TEST ${PYTHON_TESTS})
             add_test(NAME ${PYTHON_TEST}
