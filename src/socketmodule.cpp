@@ -3781,7 +3781,7 @@ sock_connect_ex(PySocketSockObject *s, PyObject *addro)
 		PyObject* result = request->execute();
 		if( result )
 		{
-			return 0;
+			return PyLong_FromLong(0L);
 		}
 		PyObject *exc, *val, *tb;
 		PyErr_Fetch( &exc, &val, &tb );
@@ -3789,8 +3789,12 @@ sock_connect_ex(PySocketSockObject *s, PyObject *addro)
 		{
 			auto err = PyObject_GetAttrString( val, "errno" );
 			PyErr_Restore(exc, val, tb);
-			PyErr_Clear();
-			return err;
+			if( PyLong_Check( err ) )
+			{
+				PyErr_Clear();
+				return err;
+			}
+			return nullptr;
 		}
 		PyErr_Restore(exc, val, tb);
 		return nullptr;
