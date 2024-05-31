@@ -98,6 +98,8 @@ add_library(carbonio ALIAS _socket)
 ccp_add_library(_ssl SHARED
         src/_ssl.h
         src/_ssl.c
+        src/c_channel.h
+        src/c_channel.cpp
 )
 get_target_property(_SOURCES _ssl SOURCES)
 source_group("_ssl" FILES
@@ -158,7 +160,7 @@ if(CMAKE_PROJECT_NAME STREQUAL io)
         add_subdirectory(tests)
         # add the python tests
         list(APPEND PYTHON_TESTS test_socket.py)
-#        list(APPEND PYTHON_TESTS test_ssl.py)
+        list(APPEND PYTHON_TESTS test_ssl.py)
         list(APPEND PYTHON_TESTS test_select.py)
         foreach(PYTHON_TEST ${PYTHON_TESTS})
             add_test(NAME ${PYTHON_TEST}

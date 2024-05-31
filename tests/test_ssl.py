@@ -1,3 +1,8 @@
+import _scheduler
+import sys
+# Scheduler needs to exist in sys.modules as "scheduler" in order that we may load the c api.
+sys.modules["scheduler"] = _scheduler
+
 # Test the support for SSL and sockets
 
 import sys
@@ -1808,6 +1813,7 @@ class SSLObjectTests(unittest.TestCase):
         c_in.write(s_out.read())
         client.unwrap()
 
+@unittest.skip("Moves socket between threads")
 class SimpleBackgroundTests(unittest.TestCase):
     """Tests that connect to a simple server running in the background"""
 
@@ -2238,7 +2244,7 @@ def _test_get_server_certificate_fail(test, host, port):
             test.fail("Got server certificate %s for %s:%s!" % (pem, host, port))
 
 
-from test.ssl_servers import make_https_server
+from ssl_servers import make_https_server
 
 class ThreadedEchoServer(threading.Thread):
 
@@ -2339,6 +2345,13 @@ class ThreadedEchoServer(threading.Thread):
                 self.sock.close()
 
         def run(self):
+            import scheduler
+            scheduler.tasklet(self._run)()
+            while getattr(self._run, "running", True):
+                scheduler.run()
+                socket.dispatch()
+
+        def _run(self):
             self.running = True
             if not self.server.starttls_server:
                 if not self.wrap_conn():
@@ -2444,6 +2457,7 @@ class ThreadedEchoServer(threading.Thread):
                  chatty=True, connectionchatty=False, starttls_server=False,
                  alpn_protocols=None,
                  ciphers=None, context=None):
+        raise unittest.SkipTest("Moves socket between threads")
         if context:
             self.context = context
         else:
@@ -2595,6 +2609,7 @@ class AsyncoreEchoServer(threading.Thread):
             raise
 
     def __init__(self, certfile):
+        raise unittest.SkipTest("Asyncore deprecated since 3.6 to be removed in 3.12")
         self.flag = None
         self.active = False
         self.server = self.EchoServer(certfile)
@@ -3139,20 +3154,29 @@ class ThreadedTests(unittest.TestCase):
         listener_ready = threading.Event()
         listener_gone = threading.Event()
 
-        s = socket.socket()
-        port = socket_helper.bind_port(s, HOST)
+        port = support.find_unused_port()
 
         # `listener` runs in a thread.  It sits in an accept() until
         # the main thread connects.  Then it rudely closes the socket,
         # and sets Event `listener_gone` to let the main thread know
         # the socket is gone.
-        def listener():
+        def _listener():
+            s = socket.socket()
+            s.bind((HOST, port))
             s.listen()
             listener_ready.set()
             newsock, addr = s.accept()
             newsock.close()
             s.close()
             listener_gone.set()
+            _listener.running = False
+
+        def listener():
+            import scheduler
+            scheduler.tasklet(_listener)()
+            while getattr(_listener, "running", True):
+                scheduler.run()
+                socket.dispatch()
 
         def connector():
             listener_ready.wait()
@@ -3172,6 +3196,9 @@ class ThreadedTests(unittest.TestCase):
             connector()
         finally:
             t.join()
+            # Delete the thread explicitly to make sure it gets removed from the threading._dangling weakset.
+            # If the thread is not deleted, dangling thread warnings get logged in support.threading_cleanup()
+            del t
 
     def test_ssl_cert_verify_error(self):
         if support.verbose:
@@ -3617,6 +3644,7 @@ class ThreadedTests(unittest.TestCase):
             s.setblocking(True)
             s.close()
 
+    @unittest.skip("Uses select, shares socket between threads")
     def test_handshake_timeout(self):
         # Issue #5103: SSL handshake must respect the socket timeout
         server = socket.socket(socket.AF_INET)
@@ -3670,22 +3698,32 @@ class ThreadedTests(unittest.TestCase):
         # Issue #16357: accept() on a SSLSocket created through
         # SSLContext.wrap_socket().
         client_ctx, server_ctx, hostname = testing_context()
-        server = socket.socket(socket.AF_INET)
         host = "127.0.0.1"
-        port = socket_helper.bind_port(server)
-        server = server_ctx.wrap_socket(server, server_side=True)
         self.assertTrue(server.server_side)
+        port = support.find_unused_port()
 
         evt = threading.Event()
         remote = None
         peer = None
-        def serve():
+        def _serve():
             nonlocal remote, peer
+            server = socket.socket(socket.AF_INET)
+            server = context.wrap_socket(server, server_side=True)
+            self.assertTrue(server.server_side)
+            server.bind((host, port))
             server.listen()
             # Block on the accept and wait on the connection to close.
             evt.set()
             remote, peer = server.accept()
             remote.send(remote.recv(4))
+            server.close()
+            _serve.running = False
+        def serve():
+            import scheduler
+            scheduler.tasklet(_serve)()
+            while getattr(_serve, "running", True):
+                scheduler.run()
+                socket.dispatch()
 
         t = threading.Thread(target=serve)
         t.start()
@@ -3701,7 +3739,6 @@ class ThreadedTests(unittest.TestCase):
         client.close()
         t.join()
         remote.close()
-        server.close()
         # Sanity checks.
         self.assertIsInstance(remote, ssl.SSLSocket)
         self.assertEqual(peer, client_addr)
@@ -4747,7 +4784,6 @@ class TestSSLDebug(unittest.TestCase):
 def set_socket_so_linger_on_with_zero_timeout(sock):
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack('ii', 1, 0))
 
-
 class TestPreHandshakeClose(unittest.TestCase):
     """Verify behavior of close sockets with received data before to the handshake.
     """
@@ -5181,4 +5217,8 @@ def setUpModule():
 
 
 if __name__ == "__main__":
-    unittest.main()
+    import scheduler
+    t = scheduler.tasklet(unittest.main)()
+    while t.alive:
+        scheduler.run()
+        socket.dispatch()
