@@ -4820,13 +4820,24 @@ class TestPreHandshakeClose(unittest.TestCase):
             self.ssl_ctx.verify_mode = ssl.CERT_REQUIRED
             self.ssl_ctx.load_verify_locations(cafile=ONLYCERT)
             self.ssl_ctx.load_cert_chain(certfile=ONLYCERT, keyfile=ONLYKEY)
+            self.listener_ready = threading.Event()
+            self.listener_sockname = None
+            super().start()
+
+        def run(self):
+            import scheduler
+            t = scheduler.tasklet(self._run)()
+            while t.alive:
+                scheduler.run()
+                socket.dispatch()
+
+        def _run(self):
             self.listener = socket.socket()
             self.port = socket_helper.bind_port(self.listener)
             self.listener.settimeout(self.timeout)
             self.listener.listen(1)
-            super().start()
-
-        def run(self):
+            self.listener_sockname = self.listener.getsockname()
+            self.listener_ready.set()
             try:
                 conn, address = self.listener.accept()
             except TimeoutError:
@@ -4889,7 +4900,8 @@ class TestPreHandshakeClose(unittest.TestCase):
         self.enterContext(server)  # starts it & unittest.TestCase stops it.
 
         with socket.socket() as client:
-            client.connect(server.listener.getsockname())
+            server.listener_ready.wait()
+            client.connect(server.listener_sockname)
             # This forces an immediate connection close via RST on .close().
             set_socket_so_linger_on_with_zero_timeout(client)
             client.setblocking(False)
@@ -4943,6 +4955,7 @@ class TestPreHandshakeClose(unittest.TestCase):
         set_socket_so_linger_on_with_zero_timeout(server.listener)
 
         with socket.socket() as client:
+            server.listener_ready.wait()
             client.connect(server.listener.getsockname())
             server_can_continue_with_wrap_socket.set()
 
@@ -5010,8 +5023,9 @@ class TestPreHandshakeClose(unittest.TestCase):
         # Redundant; call_after_accept sets SO_LINGER on the accepted conn.
         set_socket_so_linger_on_with_zero_timeout(server.listener)
 
+        server.listener_ready.wait()
         connection = SynchronizedHTTPSConnection(
-                server.listener.getsockname()[0],
+                server.listener_sockname[0],
                 port=server.port,
                 context=ssl.create_default_context(),
                 timeout=timeout,
