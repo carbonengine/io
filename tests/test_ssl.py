@@ -3154,7 +3154,7 @@ class ThreadedTests(unittest.TestCase):
         listener_ready = threading.Event()
         listener_gone = threading.Event()
 
-        port = support.find_unused_port()
+        port = socket_helper.find_unused_port()
 
         # `listener` runs in a thread.  It sits in an accept() until
         # the main thread connects.  Then it rudely closes the socket,
@@ -3699,8 +3699,7 @@ class ThreadedTests(unittest.TestCase):
         # SSLContext.wrap_socket().
         client_ctx, server_ctx, hostname = testing_context()
         host = "127.0.0.1"
-        self.assertTrue(server.server_side)
-        port = support.find_unused_port()
+        port = socket_helper.find_unused_port()
 
         evt = threading.Event()
         remote = None
@@ -3708,7 +3707,7 @@ class ThreadedTests(unittest.TestCase):
         def _serve():
             nonlocal remote, peer
             server = socket.socket(socket.AF_INET)
-            server = context.wrap_socket(server, server_side=True)
+            server = server_ctx.wrap_socket(server, server_side=True)
             self.assertTrue(server.server_side)
             server.bind((host, port))
             server.listen()
@@ -5218,7 +5217,7 @@ def setUpModule():
 
 if __name__ == "__main__":
     import scheduler
-    t = scheduler.tasklet(unittest.main)()
+    t = scheduler.tasklet(unittest.main)(verbosity=2)
     while t.alive:
         scheduler.run()
         socket.dispatch()
