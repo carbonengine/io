@@ -8552,7 +8552,6 @@ socket_exec(PyObject *m)
     PySocketModule_APIObject *capi{nullptr};
     PyObject *sock_type{nullptr};
     socket_state *state{nullptr};
-    PySocketModule_APIObject *api{nullptr};
     if (!os_init()) {
         goto error;
     }
@@ -8603,13 +8602,6 @@ socket_exec(PyObject *m)
     if (PyModule_AddType(m, state->sock_type) < 0) {
         goto error;
     }
-	
-	api = sock_get_api(state);
-	if( !api )
-	{
-		goto error;
-	}
-	AugmentSocketAPI(api);
 
     PyObject *has_ipv6;
 #ifdef ENABLE_IPV6
@@ -8626,6 +8618,7 @@ socket_exec(PyObject *m)
     if (capi == NULL) {
         goto error;
     }
+    AugmentSocketAPI(capi);
     capsule = PyCapsule_New(capi,
                                       PySocket_CAPSULE_NAME,
                                       sock_destroy_api);
