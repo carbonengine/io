@@ -555,6 +555,7 @@ class SocketConnectedTest(ThreadedTCPSocketTest):
         ThreadedTCPSocketTest.clientSetUp(self)
         self.cli.connect((HOST, self.port))
         self.serv_conn = self.cli
+        self.serv_conn.setblockingsend(True)
 
     def clientTearDown(self):
         self.serv_conn.close()
@@ -5281,6 +5282,7 @@ class NetworkConnectionTest(object):
         # BasicTCPTest, which defines self.port referenced below.
         self.cli = socket.create_connection((HOST, self.port))
         self.serv_conn = self.cli
+        self.serv_conn.setblockingsend(True)
 
 class BasicTCPTest2(NetworkConnectionTest, BasicTCPTest):
     """Tests that NetworkConnection does not break existing TCP functionality.
