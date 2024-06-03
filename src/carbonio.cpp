@@ -568,7 +568,7 @@ PyObject* StreamSendRequest::execute()
 		PyErr_SetString(PyExc_RuntimeError, "Can't perform blocking send on a block trapped tasklet");
 		return nullptr;
 	}
-	if( SchedulerAPI()->PyTasklet_IsMain( currentTasklet ) )
+	if( m_blockingSend && SchedulerAPI()->PyTasklet_IsMain( currentTasklet ) )
 	{
 		PyErr_SetString(PyExc_RuntimeError, "Can't perform blocking send on the main tasklet");
 		return nullptr;

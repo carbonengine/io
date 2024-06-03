@@ -6234,7 +6234,15 @@ class SendfileUsingSendTest(ThreadedTCPSocketTest):
     def meth_from_sock(self, sock):
         # Depending on the mixin class being run return either send()
         # or sendfile() method implementation.
-        return getattr(sock, "_sendfile_use_send")
+        def send_blocking(*args, **kwargs):
+            # Tests that use meth_form_sock expect sending to block
+            old = sock.setblockingsend()
+            sock.setblockingsend(True)
+            try:
+                return sock._sendfile_use_send(*args, **kwargs)
+            finally:
+                sock.setblockingsend(old)
+        return send_blocking
 
     # regular file
 
@@ -6259,6 +6267,7 @@ class SendfileUsingSendTest(ThreadedTCPSocketTest):
         address = self.serv.getsockname()
         file = io.BytesIO(self.FILEDATA)
         with socket.create_connection(address) as sock, file as file:
+            sock.setblockingsend(True)
             sent = sock.sendfile(file)
             self.assertEqual(sent, self.FILESIZE)
             self.assertEqual(file.tell(), self.FILESIZE)
@@ -6853,10 +6862,10 @@ class SendRecvFdsTests(unittest.TestCase):
 class CarbonIoTest(SocketPairTest):
     def test_setblockingsend(self):
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.assertTrue(s.setblockingsend(False))
-        self.assertFalse(s.setblockingsend())
         self.assertFalse(s.setblockingsend(True))
         self.assertTrue(s.setblockingsend())
+        self.assertTrue(s.setblockingsend(False))
+        self.assertFalse(s.setblockingsend())
 
         if hasattr(socket, "AF_UNIX"):
             with self.assertRaises(ValueError):
@@ -6867,12 +6876,14 @@ class CarbonIoTest(SocketPairTest):
     def test_blockingsend_behaviour(self):
         scheduler.getcurrent().block_trap = True
         try:
+            self.serv.setblockingsend(True)
             with self.assertRaises(RuntimeError):
                 self.serv.send(MSG)
             self.serv.setblockingsend(False)
             self.serv.send(MSG)
         finally:
             scheduler.getcurrent().block_trap = False
+            self.serv.setblockingsend(False)
 
     def test_stats(self):
         expected_stats_per_module = {
