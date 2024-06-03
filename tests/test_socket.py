@@ -5668,7 +5668,15 @@ class SendfileUsingSendTest(ThreadedTCPSocketTest):
     def meth_from_sock(self, sock):
         # Depending on the mixin class being run return either send()
         # or sendfile() method implementation.
-        return getattr(sock, "_sendfile_use_send")
+        def send_blocking(*args, **kwargs):
+            # Tests that use meth_form_sock expect sending to block
+            old = sock.setblockingsend()
+            sock.setblockingsend(True)
+            try:
+                return sock._sendfile_use_send(*args, **kwargs)
+            finally:
+                sock.setblockingsend(old)
+        return send_blocking
 
     # regular file
 
@@ -5821,7 +5829,6 @@ class SendfileUsingSendTest(ThreadedTCPSocketTest):
         address = self.serv.getsockname()
         file = open(support.TESTFN, 'rb')
         with socket.create_connection(address, timeout=2) as sock, file as file:
-            sock.setblockingsend(True)
             meth = self.meth_from_sock(sock)
             sent = meth(file)
             self.assertEqual(sent, self.FILESIZE)
