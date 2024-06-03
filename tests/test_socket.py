@@ -5693,6 +5693,7 @@ class SendfileUsingSendTest(ThreadedTCPSocketTest):
         address = self.serv.getsockname()
         file = io.BytesIO(self.FILEDATA)
         with socket.create_connection(address) as sock, file as file:
+            sock.setblockingsend(True)
             sent = sock.sendfile(file)
             self.assertEqual(sent, self.FILESIZE)
             self.assertEqual(file.tell(), self.FILESIZE)
@@ -5820,6 +5821,7 @@ class SendfileUsingSendTest(ThreadedTCPSocketTest):
         address = self.serv.getsockname()
         file = open(support.TESTFN, 'rb')
         with socket.create_connection(address, timeout=2) as sock, file as file:
+            sock.setblockingsend(True)
             meth = self.meth_from_sock(sock)
             sent = meth(file)
             self.assertEqual(sent, self.FILESIZE)
@@ -5836,6 +5838,7 @@ class SendfileUsingSendTest(ThreadedTCPSocketTest):
         address = self.serv.getsockname()
         with open(support.TESTFN, 'rb') as file:
             with socket.create_connection(address) as sock:
+                sock.setblockingsend(True)
                 sock.settimeout(0.0001)
                 meth = self.meth_from_sock(sock)
                 self.assertRaises(socket.timeout, meth, file)
@@ -6227,10 +6230,10 @@ class CreateServerFunctionalTest(unittest.TestCase):
 class CarbonIoTest(SocketPairTest):
     def test_setblockingsend(self):
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.assertTrue(s.setblockingsend(False))
-        self.assertFalse(s.setblockingsend())
         self.assertFalse(s.setblockingsend(True))
         self.assertTrue(s.setblockingsend())
+        self.assertTrue(s.setblockingsend(False))
+        self.assertFalse(s.setblockingsend())
 
         if hasattr(socket, "AF_UNIX"):
             with self.assertRaises(ValueError):
@@ -6240,12 +6243,14 @@ class CarbonIoTest(SocketPairTest):
     def test_blockingsend_behaviour(self):
         stackless.current.block_trap = True
         try:
+            self.serv.setblockingsend(True)
             with self.assertRaises(RuntimeError):
                 self.serv.send(MSG)
             self.serv.setblockingsend(False)
             self.serv.send(MSG)
         finally:
             stackless.current.block_trap = False
+            self.serv.setblockingsend(False)
 
     def test_stats(self):
         expected_stats_per_module = {
