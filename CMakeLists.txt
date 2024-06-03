@@ -179,7 +179,7 @@ if(CMAKE_PROJECT_NAME STREQUAL io)
 
     # Install rule to ensure that our runtime and linker files are in the expected, platform-specific folders
     install(
-            TARGETS _socket# _ssl _select
+            TARGETS _socket _ssl _select
             EXPORT ioTarget
             CONFIGURATIONS Release
             RUNTIME DESTINATION bin/${CCP_PLATFORM}/${CCP_ARCHITECTURE}/${CCP_TOOLSET}/
