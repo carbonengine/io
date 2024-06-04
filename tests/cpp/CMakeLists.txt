@@ -34,7 +34,7 @@ elseif(APPLE)
     add_custom_command(
             TARGET SocketCppUnitTests POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            $<TARGET_FILE_DIR:Python>/libpython3.8.dylib $<TARGET_FILE_DIR:SocketCppUnitTests>
+            $<TARGET_FILE:Python> $<TARGET_FILE_DIR:SocketCppUnitTests>
             COMMAND_EXPAND_LISTS
     )
 endif()

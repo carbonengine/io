@@ -6469,7 +6469,6 @@ sock_initobj_impl(PySocketSockObject *self, int family, int type, int proto,
 					s->uv_handle = reinterpret_cast<uv_handle_t*>(handle);
 				}
 			}
-		}
 #endif
 		}
     }
@@ -6486,16 +6485,16 @@ sock_initobj_impl(PySocketSockObject *self, int family, int type, int proto,
 /* Type object for socket objects. */
 
 static PyType_Slot sock_slots[] = {
-    {Py_tp_dealloc, sock_dealloc},
-    {Py_tp_traverse, sock_traverse},
-    {Py_tp_repr, sock_repr},
+    {Py_tp_dealloc, (void *)sock_dealloc},
+    {Py_tp_traverse, (void *)sock_traverse},
+    {Py_tp_repr, (void *)sock_repr},
     {Py_tp_doc, (void *)sock_doc},
     {Py_tp_methods, sock_methods},
     {Py_tp_members, sock_memberlist},
     {Py_tp_getset, sock_getsetlist},
-    {Py_tp_init, sock_initobj},
-    {Py_tp_new, sock_new},
-    {Py_tp_finalize, sock_finalize},
+    {Py_tp_init, (void *)sock_initobj},
+    {Py_tp_new, (void *)sock_new},
+    {Py_tp_finalize, (void *)sock_finalize},
     {0, NULL},
 };
 
@@ -6608,7 +6607,7 @@ extern int sethostname(const char *, size_t);
 
     res = PyObject_GetBuffer(hnobj, &buf, PyBUF_SIMPLE);
     if (!res) {
-        res = sethostname(buf.buf, buf.len);
+        res = sethostname(reinterpret_cast<const char*>(buf.buf), buf.len);
         PyBuffer_Release(&buf);
     }
     if (flag)
@@ -7416,10 +7415,10 @@ socket_socketpair(PyObject *self, PyObject *args)
 #ifdef HAVE_SOCKETPAIR
 		if( socketpair(family, type, proto, sv) < 0)
 			return set_error();
-		s0 = new_sockobject(sv[0], family, type, proto);
+		s0 = new_sockobject(state, sv[0], family, type, proto);
 		if( s0 == NULL )
 			goto finally;
-		s1 = new_sockobject(sv[1], family, type, proto);
+		s1 = new_sockobject(state, sv[1], family, type, proto);
 		if( s1 == NULL )
 			goto finally;
 		res = PyTuple_Pack(2, s0, s1);
@@ -10068,7 +10067,7 @@ error:
 }
 
 static struct PyModuleDef_Slot socket_slots[] = {
-    {Py_mod_exec, socket_exec},
+    {Py_mod_exec, (void*)socket_exec},
     {Py_mod_multiple_interpreters, Py_MOD_PER_INTERPRETER_GIL_SUPPORTED},
     {0, NULL},
 };
@@ -10099,7 +10098,7 @@ socket_free(void *mod)
     (void)socket_clear((PyObject *)mod);
 }
 
-static struct PyModuleDef socketmodule = {
+struct PyModuleDef socketmodule = {
     PyModuleDef_HEAD_INIT, // .m_base
     PySocket_MODULE_NAME, // .m_name
     socket_doc, // .m_doc
