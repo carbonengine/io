@@ -573,6 +573,7 @@ PyObject* StreamSendRequest::execute()
 		PyErr_SetString(PyExc_RuntimeError, "Can't perform blocking send on the main tasklet");
 		return nullptr;
 	}
+	Py_DECREF(currentTasklet);
 	m_writeRequest.data = this;
 	int status = uv_write(&m_writeRequest, handle(), &m_sendBuffer, 1, StreamSendRequest::sendCallback );
 	if( status < 0 ){
