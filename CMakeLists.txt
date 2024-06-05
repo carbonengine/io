@@ -167,7 +167,7 @@ if(CMAKE_PROJECT_NAME STREQUAL io)
             EXPORT ioTarget
             CONFIGURATIONS Release
             RUNTIME DESTINATION bin/${CCP_PLATFORM}/${CCP_ARCHITECTURE}/${CCP_TOOLSET}/
-            LIBRARY DESTINATION bin/${CCP_PLATFORM}/${CCP_ARCHITECTURE}/${CCP_TOOLSET}/
+            LIBRARY DESTINATION lib/${CCP_PLATFORM}/${CCP_ARCHITECTURE}/${CCP_TOOLSET}/
     )
 
     # Install rule for available public headers
