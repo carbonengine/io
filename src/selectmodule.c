@@ -13,9 +13,9 @@
 #endif
 
 #include "Python.h"
-#include "internal/pycore_fileutils.h"     // _Py_set_inheritable()
-#include "internal/pycore_import.h"        // _PyImport_GetModuleAttrString()
-#include "internal/pycore_time.h"          // _PyTime_t
+#include "pycore_fileutils.h"     // _Py_set_inheritable()
+#include "pycore_import.h"        // _PyImport_GetModuleAttrString()
+#include "pycore_time.h"          // _PyTime_t
 #include "structmember.h"         // PyMemberDef
 
 #include <stdbool.h>

@@ -107,8 +107,8 @@ Local naming conventions:
 
 #define PY_SSIZE_T_CLEAN
 #include "Python.h"
-#include "internal/pycore_fileutils.h"     // _Py_set_inheritable()
-#include "internal/pycore_moduleobject.h"  // _PyModule_GetState
+#include "pycore_fileutils.h"     // _Py_set_inheritable()
+#include "pycore_moduleobject.h"  // _PyModule_GetState
 #include "structmember.h"         // PyMemberDef
 
 #ifdef _Py_MEMORY_SANITIZER

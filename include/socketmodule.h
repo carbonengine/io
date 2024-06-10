@@ -1,4 +1,3 @@
-#pragma once
 /* Socket module header file */
 
 /* Includes needed for the sockaddr_* symbols below */
@@ -99,8 +98,6 @@ typedef int socklen_t;
 #  include <asm/types.h>
 # endif
 # include <linux/netlink.h>
-#elif defined(HAVE_NETLINK_NETLINK_H)
-# include <netlink/netlink.h>
 #else
 #  undef AF_NETLINK
 #endif
@@ -314,8 +311,7 @@ typedef union sock_addr {
    like the address family, which is used to decode socket address
    arguments properly. */
 
-typedef struct uv_handle_s uv_handle_t; // forward declare
-typedef struct PySocketSockObject_t {
+typedef struct {
     PyObject_HEAD
     SOCKET_T sock_fd;           /* Socket file descriptor */
     int sock_family;            /* Address family, e.g., AF_INET */
@@ -327,7 +323,6 @@ typedef struct PySocketSockObject_t {
     _PyTime_t sock_timeout;     /* Operation timeout in seconds;
                                         0.0 means non-blocking */
     struct _socket_state *state;
-	uv_handle_t* uv_handle;     /* the libuv handle associated with this socket object */
 } PySocketSockObject;
 
 /* --- C API ----------------------------------------------------*/
@@ -382,19 +377,10 @@ typedef struct PySocketSockObject_t {
 
 /* C API for usage by other Python modules.
  * Always add new things to the end for binary compatibility. */
-typedef int(*OobDataCallback)(long long descriptor, const char* data, int len, const char* OOBdata, int OOBLen );
-
 typedef struct {
     PyTypeObject *Sock_Type;
     PyObject *error;
     PyObject *timeout_error;
-    void (*dispatch)();
-    void (*add_oob_data_callback)(OobDataCallback);
-    void (*remove_oob_data_callback)(OobDataCallback);
-	// these are supposed to bypass Python!
-    int (*format_packet)(char* buf, const char* data, const uint32_t dataLen, const char* OOBData, const uint32_t OOBLen);
-    int (*send_formatted_packet)(const long long fd, const char* data, const unsigned int len);
-    int (*send_packet)(const long long fd, const char* data, const unsigned int len, const char* OOBData, const unsigned int OOBLen);
 } PySocketModule_APIObject;
 
 #define PySocketModule_ImportModuleAndAPI() PyCapsule_Import(PySocket_CAPSULE_NAME, 1)
