@@ -1,6 +1,6 @@
 # CCP Python Module Modifications
 
-These patch files keep track of changes made to files sourced from the cpython repo https://github.com/ccpgames/cpython. Please make sure to generate new patch files when you make changes to their corresponding source files.
+These patch files keep track of changes made to files sourced from CCPs fork of the cpython repo https://github.com/ccpgames/cpython. Please make sure to generate new patch files when you make changes to their corresponding source files.
 
 When updating to a new Python version fresh copies of those files should be placed in the repo. Then the patches should be applied either manually by hand, or using whatever tools you like. Be mindful that not all changes required are necessarily going to be included in the patch. For example the socket module has been converted from C to C++, so any C++ incompatible changes will have to be fixed up.
 
@@ -25,11 +25,11 @@ Mapping of files sourced from Python:
 | Modules/addrinfo.h              | src/addrinfo.h              |
 | Modules/selectmodule.c          | src/selectmodule.c          |
 | Modules/socketmodule.c          | src/socketmodule.cpp        |
-| Lib/test/certdata               | tests/certdata              | 
+| Lib/test/certdata               | tests/certdata              |
+| Lib/test/ssl_servers.py         | tests/ssl_servers.py        |
 | Lib/test/test_select.py         | tests/test_select.py        |
 | Lib/test/test_socket.py         | tests/test_socket.py        |
 | Lib/test/test_ssl.py            | tests/test_ssl.py           |
 
 Base cpython branch: 3.12
-
-Base cpython commit hash: 078da88ad19e8f7474b6943edd39b7e61511bd20
+Base cpython release: v3.12.3 (f6650f9ad73359051f3e558c2431a109bc016664)

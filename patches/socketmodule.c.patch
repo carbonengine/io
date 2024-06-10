@@ -1,7 +1,18 @@
 diff --git a/src/socketmodule.c b/src/socketmodule.c
-index 39a8372..6ed4406 100644
+index 9724879..6ed4406 100644
 --- a/src/socketmodule.c
 +++ b/src/socketmodule.cpp
+@@ -107,8 +107,8 @@ Local naming conventions:
+ 
+ #define PY_SSIZE_T_CLEAN
+ #include "Python.h"
+-#include "pycore_fileutils.h"     // _Py_set_inheritable()
+-#include "pycore_moduleobject.h"  // _PyModule_GetState
++#include "internal/pycore_fileutils.h"     // _Py_set_inheritable()
++#include "internal/pycore_moduleobject.h"  // _PyModule_GetState
+ #include "structmember.h"         // PyMemberDef
+ 
+ #ifdef _Py_MEMORY_SANITIZER
 @@ -578,7 +578,7 @@ get_module_state(PyObject *mod)
      return (socket_state *)state;
  }
