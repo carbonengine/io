@@ -1224,10 +1224,10 @@ extern "C" int SendPacket( long long fd, const char* data, unsigned int len, con
 {
 	size_t bufsize = sizeof(uint32_t) * 2 + len + OOBLen;
 	auto buf = new char[bufsize];
+	ON_BLOCK_EXIT([buf] {delete[] buf;});
 	size_t outlen = FormatPacket( buf, data, len, OOBData, OOBLen );
 	if ( outlen == 0 )
 	{
-		delete buf;
 		return 0;
 	}
 	// SendFormattedPacket takes ownership of `buf` at this point
