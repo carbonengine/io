@@ -6967,8 +6967,11 @@ class CarbonIoTest(SocketPairTest):
 
         def receive(i):
             msg, _, sequence = self.serv.recvpacketoob()
-            self.assertEqual(i, sequence)
-            self.assertEqual(MSG, msg)
+            try:
+                self.assertEqual(i, sequence)
+                self.assertEqual(MSG, msg)
+            except AssertionError as exc:
+                channel.send_exception(AssertionError, *exc.args)
             channel.send(None)
 
         old_stats = socket.getstats()

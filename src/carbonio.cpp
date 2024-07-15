@@ -440,7 +440,7 @@ void StreamRecvRequest::onCallback( ICallbackParams* callbackParams )
 	}
 }
 
-void StreamRecvRequest::alloc(uv_handle_t* handle, size_t size, uv_buf_t* buf)
+void growingBufferAlloc(uv_handle_t* handle, size_t size, uv_buf_t* buf)
 {
 	auto* data = reinterpret_cast<HandleData*>(handle->data);
 	auto& handleBuf = data->buf;
@@ -553,7 +553,7 @@ StreamRecvRequest::StreamRecvRequest( PySocketSockObject* socket, Py_ssize_t len
 int StreamRecvRequest::startRead()
 {
 	handleData()->receiveRequest = m_self;
-	return uv_read_start( handle(), StreamRecvRequest::alloc, StreamRecvRequest::readCallback );
+	return uv_read_start( handle(), growingBufferAlloc, StreamRecvRequest::readCallback );
 }
 
 PyObject* StreamSendRequest::execute()
@@ -1040,131 +1040,6 @@ PyObject* SendPacket( PySocketSockObject* socket, void* data, Py_ssize_t len )
 	return req->execute();
 }
 
-PyObject* ReceivePacket( PySocketSockObject* socket )
-{
-	auto* handleData = reinterpret_cast<HandleData*>( socket->uv_handle->data );
-
-	// Make sure only one tasklet is receiving packets at a time because:
-	// 1. We do 2 receives, and assume the first thing we receive is the length of a packet,
-	//    and the second thing is the contents of that package.
-	// 2. If we try to call uv_read_start twice in a row, we get error WSAEALREADY.
-	handleData->activePacketReceiveRequests += 1;
-	ON_BLOCK_EXIT( [&socket, &handleData] {
-		if ( is_valid_socket( socket ) )
-		{
-			handleData->activePacketReceiveRequests -= 1;
-			if( SchedulerAPI()->PyChannel_GetBalance( handleData->packetReceiveQueue ) < 0 )
-			{
-				int ret = SchedulerAPI()->PyChannel_Send( handleData->packetReceiveQueue, Py_None );
-				if( ret == -1 )
-				{
-					LogError("ReceivePacket failed to send sentinel");
-					PyErr_Clear();
-				}
-			}
-		}
-	} );
-	if( handleData->activePacketReceiveRequests > 1 )
-	{
-		PyObject* ret = SchedulerAPI()->PyChannel_Receive( handleData->packetReceiveQueue );
-		if( !ret )
-		{
-			return nullptr;
-		}
-	}
-
-	uint32_t header{0};
-	auto* request = new StreamRecvRequest(socket, sizeof(header), 0);
-	auto* pyHeader = request->execute();
-	if ( !pyHeader )
-	{
-		return nullptr;
-	}
-	ON_BLOCK_EXIT([pyHeader]{ Py_DecRef( pyHeader ); });
-	if( !is_valid_socket( socket ) )
-	{
-		// The request completed successfully, but there is still
-		// room for the socket to have closed between the sending
-		// tasklet sending the data and this tasklet getting run
-		// after the data is made available on the channel.
-		PyErr_SetString(PyExc_OSError, "Socket closed while receiving packet");
-		return nullptr;
-	}
-
-	header = ntohl( *reinterpret_cast<decltype( header )*>( PyBytes_AsString( pyHeader ) ) );
-	uint32_t payloadLen = header & ceHeaderSizeMask;
-
-	if ( payloadLen > handleData->maxPacketSize )
-	{
-		PyErr_Format(PyExc_OSError, "too large a packet detected at %d bytes, max is %llu", payloadLen, handleData->maxPacketSize);
-		return nullptr;
-	}
-
-	uint32_t remaining = payloadLen;
-	request = new StreamRecvRequest(socket, payloadLen, 0);
-	auto* pyPayload = request->execute();
-	if ( !pyPayload )
-	{
-		return nullptr;
-	}
-	remaining -= PyBytes_Size( pyPayload );
-	while( remaining > 0 )
-	{
-		request = new StreamRecvRequest( socket, remaining, 0 );
-		auto* chunk = request->execute();
-		if( !chunk )
-		{
-			return nullptr;
-		}
-		remaining -= PyBytes_Size( chunk );
-		PyBytes_ConcatAndDel( &pyPayload, chunk );
-		if( !pyPayload )
-		{
-			return nullptr;
-		}
-	}
-
-	char* payload = PyBytes_AsString( pyPayload );
-	char* payloadEnd = payload + payloadLen;
-	uint32_t oobDataLen{0};
-
-	if ( (header & ceHeaderExpectPayloadOffset) == ceHeaderExpectPayloadOffset)
-	{
-		oobDataLen = ntohl( *reinterpret_cast<decltype( oobDataLen )*>( payload ) );
-
-		if ( oobDataLen > handleData->maxPacketSize )
-		{
-			PyErr_Format(PyExc_OSError, "corrupted out-of-band data in packet detected at %d bytes, max is %llu", oobDataLen, handleData->maxPacketSize);
-			return nullptr;
-		}
-
-		payload += sizeof(oobDataLen);
-		auto* oobData = payload;
-		for ( auto callback : s_oobDataCallbacks ) {
-			auto stop = callback(
-				static_cast<long long>( socket->sock_fd ),
-				payload + oobDataLen,
-				payloadLen - oobDataLen,
-				oobData,
-				oobDataLen
-			);
-			if (stop != 0) {
-				// BlueNet ate the packet, so reset our internal state ... is this correct? When would bluenet eat the packet?
-				Py_RETURN_NONE;
-			}
-		}
-		payload += oobDataLen;
-	}
-
-	s_packetsReceived += 1;
-	Py_IncRef( Py_None );
-	auto* packet = PyTuple_Pack( 3, PyBytes_FromStringAndSize( payload, payloadEnd - payload ), Py_None, PyLong_FromSize_t( handleData->packetNumber++ ) );
-	if ( !packet ) {
-		Py_DecRef( Py_None );
-	}
-	return packet;
-}
-
 extern "C" void AddOobDataCallback( OobDataCallback packetCallback )
 {
 	s_oobDataCallbacks.push_back( packetCallback );
@@ -1267,4 +1142,217 @@ void AugmentSocketAPI( PySocketModule_APIObject* apiObject )
 	apiObject->format_packet = FormatPacket;
 	apiObject->send_formatted_packet = SendFormattedPacket;
 	apiObject->send_packet = SendPacket;
+}
+
+bool StreamPacketReceiveRequest::readHeader( char* src )
+{
+	m_packetHeader = ntohl( *reinterpret_cast<uint32_t*>( src ) );
+	if ( payloadLen() > handleData()->maxPacketSize )
+	{
+		PyErr_Format( PyExc_OSError, "too large a packet detected at %d bytes, max is %llu", payloadLen(), handleData()->maxPacketSize );
+		return false;
+	}
+
+	m_data.resize( payloadLen() );
+
+	return true;
+}
+
+PyObject* StreamPacketReceiveRequest::execute()
+{
+	auto* data = handleData();
+
+	auto sequenceNumber = data->packetNumber++;
+
+	// something is already reading, so let's try again at a later point in time
+	if ( data->activePacketReceiveRequests > 0 ) {
+		auto sentinel = SchedulerAPI()->PyChannel_Receive( data->packetReceiveQueue );
+		if ( !sentinel ) {
+			return nullptr;
+		}
+	}
+
+	data->activePacketReceiveRequests++;
+	ON_BLOCK_EXIT( [data]{
+	  data->activePacketReceiveRequests--;
+	} );
+
+	auto ret = startTimeout();
+	if( ret != Py_None )
+	{
+		return nullptr;
+	}
+
+	// check if we can read the header from existing data
+	auto needMore = [this, data] () -> bool{
+		auto bytesRemaining = data->bufWritePos - data->bufReadPos;
+		if ( bytesRemaining >= sizeof( uint32_t ) ) {
+			if ( ! readHeader( data->buf.base + data->bufReadPos ) )
+			{
+				return false;
+			}
+			data->bufReadPos += sizeof( uint32_t );
+			bytesRemaining -= sizeof( uint32_t );
+
+			// do we have even more bytes remaining that we can already fill into the buffer?
+			if ( bytesRemaining > 0 ) {
+				memcpy( m_data.data(), data->buf.base + data->bufReadPos, std::min( size_t( bytesRemaining ), m_data.size() ) );
+				data->bufReadPos += (ssize_t)m_data.size();
+			}
+			return bytesRemaining < m_data.size();
+		}
+		return true;
+	};
+
+	while ( needMore() )
+	{
+		auto status = startRead();
+		if ( status == 0 )
+		{
+			auto sentinel = SchedulerAPI()->PyChannel_Receive( m_channel );
+			if( !sentinel )
+			{
+				return nullptr;
+			}
+			break;
+		} else {
+			PyErr_FromUvErr( status );
+			return nullptr;
+		}
+	}
+
+	if ( PyErr_Occurred() ) {
+		return nullptr;
+	}
+
+	size_t payloadLen = m_packetHeader & ceHeaderSizeMask;
+	char* payload = m_data.data();
+	char* payloadEnd = payload + payloadLen;
+	uint32_t oobDataLen{0};
+
+	if ( (m_packetHeader & ceHeaderExpectPayloadOffset) == ceHeaderExpectPayloadOffset)
+	{
+		oobDataLen = ntohl( *reinterpret_cast<decltype( oobDataLen )*>( payload ) );
+
+		if ( oobDataLen > data->maxPacketSize )
+		{
+			PyErr_Format(PyExc_OSError, "corrupted out-of-band data in packet detected at %d bytes, max is %llu", oobDataLen, data->maxPacketSize);
+			return nullptr;
+		}
+
+		payload += sizeof(oobDataLen);
+		auto* oobData = payload;
+		for ( auto callback : s_oobDataCallbacks ) {
+			auto stop = callback(
+				static_cast<long long>( m_fd ),
+				payload + oobDataLen,
+				payloadLen - oobDataLen,
+				oobData,
+				oobDataLen
+			);
+			if (stop != 0) {
+				// BlueNet ate the packet, so reset our internal state ... is this correct? When would bluenet eat the packet?
+				Py_RETURN_NONE;
+			}
+		}
+		payload += oobDataLen;
+	}
+
+	s_packetsReceived += 1;
+
+	Py_IncRef( Py_None );
+	auto packetSize = payloadEnd - payload;
+	auto* packet = PyTuple_Pack( 3, PyBytes_FromStringAndSize( payload, packetSize ), Py_None, PyLong_FromSize_t( sequenceNumber ) );
+	if ( !packet ) {
+		Py_DecRef( Py_None );
+	}
+
+	auto balance = SchedulerAPI()->PyChannel_GetBalance( handleData()->packetReceiveQueue );
+	if ( balance < 0 ) {
+		if ( SchedulerAPI()->PyChannel_Send( handleData()->packetReceiveQueue, Py_None ) < 0 ) {
+			LogError( "StreamPacketReceiveRequest::stopRead() failed to signal waiting handlers" );
+			PyErr_Format( PyExc_SystemError, "StreamPacketReceiveRequest::stopRead() failed to signal waiting handlers" );
+			return nullptr;
+		}
+	}
+
+	return packet;
+}
+
+int StreamPacketReceiveRequest::startRead()
+{
+	handleData()->receiveRequest = m_self;
+	return uv_read_start( handle(), growingBufferAlloc, StreamPacketReceiveRequest::readCallback );
+}
+
+void StreamPacketReceiveRequest::readCallback( uv_stream_t* client, ssize_t nread, const uv_buf_t* buf )
+{
+	auto* data = reinterpret_cast<HandleData*>( client->data );
+	if( data->receiveRequest )
+	{
+		auto _this = reinterpret_cast<StreamPacketReceiveRequest*>( data->receiveRequest.get() );
+		auto params = Params( nread, buf );
+		_this->onCallback( &params );
+	}
+}
+
+size_t StreamPacketReceiveRequest::payloadLen() const
+{
+	return m_packetHeader & ceHeaderSizeMask;
+}
+
+void StreamPacketReceiveRequest::stopRead()
+{
+	uv_read_stop( handle() );
+}
+
+void StreamPacketReceiveRequest::onCallback( ICallbackParams* callbackParams )
+{
+	auto params = dynamic_cast<Params*>(callbackParams);
+	ssize_t nread = params->nread;
+	if( nread == 0 ) {
+		return;
+	}
+	Ccp::PyGilEnsure gil;
+	ON_BLOCK_EXIT( [&] { clearTimeout(); finalize();} );
+	SchedulerAPI()->PyChannel_SetPreference(m_channel, PREFER_SENDER );
+	if ( nread < 0 ) {
+		if (nread != UV_EOF) {
+			stopRead();
+			PyErr_FromUvErr( int( nread ) );
+			sendError("OnReceive failed to read data.");
+		}
+		else {
+			stopRead();
+			// Nothing left to read
+			if ( SchedulerAPI()->PyChannel_Send( m_channel, Py_None ) < 0 ) {
+				LogError( "StreamRecvRequest::onReceive failed to signal sentinel" );
+				PyErr_Clear();
+			}
+		}
+	}
+	if ( nread > 0 ) {
+		auto* handleData = this->handleData();
+		s_bytesReceived += nread;
+		handleData->bufWritePos += nread;
+		// start by reading the size of the packet
+		if ( m_data.empty() ) {
+			if ( ! readHeader( params->buf->base ) )
+			{
+				stopRead();
+				sendError( "too large a packet detected" );
+			}
+			handleData->bufReadPos += sizeof( m_packetHeader );
+		}
+
+		if ( nread >= m_data.size() ) {
+			memcpy( m_data.data(), handleData->buf.base + handleData->bufReadPos, m_data.size() );
+			handleData->bufReadPos += m_data.size();
+			stopRead();
+			if ( SchedulerAPI()->PyChannel_Send( m_channel, Py_None ) < 0 ) {
+				LogError( "StreamRecvRequest::onReceive failed to signal sentinel" );
+				PyErr_Clear();
+			}
+		}
+	}
 }

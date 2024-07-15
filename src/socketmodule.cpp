@@ -5721,7 +5721,8 @@ static PyObject *sock_recvpacketoob(PySocketSockObject *s, PyObject *args)
 		return nullptr;
 	}
 
-	return ReceivePacket( s );
+	auto request = new StreamPacketReceiveRequest( s );
+	return request->execute();
 }
 PyDoc_STRVAR( recvpacketoob_doc,
 			  "recvpacketoob()\n\

@@ -199,7 +199,6 @@ protected:
 
 private:
 	void onCallback( ICallbackParams *callbackParams ) override;
-	static void alloc(uv_handle_t* handle, size_t size, uv_buf_t* buf);
 };
 
 class StreamRecvIntoRequest : public StreamRecvRequest
@@ -320,6 +319,35 @@ public:
 	PyObject* execute() override;
 private:
 	void onCallback(ICallbackParams *params) override {};
+};
+
+class StreamPacketReceiveRequest : IStreamRequest
+{
+public:
+	explicit StreamPacketReceiveRequest( PySocketSockObject* socket ) :
+		IStreamRequest( socket ), m_fd( socket->sock_fd )
+	{}
+
+	PyObject* execute() override;
+
+private:
+	struct Params : public ICallbackParams {
+		ssize_t nread;
+		const uv_buf_t* buf;
+		Params(ssize_t nread, const uv_buf_t* buf) : nread(nread), buf(buf) {};
+	};
+
+	void onCallback(ICallbackParams * callbackParams ) override;
+	static void readCallback( uv_stream_t* client, ssize_t nread, const uv_buf_t* buf );
+	int startRead();
+	void stopRead();
+
+	bool readHeader( char* src );
+	size_t payloadLen() const;
+
+	std::vector<char> m_data;
+	SOCKET_T m_fd;
+	uint32_t m_packetHeader;
 };
 
 void AddToLookupTable(SOCKET_T fileDescriptor, uv_handle_t* uvHandle);
