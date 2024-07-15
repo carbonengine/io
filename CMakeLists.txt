@@ -32,6 +32,8 @@ ccp_add_library(_socket SHARED
         src/socketmodule.cpp
 )
 target_precompile_headers(_socket PRIVATE
+        <string_view>
+
         <CcpLog.h>
         <CcpScopeGuard.h>
 )

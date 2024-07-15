@@ -1196,7 +1196,8 @@ PyObject* StreamPacketReceiveRequest::execute()
 
 			// do we have even more bytes remaining that we can already fill into the buffer?
 			if ( bytesRemaining > 0 ) {
-				memcpy( m_data.data(), data->buf.base + data->bufReadPos, std::min( size_t( bytesRemaining ), m_data.size() ) );
+				auto copyAmount= bytesRemaining > m_data.size() ? m_data.size() : bytesRemaining;
+				memcpy_s( m_data.data(), m_data.size(), data->buf.base + data->bufReadPos, copyAmount );
 				data->bufReadPos += (ssize_t)m_data.size();
 			}
 			return bytesRemaining < m_data.size();
