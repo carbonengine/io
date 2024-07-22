@@ -6952,6 +6952,46 @@ class CarbonIoTest(SocketPairTest):
         with self.assertRaises(OSError):
             _ = self.serv.recvpacketoob()
 
+    def test_recvpacket_async_interleaved(self):
+        smallPacket = b'A' * 256
+        mediumPacket = b'C' * 32768
+        largePacket = b'1' * 65535
+
+        numPackets = 100
+
+        def producer():
+            for i in range(numPackets):
+                x = i % 3
+                if x == 0:
+                    self.cli.sendpacket(smallPacket)
+                elif x == 1:
+                    self.cli.sendpacket(mediumPacket)
+                else:
+                    self.cli.sendpacket(largePacket)
+
+        def consumer(chan):
+            msg, _, sequence = self.serv.recvpacketoob()
+            chan.send(msg)
+
+        channel = scheduler.channel()
+        scheduler.tasklet(producer)()
+        for _ in range(numPackets):
+            scheduler.tasklet(consumer)(channel)
+
+        receivedPackets = []
+        for _ in range(numPackets):
+            receivedPackets.append(channel.receive())
+
+        for i in range(numPackets):
+            if i % 3 == 0:
+                expectedPacket = smallPacket
+            elif i % 3 == 1:
+                expectedPacket = mediumPacket
+            else:
+                expectedPacket = largePacket
+            self.assertEqual(receivedPackets[i], expectedPacket)
+
+
     def test_recvpacket_async(self):
         numPackets = 10
         headerSize = 4
