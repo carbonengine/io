@@ -2,6 +2,7 @@ import _scheduler
 import sys
 # Scheduler needs to exist in sys.modules as "scheduler" in order that we may load the c api.
 sys.modules["scheduler"] = _scheduler
+import scheduler
 import unittest
 from test import support
 from test.support import os_helper
