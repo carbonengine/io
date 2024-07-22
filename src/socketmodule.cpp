@@ -8350,6 +8350,10 @@ range of values.");
 
 PyObject* socket_dispatch(PyObject*, PyObject*) {
 	TickUvLoop();
+	if (PyErr_Occurred())
+	{
+		return nullptr;
+	}
 	Py_RETURN_NONE;
 }
 
