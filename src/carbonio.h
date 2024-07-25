@@ -26,7 +26,6 @@ struct PyObjectDeleter
 
 typedef std::unique_ptr<PyObject, PyObjectDeleter> PyObjectPtr;
 
-
 struct IRequest;
 struct HandleData
 {
@@ -34,21 +33,23 @@ struct HandleData
 	~HandleData();
 
 	// This channel is for accepting connections.
-	PyChannelObject* channel;
+	PyChannelObject* channel{nullptr};
 
-	// This will always point to the associated request while there is one
-	std::shared_ptr<IRequest> request;
+	// This will always point to the associated _non-receiving_ request while there is one
+	std::shared_ptr<IRequest> request{nullptr};
 
-	// We need to keep the receive-request around since another request can take over
-	// as the "active" request while we wait for it to complete.
-	std::shared_ptr<IRequest> receiveRequest;
+	// This will always point to the associated _receiving_ request while there is one
+	std::shared_ptr<IRequest> receiveRequest{nullptr};
 
 	// Receive from this when starting to receive macho packet, send to this when done.
-	PyChannelObject* packetReceiveQueue;
+	std::shared_ptr<PyChannelObject> receiveQueue;
+
+	//
+	std::shared_ptr<PyChannelObject> sendQueue;
 
 	// This backing buffer needs to outlive any potential request so that
 	// we can correctly re-construct multiple `receive()` requests.
-	uv_buf_t buf;
+	uv_buf_t buf{};
 
 	// When receiving on a socket, libuv returns us more data than might have
 	// been requested by the user. Since the buffer outlives the request, then
@@ -61,14 +62,15 @@ struct HandleData
 	// returned to the user yet.
 	ssize_t bufReadPos{0};
 	ssize_t bufWritePos{0};
+
 	bool blockingSend{false};
 	size_t maxPacketSize{1024*1024}; //one megabyte
 
 	// in case the socket deals with packets, it needs to keep track of a packet's sequence number.
 	size_t packetNumber{0};
-	// Keep track of active packet receive requests,
-	// since we need to know when to block on the channel.
-	int activePacketReceiveRequests{0};
+
+	bool receiving{false};
+	bool sending{false};
 };
 
 enum ChannelPreference : int {
@@ -92,20 +94,20 @@ void* CreateHandleData();
 
 extern "C" typedef struct PySocketSockObject_t PySocketSockObject;
 
-extern PyObject* ReceivePacket( PySocketSockObject* socket );
 extern PyObject* SendPacket( PySocketSockObject* socket, void* data, Py_ssize_t len );
 
 struct ICallbackParams {
 	virtual ~ICallbackParams() = default;
 };
 
-struct IRequest
+struct IRequest : public std::enable_shared_from_this<IRequest>
 {
 public:
 	IRequest( PySocketSockObject* socket );
 
 	virtual ~IRequest()
 	{
+        CCP_LOG( "Handle %p destroying request %p", m_handle, this );
 		clearTimeout();
 		Py_XDECREF(m_channel);
 	}
@@ -123,32 +125,33 @@ public:
 	virtual void onCallback( ICallbackParams* params ) = 0;
 
 protected:
+	void acquireReceive(const char*);
+	void releaseReceive(const char*);
+	void acquireSend(const char*);
+	void releaseSend(const char*);
+    void associateWithHandleData();
+
 	void clearTimeout();
 	HandleData* handleData() { return reinterpret_cast<HandleData*>(m_handle->data); }
 	void sendError(std::string_view msg);
-	void finalize() { m_self.reset(); }
 
 	uv_handle_t* m_handle{nullptr};
 	uv_timer_t* m_timeout{nullptr};
 	_PyTime_t m_timeout_nanoseconds{-1};
 	bool m_timedOut{false};
 
-	// We keep around a shared pointer to ourselves because we need the request to live until
-	// the libuv callbacks for that request have finished, which in some cases is after the
-	// `execute()` method has returned.
-	// Once no more libuv callbacks are expected for the request, `finalize()` needs to
-	// be called in order to avoid leaking requests.
-	std::shared_ptr<IRequest> m_self{nullptr};
-
 	// Requests wait by receiving on this channel as they wait for asynchronous
 	// operations to complete.
 	PyChannelObject* m_channel{nullptr};
+
+	std::shared_ptr<PyChannelObject> m_requestQueue{nullptr};
+	std::shared_ptr<PyChannelObject> m_sendQueue{nullptr};
 };
 
 class IStreamRequest : public IRequest
 {
 public:
-	IStreamRequest( PySocketSockObject* socket ) : IRequest( socket ){}
+	explicit IStreamRequest( PySocketSockObject* socket ) : IRequest( socket ){}
 	uv_stream_t* handle() { return reinterpret_cast<uv_stream_t*>( m_handle ); }
 };
 
@@ -156,14 +159,15 @@ class StreamConnectRequest : public IStreamRequest
 {
 public:
 	StreamConnectRequest( PySocketSockObject* socket, struct sockaddr* address );
-	~StreamConnectRequest();
+	~StreamConnectRequest() override;
 	PyObject* execute() override;
+	void onTimeout() override;
 
 	static void connectCallback(uv_connect_t* connection, int status);
 
 	struct Params : public ICallbackParams {
 		int status;
-		Params(int status) : status(status) {};
+		explicit Params(int status) : status(status) {};
 	};
 
 private:
@@ -219,8 +223,7 @@ public:
 	StreamSendRequest( PySocketSockObject* socket, char* buf, Py_ssize_t len, int flags, bool blockingSend ) :
 		IStreamRequest( socket ), m_flags( flags )
 	{
-		m_sendBuffer.base = buf;
-		m_sendBuffer.len = len;
+		m_sendBuffer = uv_buf_init( buf, len );
 		m_blockingSend = blockingSend;
 	}
 	PyObject* execute() override;
@@ -278,11 +281,11 @@ private:
 class UdpSendRequest : public IUdpRequest
 {
 public:
-	UdpSendRequest( PySocketSockObject* socket, char* buf, ssize_t len, const struct sockaddr* addr, int addrlen , int flags )
-	: IUdpRequest( socket ), m_addr( addr ), m_addrLen( addrlen ) , m_flags( flags )
+	UdpSendRequest( PySocketSockObject* socket, char* buf, Py_ssize_t len, const struct sockaddr* addr, int addrlen , int flags )
+	: IUdpRequest( socket ), m_addrLen( addrlen ) , m_flags( flags )
 	{
-		m_sendBuffer.base = buf;
-		m_sendBuffer.len = len;
+		memcpy( &m_addr, addr, addrlen );
+		m_sendBuffer = uv_buf_init( buf, len );
 	}
 
 	PyObject* execute() override;
@@ -296,7 +299,7 @@ public:
 private:
 	void onCallback( ICallbackParams *callbackParams ) override;
 
-	const struct sockaddr* m_addr;
+	struct sockaddr m_addr;
 	int m_addrLen;
 	int m_flags;
 
@@ -305,7 +308,7 @@ private:
 };
 
 
-class StreamAcceptRequest : IStreamRequest
+class StreamAcceptRequest : public IStreamRequest
 {
 public:
 	StreamAcceptRequest( PySocketSockObject* socket ) :
@@ -321,7 +324,7 @@ private:
 	void onCallback(ICallbackParams *params) override {};
 };
 
-class StreamPacketReceiveRequest : IStreamRequest
+class StreamPacketReceiveRequest : public IStreamRequest
 {
 public:
 	explicit StreamPacketReceiveRequest( PySocketSockObject* socket ) :
@@ -347,7 +350,8 @@ private:
 
 	std::vector<char> m_data;
 	SOCKET_T m_fd;
-	uint32_t m_packetHeader;
+	uint32_t m_packetHeader{0};
+	size_t m_bytesRead{0};
 };
 
 void AddToLookupTable(SOCKET_T fileDescriptor, uv_handle_t* uvHandle);
