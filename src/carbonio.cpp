@@ -1069,7 +1069,7 @@ void StreamRecvIntoRequest::alloc( uv_handle_t* handle, size_t size, uv_buf_t* b
 	buf->base = request->m_buf;
 	buf->len = ULONG( request->m_requested_len );
 
-	ssize_t unreadBytes = data->bufReadPos - data->bufWritePos;
+	ssize_t unreadBytes = data->bufWritePos - data->bufReadPos;
 
 	// StreamRecvRequest's receive function should ensure that uv_read_start
 	// doesn't get called when we already have all the data on hand.
@@ -1081,6 +1081,7 @@ void StreamRecvIntoRequest::alloc( uv_handle_t* handle, size_t size, uv_buf_t* b
 		memcpy_s(buf->base, copyAmount, data->buf.base + data->bufReadPos, copyAmount);
 		buf->base += copyAmount;
 		buf->len -= ULONG( copyAmount );
+		data->bufReadPos += copyAmount;
 	}
 }
 
