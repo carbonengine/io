@@ -1512,14 +1512,10 @@ void StreamPacketReceiveRequest::onCallback( ICallbackParams* callbackParams )
 		}
 
 		auto spaceLeftInBuffer = m_data.size() - m_bytesRead;
-		auto copyAmount = nread > spaceLeftInBuffer ? spaceLeftInBuffer : nread ;
 		auto copyAmount = unprocessedBytes >= spaceLeftInBuffer ? spaceLeftInBuffer : unprocessedBytes;
 		memcpy_s( m_data.data() + m_bytesRead, spaceLeftInBuffer, handleData->buf.base + handleData->bufReadPos, copyAmount );
 		handleData->bufReadPos += copyAmount;
-		if (consumedHeader && copyAmount == nread)
-		{
-			handleData->bufReadPos -= sizeof( m_packetHeader );
-		}
+		assert( handleData->bufReadPos <= handleData->bufWritePos );
 		m_bytesRead += copyAmount;
 
 		if ( m_bytesRead == m_data.size() ) {
