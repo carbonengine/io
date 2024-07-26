@@ -1321,6 +1321,7 @@ bool StreamPacketReceiveRequest::readHeader( char* src )
 	}
 
 	m_packetHeader = ntohl( *reinterpret_cast<uint32_t*>( src ) );
+	handleData()->bufReadPos += sizeof( m_packetHeader );
 	if ( payloadLen() > handleData()->maxPacketSize )
 	{
 		CCP_LOGERR( "Handle %p readHeader for %p: too large a packet detected (%d bytes)", m_handle, handleData()->request, m_packetHeader );
@@ -1358,8 +1359,7 @@ PyObject* StreamPacketReceiveRequest::execute()
 				{
 					return false;
 				}
-				data->bufReadPos += sizeof( uint32_t );
-				bytesRemaining -= sizeof( uint32_t );
+				bytesRemaining -= sizeof( m_packetHeader );
 			}
 
 			// do we have even more bytes remaining that we can already fill into the buffer?
@@ -1371,7 +1371,7 @@ PyObject* StreamPacketReceiveRequest::execute()
 			}
 			return copyAmount != m_data.size();
 		}
-		return true;
+		return m_data.empty() || m_bytesRead < m_data.size();
 	};
 
 	while ( needMore() )
@@ -1496,9 +1496,9 @@ void StreamPacketReceiveRequest::onCallback( ICallbackParams* callbackParams )
 	}
 	if ( nread > 0 ) {
 		auto* handleData = this->handleData();
+		auto unprocessedBytes = nread;
 		s_bytesReceived += nread;
 		handleData->bufWritePos += nread;
-		bool consumedHeader{false};
 		// start by reading the size of the packet
 		if ( m_data.empty() ) {
 			CCP_LOG( "Handle %p in StreamPacketReceiveRequest::onCallback for %p - discovered an empty packet, reading header", m_handle, handleData->receiveRequest.get() );
@@ -1508,12 +1508,12 @@ void StreamPacketReceiveRequest::onCallback( ICallbackParams* callbackParams )
 				sendError( "too large a packet detected" );
 			}
 			CCP_LOG( "Handle %p in StreamPacketReceiveRequest::onCallback for %p - header says to expect a packet of size %d", m_handle, handleData->receiveRequest.get(), m_packetHeader );
-			handleData->bufReadPos += sizeof( m_packetHeader );
-			consumedHeader = true;
+			unprocessedBytes -= sizeof( m_packetHeader );
 		}
 
 		auto spaceLeftInBuffer = m_data.size() - m_bytesRead;
 		auto copyAmount = nread > spaceLeftInBuffer ? spaceLeftInBuffer : nread ;
+		auto copyAmount = unprocessedBytes >= spaceLeftInBuffer ? spaceLeftInBuffer : unprocessedBytes;
 		memcpy_s( m_data.data() + m_bytesRead, spaceLeftInBuffer, handleData->buf.base + handleData->bufReadPos, copyAmount );
 		handleData->bufReadPos += copyAmount;
 		if (consumedHeader && copyAmount == nread)
@@ -1522,7 +1522,7 @@ void StreamPacketReceiveRequest::onCallback( ICallbackParams* callbackParams )
 		}
 		m_bytesRead += copyAmount;
 
-		if ( m_bytesRead >= m_data.size() ) {
+		if ( m_bytesRead == m_data.size() ) {
 			CCP_LOG( "Handle %p in StreamPacketReceiveRequest::onCallback for %p - completed read for packet of size %d", m_handle, handleData->receiveRequest.get(), m_data.size() );
 			stopRead();
 			if ( SchedulerAPI()->PyChannel_Send( m_channel, Py_None ) < 0 ) {
