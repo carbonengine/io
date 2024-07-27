@@ -1117,6 +1117,7 @@ PyObject* StreamConnectRequest::execute()
 		return nullptr;
 	}
 	Py_DecRef(ret);
+	handleData()->request = shared_from_this();
 	m_connect->data = this;
 	int status = uv_tcp_connect(m_connect, reinterpret_cast<uv_tcp_t*>( handle() ), m_address, &StreamConnectRequest::connectCallback);
 	if ( status < 0 )
@@ -1324,7 +1325,7 @@ bool StreamPacketReceiveRequest::readHeader( char* src )
 	handleData()->bufReadPos += sizeof( m_packetHeader );
 	if ( payloadLen() > handleData()->maxPacketSize )
 	{
-		CCP_LOGERR( "Handle %p readHeader for %p: too large a packet detected (%d bytes)", m_handle, handleData()->request, m_packetHeader );
+		CCP_LOGERR( "Handle %p readHeader for %p: too large a packet detected (%d bytes)", m_handle, handleData()->request.get(), m_packetHeader );
 		PyErr_Format( PyExc_OSError, "too large a packet detected at %d bytes, max is %llu", payloadLen(), handleData()->maxPacketSize );
 		return false;
 	}
@@ -1449,7 +1450,7 @@ int StreamPacketReceiveRequest::startRead()
 void StreamPacketReceiveRequest::readCallback( uv_stream_t* client, ssize_t nread, const uv_buf_t* buf )
 {
 	auto* data = reinterpret_cast<HandleData*>( client->data );
-	CCP_LOG( "Handle %p triggering StreamPacketReceiveRequest::readCallback for %p with %d bytes (%s)", client, data->receiveRequest, nread, nread < 0 ? uv_err_name( nread ) : "OK" );
+	CCP_LOG( "Handle %p triggering StreamPacketReceiveRequest::readCallback for %p with %d bytes (%s)", client, data->receiveRequest.get(), nread, nread < 0 ? uv_err_name( nread ) : "OK" );
 	if( data->receiveRequest )
 	{
 		auto _this = std::reinterpret_pointer_cast<StreamPacketReceiveRequest>( data->receiveRequest );
