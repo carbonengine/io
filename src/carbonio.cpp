@@ -1478,11 +1478,6 @@ void StreamPacketReceiveRequest::onCallback( ICallbackParams* callbackParams )
 {
 	auto params = dynamic_cast<Params*>(callbackParams);
 	ssize_t nread = params->nread;
-	if( nread == 0 ) {
-		PyErr_Format( PyExc_SystemError, "Unexpected zero-byte read" );
-		sendError( "Zero Byte read?" );
-		return;
-	}
 	Ccp::PyGilEnsure gil;
 	SchedulerAPI()->PyChannel_SetPreference(m_channel, PREFER_SENDER );
 	if ( nread < 0 ) {
@@ -1500,40 +1495,13 @@ void StreamPacketReceiveRequest::onCallback( ICallbackParams* callbackParams )
 			}
 		}
 	}
-	if ( nread > 0 ) {
-		auto* handleData = this->handleData();
-		auto unprocessedBytes = nread;
+	if ( nread >= 0 ) {
 		s_bytesReceived += nread;
-		handleData->bufWritePos += nread;
-		// start by reading the size of the packet
-		if ( m_data.empty() ) {
-			CCP_LOG( "Handle %p in StreamPacketReceiveRequest::onCallback for %p - discovered an empty packet, reading header", m_handle, handleData->receiveRequest.get() );
-			if ( ! readHeader( params->buf->base ) )
-			{
-				stopRead();
-				sendError( "too large a packet detected" );
-			}
-			CCP_LOG( "Handle %p in StreamPacketReceiveRequest::onCallback for %p - header says to expect a packet of size %d", m_handle, handleData->receiveRequest.get(), m_packetHeader );
-			unprocessedBytes -= sizeof( m_packetHeader );
-		}
-
-		auto spaceLeftInBuffer = m_data.size() - m_bytesRead;
-		auto copyAmount = unprocessedBytes >= spaceLeftInBuffer ? spaceLeftInBuffer : unprocessedBytes;
-		memcpy_s( m_data.data() + m_bytesRead, spaceLeftInBuffer, handleData->buf.base + handleData->bufReadPos, copyAmount );
-		handleData->bufReadPos += copyAmount;
-		assert( handleData->bufReadPos <= handleData->bufWritePos );
-		m_bytesRead += copyAmount;
-
-		if ( m_bytesRead == m_data.size() ) {
-			CCP_LOG( "Handle %p in StreamPacketReceiveRequest::onCallback for %p - completed read for packet of size %d", m_handle, handleData->receiveRequest.get(), m_data.size() );
-			stopRead();
-			if ( SchedulerAPI()->PyChannel_Send( m_channel, Py_None ) < 0 ) {
-				LogError( "StreamRecvRequest::onReceive failed to signal sentinel" );
-				PyErr_Clear();
-			}
-		} else
-		{
-			CCP_LOG( "Handle %p in StreamPacketReceiveRequest::onCallback for %p - %d bytes read did not yet satisfy packet of size %d, continue reading", m_handle, handleData->receiveRequest.get(), m_bytesRead, m_data.size() );
+		handleData()->bufWritePos += nread;
+		stopRead();
+		if ( SchedulerAPI()->PyChannel_Send( m_channel, Py_None ) < 0 ) {
+			LogError( "StreamRecvRequest::onReceive failed to signal sentinel" );
+			PyErr_Clear();
 		}
 	}
 }
