@@ -1335,6 +1335,37 @@ bool StreamPacketReceiveRequest::readHeader( char* src )
 	return true;
 }
 
+bool StreamPacketReceiveRequest::needMore() {
+	auto data = handleData();
+	assert( data->bufWritePos >= data->bufReadPos );
+	auto bytesRemaining = data->bufWritePos - data->bufReadPos;
+	if ( !m_packetHeader && bytesRemaining >= sizeof( uint32_t ) )
+	{
+		if( !readHeader( data->buf.base + data->bufReadPos ) )
+		{
+			return false;
+		}
+		bytesRemaining -= sizeof( m_packetHeader );
+		assert( data->bufWritePos >= data->bufReadPos );
+	}
+
+	if ( bytesRemaining > 0 ) {
+		// do we have even more bytes remaining that we can already fill into the buffer?
+		auto spaceLeftInBuffer = m_data.size() - m_bytesRead;
+		auto copyAmount = bytesRemaining >= spaceLeftInBuffer ? spaceLeftInBuffer : bytesRemaining;
+		assert( copyAmount <= m_data.size() );
+		if ( copyAmount > 0 ) {
+			assert(data->bufReadPos < data->buf.len);
+			memcpy_s( m_data.data(), m_data.size(), data->buf.base + data->bufReadPos, copyAmount );
+			data->bufReadPos += copyAmount;
+			m_bytesRead += copyAmount;
+		}
+		assert( data->bufWritePos >= data->bufReadPos );
+		assert( m_bytesRead <= m_data.size() );
+	}
+	return m_data.empty() || m_bytesRead < m_data.size();
+};
+
 PyObject* StreamPacketReceiveRequest::execute()
 {
 	acquireReceive("StreamPacketReceiveRequest");
@@ -1350,32 +1381,7 @@ PyObject* StreamPacketReceiveRequest::execute()
 	}
 	ON_BLOCK_EXIT( [&] { clearTimeout(); } );
 
-	// check if we can read the header from existing data
-	auto needMore = [this, data] () -> bool{
-		auto bytesRemaining = data->bufWritePos - data->bufReadPos;
-		if ( bytesRemaining >= sizeof( uint32_t ) ) {
-			if ( ! m_packetHeader )
-			{
-				if ( ! readHeader( data->buf.base + data->bufReadPos ) )
-				{
-					return false;
-				}
-				bytesRemaining -= sizeof( m_packetHeader );
-			}
-
-			// do we have even more bytes remaining that we can already fill into the buffer?
-			auto copyAmount= bytesRemaining > m_data.size() ? m_data.size() : bytesRemaining;
-			if ( bytesRemaining > 0 ) {
-				memcpy_s( m_data.data(), m_data.size(), data->buf.base + data->bufReadPos, copyAmount );
-				data->bufReadPos += copyAmount;
-				m_bytesRead += copyAmount;
-			}
-			return copyAmount != m_data.size();
-		}
-		return m_data.empty() || m_bytesRead < m_data.size();
-	};
-
-	while ( needMore() )
+	while ( !m_timedOut && needMore() )
 	{
 		auto status = startRead();
 		CCP_LOG("Handle %p in StreamPacketReceiveRequest::execute() for %p - want more data (have header? %s - size %d), started read (%d = %s)", m_handle, this, m_packetHeader > 0 ? "Yes" : "No", payloadLen(), status, status < 0 ? uv_err_name( status ) : "OK");
@@ -1386,7 +1392,6 @@ PyObject* StreamPacketReceiveRequest::execute()
 			{
 				return nullptr;
 			}
-			break;
 		} else {
 			PyErr_FromUvErr( status );
 			return nullptr;

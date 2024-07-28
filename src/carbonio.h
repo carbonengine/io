@@ -346,6 +346,7 @@ private:
 	void stopRead();
 
 	bool readHeader( char* src );
+	bool needMore();
 	size_t payloadLen() const;
 
 	std::vector<char> m_data;
