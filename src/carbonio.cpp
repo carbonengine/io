@@ -1337,7 +1337,6 @@ bool StreamPacketReceiveRequest::readHeader( char* src )
 
 bool StreamPacketReceiveRequest::needMore() {
 	auto data = handleData();
-	assert( data->bufWritePos >= data->bufReadPos );
 	auto bytesRemaining = data->bufWritePos - data->bufReadPos;
 	if ( !m_packetHeader && bytesRemaining >= sizeof( uint32_t ) )
 	{
@@ -1346,22 +1345,18 @@ bool StreamPacketReceiveRequest::needMore() {
 			return false;
 		}
 		bytesRemaining -= sizeof( m_packetHeader );
-		assert( data->bufWritePos >= data->bufReadPos );
 	}
 
 	if ( bytesRemaining > 0 ) {
 		// do we have even more bytes remaining that we can already fill into the buffer?
 		auto spaceLeftInBuffer = m_data.size() - m_bytesRead;
 		auto copyAmount = bytesRemaining >= spaceLeftInBuffer ? spaceLeftInBuffer : bytesRemaining;
-		assert( copyAmount <= m_data.size() );
 		if ( copyAmount > 0 ) {
-			assert(data->bufReadPos < data->buf.len);
-			memcpy_s( m_data.data(), m_data.size(), data->buf.base + data->bufReadPos, copyAmount );
+			auto bufferStart = copyAmount == data->buf.len ? data->buf.base : data->buf.base + data->bufReadPos;
+			memcpy_s( m_data.data() + m_bytesRead, m_data.size() - m_bytesRead, bufferStart, copyAmount );
 			data->bufReadPos += copyAmount;
 			m_bytesRead += copyAmount;
 		}
-		assert( data->bufWritePos >= data->bufReadPos );
-		assert( m_bytesRead <= m_data.size() );
 	}
 	return m_data.empty() || m_bytesRead < m_data.size();
 };
