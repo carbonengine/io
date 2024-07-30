@@ -2939,7 +2939,7 @@ sock_accept(PySocketSockObject *s, PyObject *Py_UNUSED(ignored))
 			goto finally;
 		}
 		else {
-			auto* request = new StreamAcceptRequest( s );
+			auto request = std::make_shared<StreamAcceptRequest>( s );
 			auto result = request->execute();
 			if( !result )
 			{
@@ -3724,7 +3724,7 @@ sock_connect(PySocketSockObject *s, PyObject *addro)
 			return nullptr;
 		}
 
-		auto* request = new StreamConnectRequest( s, SAS2SA( &addrbuf ) );
+		auto request = std::make_shared<StreamConnectRequest>( s, SAS2SA( &addrbuf ) );
 		return request->execute();
 	}
 	else
@@ -3777,7 +3777,7 @@ sock_connect_ex(PySocketSockObject *s, PyObject *addro)
 			return nullptr;
 		}
 
-		auto* request = new StreamConnectRequest( s, SAS2SA( &addrbuf ) );
+		auto request = std::make_shared<StreamConnectRequest>( s, SAS2SA( &addrbuf ) );
 		PyObject* result = request->execute();
 		if( result )
 		{
@@ -4013,7 +4013,7 @@ static PyObject* uv_tcp_recv_impl( PySocketSockObject* s, Py_ssize_t recvlen, in
 	PyObject* buf{ nullptr };
 	if( s->sock_fd != INVALID_SOCKET && is_valid_uv_handle( s->uv_handle ) )
 	{
-		auto* request = new StreamRecvRequest( s, recvlen, flags );
+		auto request = std::make_shared<StreamRecvRequest>( s, recvlen, flags );
 		buf = request->execute();
 	}
 	else
@@ -4029,7 +4029,7 @@ static PyObject* uv_udp_recv_impl( PySocketSockObject* s, Py_ssize_t recvlen, in
 	PyObject* tup{nullptr};
 	if ( s->sock_fd != INVALID_SOCKET && is_valid_uv_handle( s->uv_handle ) )
 	{
-		auto request = new UdpRecvRequest( s, recvlen, flags );
+		auto request = std::make_shared<UdpRecvRequest>( s, recvlen, flags );
 		tup = request->execute();
 	} else
 	{
@@ -4154,7 +4154,7 @@ sock_recv_into(PySocketSockObject *s, PyObject *args, PyObject *kwds)
 	{
 		if( s->sock_type == SOCK_STREAM )
 		{
-			auto* request = new StreamRecvIntoRequest(s, buf, recvlen, flags);
+			auto request = std::make_shared<StreamRecvIntoRequest>(s, buf, recvlen, flags);
 			PyObject* bytesReceived = request->execute();
 			if( !bytesReceived )
 			{
@@ -4399,7 +4399,7 @@ sock_recvfrom_into(PySocketSockObject *s, PyObject *args, PyObject* kwds)
 	{
 		if( s->sock_type == SOCK_STREAM )
 		{
-			auto* request = new StreamRecvIntoRequest(s, buf, recvlen, flags);
+			auto request = std::make_shared<StreamRecvIntoRequest>(s, buf, recvlen, flags);
 			PyObject* bytesReceived = request->execute();
 			if( !bytesReceived )
 			{
@@ -4838,7 +4838,7 @@ sock_send_impl(PySocketSockObject *s, void *data)
 PyObject* uv_sendall_impl(PySocketSockObject* s, char* buf, Py_ssize_t len, int flags)
 {
 	auto handleData = reinterpret_cast<HandleData*>(s->uv_handle->data);
-	auto* request = new StreamSendRequest(s, buf, len, flags, handleData->blockingSend);
+	auto request = std::make_shared<StreamSendRequest>(s, buf, len, flags, handleData->blockingSend);
 	auto status = request->execute();
 	return status;
 }
@@ -5030,7 +5030,7 @@ sock_sendto_impl(PySocketSockObject *s, void *data)
 
 PyObject* uv_udp_sendto_impl( PySocketSockObject* socket, struct sock_sendto* ctx )
 {
-	auto request = new UdpSendRequest( socket, ctx->buf, ctx->len, SAS2SA( ctx->addrbuf ), ctx->addrlen, ctx->flags );
+	auto request = std::make_shared<UdpSendRequest>( socket, ctx->buf, ctx->len, SAS2SA( ctx->addrbuf ), ctx->addrlen, ctx->flags );
 	return request->execute();
 }
 
@@ -5721,7 +5721,7 @@ static PyObject *sock_recvpacketoob(PySocketSockObject *s, PyObject *args)
 		return nullptr;
 	}
 
-	auto request = new StreamPacketReceiveRequest( s );
+	auto request = std::make_shared<StreamPacketReceiveRequest>( s );
 	return request->execute();
 }
 PyDoc_STRVAR( recvpacketoob_doc,
@@ -8350,6 +8350,10 @@ range of values.");
 
 PyObject* socket_dispatch(PyObject*, PyObject*) {
 	TickUvLoop();
+	if (PyErr_Occurred())
+	{
+		return nullptr;
+	}
 	Py_RETURN_NONE;
 }
 

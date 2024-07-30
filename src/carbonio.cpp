@@ -45,6 +45,7 @@ void AddToLookupTable( SOCKET_T fileDescriptor, uv_handle_t* uvHandle )
 {
 	std::scoped_lock mutex( s_uvHandleLookupLock );
 	s_uvHandleLookup[fileDescriptor] = uvHandle;
+	CCP_LOG( "Handle %p created and added to lookup table", uvHandle );
 }
 
 uv_handle_t* LookupHandle( SOCKET_T fileDescriptor )
@@ -53,6 +54,7 @@ uv_handle_t* LookupHandle( SOCKET_T fileDescriptor )
 	auto iter = s_uvHandleLookup.find( fileDescriptor );
 	if ( iter != s_uvHandleLookup.cend() )
 	{
+		CCP_LOG( "Looking up handle %p", iter->second );
 		return iter->second;
 	}
 
@@ -65,7 +67,22 @@ void RemoveFromLookupTable( SOCKET_T fileDescriptor )
 	auto iter = s_uvHandleLookup.find( fileDescriptor );
 	if ( iter != s_uvHandleLookup.cend() )
 	{
+		CCP_LOG( "Removing handle %p from lookup table", iter->second );
 		s_uvHandleLookup.erase( iter );
+	}
+}
+
+// Simple wrapper function so that we can use std::shared_ptr
+void DeleteRequestQueueChannel(PyChannelObject* obj)
+{
+	if ( obj )
+	{
+		// Ensure nobody is left waiting
+		auto balance = SchedulerAPI()->PyChannel_GetBalance( obj );
+		while ( SchedulerAPI()->PyChannel_GetBalance( obj ) < 0 ) {
+			SchedulerAPI()->PyChannel_Send( obj, Py_None );
+		}
+		Py_DecRef( (PyObject*) obj );
 	}
 }
 
@@ -101,10 +118,11 @@ void cleanup_uv_handle( uv_handle_t* uv_handle )
 	auto data = reinterpret_cast<HandleData*>( uv_handle->data );
 	if( data )
 	{
+		CCP_LOG( "Handle %p about to be cleaned up, outstanding requests: %d", uv_handle, SchedulerAPI()->PyChannel_GetBalance( data->receiveQueue.get() ) );
 		if ( data->request ) {
 			data->request->cancel();
 		}
-		if( data->receiveRequest )
+		if ( data->receiveRequest )
 		{
 			data->receiveRequest->cancel();
 		}
@@ -131,12 +149,7 @@ bool is_valid_uv_handle( uv_handle_t* handle )
 	return handle && !uv_is_closing( handle );
 }
 
-bool is_valid_socket( PySocketSockObject* socket )
-{
-	return socket->sock_fd != INVALID_SOCKET && is_valid_uv_handle( socket->uv_handle );
-}
-
-HandleData::HandleData() : channel( SchedulerAPI()->PyChannel_New( nullptr ) ), packetReceiveQueue( SchedulerAPI()->PyChannel_New( nullptr ) ), request( nullptr )
+HandleData::HandleData() : channel( SchedulerAPI()->PyChannel_New( nullptr ) ), receiveQueue( SchedulerAPI()->PyChannel_New( nullptr ), DeleteRequestQueueChannel ), sendQueue( SchedulerAPI()->PyChannel_New( nullptr ), DeleteRequestQueueChannel )
 {
 	buf = uv_buf_init( nullptr, 0 );
 }
@@ -145,8 +158,7 @@ HandleData::~HandleData()
 {
 	Py_XDECREF( channel );
 	channel = nullptr;
-	Py_XDECREF( packetReceiveQueue );
-	packetReceiveQueue = nullptr;
+	receiveQueue = nullptr;
 	delete buf.base;
 	buf.base = nullptr;
 	buf.len = 0;
@@ -160,18 +172,17 @@ void* CreateHandleData()
 	auto* data = new HandleData;
 	if( data->channel == nullptr )
 	{
-		Py_XDECREF( data->packetReceiveQueue );
 		delete data;
 		return nullptr;
 	}
-	if( data->packetReceiveQueue == nullptr )
+	if( data->receiveQueue == nullptr )
 	{
 		Py_DECREF( data->channel );
 		delete data;
 		return nullptr;
 	}
 
-	SchedulerAPI()->PyChannel_SetPreference( data->packetReceiveQueue, PREFER_SENDER );
+	SchedulerAPI()->PyChannel_SetPreference( data->receiveQueue.get(), PREFER_SENDER );
 	return data;
 }
 
@@ -278,10 +289,8 @@ void SetTimeoutErrorType( PyObject* value )
 	s_timeout_error = value;
 }
 
-IRequest::IRequest( PySocketSockObject* socket ) : m_handle( socket->uv_handle ), m_timeout_nanoseconds(socket->sock_timeout)
+IRequest::IRequest( PySocketSockObject* socket ) : m_handle( socket->uv_handle ), m_timeout_nanoseconds(socket->sock_timeout), m_requestQueue( handleData()->receiveQueue ), m_sendQueue( handleData()->sendQueue )
 {
-	handleData()->request.reset(this);
-	m_self = handleData()->request;
 	m_channel = SchedulerAPI()->PyChannel_New( nullptr );
 	if( !m_channel )
 	{
@@ -291,17 +300,96 @@ IRequest::IRequest( PySocketSockObject* socket ) : m_handle( socket->uv_handle )
 	{
 		SchedulerAPI()->PyChannel_SetPreference( m_channel, PREFER_SENDER );
 	}
+	SchedulerAPI()->PyChannel_SetPreference( m_requestQueue.get(), PREFER_SENDER );
+	CCP_LOG( "Handle %p created request %p", m_handle, this );
+}
+
+void IRequest::acquireReceive(const char* context)
+{
+	auto keepAlive = shared_from_this();
+
+	// there's already an outstanding request associated with the socket, let's wait until we can perform our operation
+	while ( handleData()->receiving ) {
+		CCP_LOG( "Handle %p waiting for %d outstanding requests to complete before request %s (%p) continues",
+			this->m_handle, SchedulerAPI()->PyChannel_GetBalance( m_requestQueue.get() ), context, this);
+		// something is already reading, so let's try again at a later point in time
+		auto sentinel = SchedulerAPI()->PyChannel_Receive( m_requestQueue.get() );
+		CCP_LOG( "Handle %p woke up in %s (%p), %s. %d outstanding requests remaining in the queue",
+			this->m_handle, context, this, handleData()->receiving ? "but something is still occupying the socket" : "and nothing is receiving, I can continue", SchedulerAPI()->PyChannel_GetBalance( m_requestQueue.get() ));
+		if ( !sentinel ) {
+			LogError("Oh boy");
+		}
+	}
+	CCP_LOG( "Handle %p processing request %s (%p)", this->m_handle, context, this );
+	handleData()->receiving = true;
+	CCP_LOG( "Handle %p associate with request %p", m_handle, this );
+	handleData()->receiveRequest = this->shared_from_this();
+}
+
+void IRequest::acquireSend( const char* context )
+{
+	auto keepAlive = shared_from_this();
+
+	// there's already an outstanding request associated with the socket, let's wait until we can perform our operation
+	while ( handleData()->sending ) {
+		CCP_LOG( "Handle %p waiting for %d outstanding requests to complete before request %s (%p) continues",
+			this->m_handle, SchedulerAPI()->PyChannel_GetBalance( m_sendQueue.get() ), context, this);
+		// something is already reading, so let's try again at a later point in time
+		auto sentinel = SchedulerAPI()->PyChannel_Receive( m_sendQueue.get() );
+		if ( !sentinel ) {
+			LogError("Oh boy");
+		}
+	}
+	CCP_LOG( "Handle %p processing request %s (%p)", this->m_handle, context, this );
+	handleData()->sending = true;
+	CCP_LOG( "Handle %p associate with request %p", m_handle, this );
+	handleData()->request = this->shared_from_this();
+}
+
+
+void IRequest::associateWithHandleData()
+{
+	CCP_LOG( "Handle %p associate with request %p", m_handle, this );
+	handleData()->request = this->shared_from_this();
+}
+
+void IRequest::releaseReceive(const char* context)
+{
+	handleData()->receiving = false;
+	handleData()->receiveRequest = nullptr;
+	auto balance = SchedulerAPI()->PyChannel_GetBalance( m_requestQueue.get() );
+	CCP_LOG( "Handle %p finished request %s (%p), request queue balance = %d", this->m_handle, context, this, balance );
+	if ( balance < 0 ) {
+		if ( SchedulerAPI()->PyChannel_Send( m_requestQueue.get(), Py_None ) < 0 ) {
+			LogError( "IRequest::releaseReceive() failed to signal waiting handlers" );
+			PyErr_Format( PyExc_SystemError, "IRequest::releaseReceive() failed to signal waiting handlers" );
+		}
+	}
+}
+
+void IRequest::releaseSend(const char* context)
+{
+	handleData()->sending = false;
+	handleData()->request = nullptr;
+	auto balance = SchedulerAPI()->PyChannel_GetBalance( m_sendQueue.get() );
+	CCP_LOG( "Handle %p finished request %s (%p), request queue balance = %d", this->m_handle, context, this, balance );
+	if ( balance < 0 ) {
+		if ( SchedulerAPI()->PyChannel_Send( m_sendQueue.get(), Py_None ) < 0 ) {
+			LogError( "IRequest::releaseSend() failed to signal waiting handlers" );
+			PyErr_Format( PyExc_SystemError, "IRequest::releaseSend() failed to signal waiting handlers" );
+		}
+	}
 }
 
 void IRequest::sendError(std::string_view msg)
 {
 	PyObject *exc, *val, *tb;
 	PyErr_Fetch( &exc, &val, &tb );
-	SchedulerAPI()->PyChannel_SetPreference(m_channel, PREFER_SENDER );
+	SchedulerAPI()->PyChannel_SetPreference( m_channel, PREFER_SENDER );
 	auto ret = SchedulerAPI()->PyChannel_SendThrow( m_channel, exc, val, tb);
 	if( ret < 0 )
 	{
-		PyErr_Restore( exc, val, tb );
+		// we intentionally do not restore the exception state here, otherwise it may end up in `socket.dispatch()` where it isn't very useful
 		LogError( msg.data() );
 	}
 }
@@ -370,6 +458,8 @@ void IRequest::clearTimeout()
 
 PyObject* StreamRecvRequest::execute()
 {
+	acquireReceive("StreamRecvRequest");
+	ON_BLOCK_EXIT([&]{releaseReceive("StreamRecvRequest");});
 	auto* data = handleData();
 
 	auto bufferedAmount = data->bufWritePos - data->bufReadPos;
@@ -410,18 +500,22 @@ PyObject* StreamRecvRequest::constructResult( HandleData* data ) const
 
 void StreamRecvRequest::onCallback( ICallbackParams* callbackParams )
 {
-	auto params = dynamic_cast<StreamRecvRequest::Params*>(callbackParams);
+	if ( m_timedOut )
+	{
+		return;
+	}
+	Ccp::PyGilEnsure gil;
+	ON_BLOCK_EXIT( [&] { clearTimeout(); } );
+	auto params = dynamic_cast<StreamRecvRequest::Params*>( callbackParams );
 	ssize_t nread = params->nread;
 	if( nread == 0 ) {
 		return;
 	}
-	Ccp::PyGilEnsure gil;
-	ON_BLOCK_EXIT( [&] { clearTimeout(); finalize();} );
-	SchedulerAPI()->PyChannel_SetPreference(m_channel, PREFER_SENDER );
+	SchedulerAPI()->PyChannel_SetPreference( m_channel, PREFER_SENDER );
 	if ( nread < 0 ) {
-		if (nread != UV_EOF) {
+		if ( nread != UV_EOF ) {
 			PyErr_FromUvErr( int( nread ) );
-			sendError("OnReceive failed to read data.");
+			sendError( "OnReceive failed to read data." );
 		}
 		else {
 			if ( SchedulerAPI()->PyChannel_Send( m_channel, Py_None ) < 0 ) {
@@ -440,6 +534,8 @@ void StreamRecvRequest::onCallback( ICallbackParams* callbackParams )
 	}
 }
 
+static CcpLogChannel_t allocLog = CCP_LOG_DEFINE_CHANNEL( "growingBufferAlloc" );
+
 void growingBufferAlloc(uv_handle_t* handle, size_t size, uv_buf_t* buf)
 {
 	auto* data = reinterpret_cast<HandleData*>(handle->data);
@@ -447,9 +543,12 @@ void growingBufferAlloc(uv_handle_t* handle, size_t size, uv_buf_t* buf)
 
 	constexpr size_t BUF_SIZE = 4096;
 
+	CCP_LOG_CH( allocLog, "libuv requesting %d bytes for handle %p", size, handle );
+
 	// Scenario 1: We don't have a buffer yet, allocate one.
 	if( !handleBuf.base )
 	{
+		CCP_LOG_CH( allocLog, "First alloc for %p, creating backing buffer", handle );
 		handleBuf.base = new char[BUF_SIZE];
 		handleBuf.len = BUF_SIZE;
 
@@ -457,6 +556,8 @@ void growingBufferAlloc(uv_handle_t* handle, size_t size, uv_buf_t* buf)
 		buf->len = handleBuf.len;
 		return;
 	}
+
+	CCP_LOG_CH( allocLog, "Alloc for %p, base=%p len=%d writePos=%p readPos=%p", handle, data->buf.base, data->buf.len, data->bufWritePos, data->bufReadPos );
 
 	// Scenario 2: We have a buffer, but we have read everything.
 	// Just use it completely.
@@ -468,6 +569,7 @@ void growingBufferAlloc(uv_handle_t* handle, size_t size, uv_buf_t* buf)
 
 		buf->base = handleBuf.base;
 		buf->len = handleBuf.len;
+		CCP_LOG_CH( allocLog, "Alloc for %p, complete buffer re-use. base=%p len=%d writePos=%p readPos=%p", handle, buf->base, buf->len, data->bufWritePos, data->bufReadPos );
 		return;
 	}
 
@@ -479,6 +581,7 @@ void growingBufferAlloc(uv_handle_t* handle, size_t size, uv_buf_t* buf)
 	{
 		buf->base = handleBuf.base + data->bufWritePos;
 		buf->len = handleBuf.len - data->bufWritePos;
+		CCP_LOG_CH( allocLog, "Alloc for %p, partial buffer with %d bytes remaining data. base=%p len=%d writePos=%p readPos=%p", handle, remainingBytes, buf->base, buf->len, data->bufWritePos, data->bufReadPos );
 		return;
 	}
 
@@ -492,6 +595,7 @@ void growingBufferAlloc(uv_handle_t* handle, size_t size, uv_buf_t* buf)
 
 		buf->base = handleBuf.base + data->bufWritePos;
 		buf->len = handleBuf.len - data->bufWritePos;
+		CCP_LOG_CH( allocLog, "Alloc for %p, partial buffer with free space, shifting %d bytes of unread data. base=%p len=%d writePos=%p readPos=%p", handle, unreadBytes, buf->base, buf->len, data->bufWritePos, data->bufReadPos );
 		return;
 	}
 
@@ -506,6 +610,7 @@ void growingBufferAlloc(uv_handle_t* handle, size_t size, uv_buf_t* buf)
 
 	buf->base = handleBuf.base;
 	buf->len = handleBuf.len;
+	CCP_LOG_CH( allocLog, "Alloc for %p, existing buffer is full, expanding current one. base=%p len=%d writePos=%p readPos=%p", handle, unreadBytes, buf->base, buf->len, data->bufWritePos, data->bufReadPos );
 }
 
 void StreamRecvRequest::onTimeout()
@@ -523,10 +628,11 @@ void alloc(uv_handle_t* handle, size_t size, uv_buf_t* buf)
 
 void StreamRecvRequest::readCallback( uv_stream_t* client, ssize_t nread, const uv_buf_t* buf )
 {
+	CCP_LOG( "Handle %p in StreamRecvRequest::readCallback", client);
 	auto* data = reinterpret_cast<HandleData*>( client->data );
-	if( data->receiveRequest )
+	if( data && data->receiveRequest )
 	{
-		auto _this = reinterpret_cast<StreamRecvRequest*>( data->receiveRequest.get() );
+		auto _this = std::reinterpret_pointer_cast<StreamRecvRequest>( data->receiveRequest );
 		auto params = StreamRecvRequest::Params( nread, buf );
 		_this->onCallback( &params );
 	}
@@ -552,30 +658,62 @@ StreamRecvRequest::StreamRecvRequest( PySocketSockObject* socket, Py_ssize_t len
 }
 int StreamRecvRequest::startRead()
 {
-	handleData()->receiveRequest = m_self;
 	return uv_read_start( handle(), growingBufferAlloc, StreamRecvRequest::readCallback );
+}
+
+typedef struct {
+	uv_write_t req;
+	uv_buf_t buf;
+} write_req_t;
+
+// libuv needs a callback
+void sendNoopCallback( uv_write_t* req, int )
+{
+	CCP_LOG( "Processing non-blocking callback for write request %p", req );
+    auto *wr = (write_req_t*) req;
+	delete[] wr->buf.base;
+	delete wr;
 }
 
 PyObject* StreamSendRequest::execute()
 {
-	if ( ! startTimeout() )
+	CCP_LOG( "Handle %p processing request StreamSendRequest (%p) uv_write_t=%p payloadSize=%d", this->m_handle, this, &this->m_writeRequest, m_sendBuffer.len );
+	auto acquireGuard = MakeGuard( [&] { releaseSend( "StreamSendRequest" ); } );
+	// if ( m_blockingSend )
+	// {
+	auto write_req = new write_req_t;
+	write_req->buf = uv_buf_init( new char[m_sendBuffer.len], m_sendBuffer.len );
+	memcpy( write_req->buf.base, m_sendBuffer.base, m_sendBuffer.len );
+	acquireSend("StreamSendRequest");
+	// }
+	// else
+	// {
+		// associateWithHandleData();
+		// acquireGuard.Dismiss();
+	// }
+	if ( m_blockingSend && ! startTimeout() )
 	{
+		delete[] write_req->buf.base;
+		delete write_req;
 		return nullptr;
 	}
 	auto currentTasklet = reinterpret_cast<PyTaskletObject*>( SchedulerAPI()->PyScheduler_GetCurrent() );
 	if( m_blockingSend && SchedulerAPI()->PyTasklet_GetBlockTrap( currentTasklet ) )
 	{
+		delete[] write_req->buf.base;
+		delete write_req;
 		PyErr_SetString(PyExc_RuntimeError, "Can't perform blocking send on a block trapped tasklet");
 		return nullptr;
 	}
 	if( m_blockingSend && SchedulerAPI()->PyTasklet_IsMain( currentTasklet ) )
 	{
+		delete[] write_req->buf.base;
+		delete write_req;
 		PyErr_SetString(PyExc_RuntimeError, "Can't perform blocking send on the main tasklet");
 		return nullptr;
 	}
 	Py_DECREF(currentTasklet);
-	m_writeRequest.data = this;
-	int status = uv_write(&m_writeRequest, handle(), &m_sendBuffer, 1, StreamSendRequest::sendCallback );
+	int status = uv_write( reinterpret_cast<uv_write_t*>( write_req ), handle(), &write_req->buf, 1, m_blockingSend ? StreamSendRequest::sendCallback : sendNoopCallback );
 	if( status < 0 ){
 		return PyLong_FromLong(status);
 	}
@@ -590,19 +728,32 @@ PyObject* StreamSendRequest::execute()
 
 void StreamSendRequest::sendCallback( uv_write_t* request, int status )
 {
-	auto *_this = reinterpret_cast<StreamSendRequest*>( request->data );
-	auto params = std::make_unique<StreamSendRequest::Params>( status );
-	_this->onCallback( params.get() );
+	CCP_LOG( "Handle %p in StreamSendRequest::sendCallback (write request: %p)", request->handle, request );
+	if( request->handle && request->handle->data )
+	{
+		auto _this = std::reinterpret_pointer_cast<StreamSendRequest>( reinterpret_cast<HandleData*>( request->handle->data )->request );
+		if( _this )
+		{
+			auto params = std::make_unique<StreamSendRequest::Params>( status );
+			_this->onCallback( params.get() );
+		}
+	}
+    auto *wr = (write_req_t*) request;
+	delete[] wr->buf.base;
+	delete wr;
 }
 
 void StreamSendRequest::onCallback( ICallbackParams* callbackParams )
 {
-	ON_BLOCK_EXIT( [this] { finalize(); } );
 	if( m_timedOut ) // If we have timed out, the execute method has already been unblocked.
 	{
 		return;
 	}
 	ON_BLOCK_EXIT( [&] { clearTimeout(); } );
+	if ( !m_blockingSend )
+	{
+		return;
+	}
 	auto *params = dynamic_cast<StreamSendRequest::Params*>(callbackParams);
 	Ccp::PyGilEnsure gil;
 
@@ -611,13 +762,10 @@ void StreamSendRequest::onCallback( ICallbackParams* callbackParams )
 		sendError("StreamSendRequest::send Failed to convert status to python int");
 		return;
 	}
-	if( m_blockingSend && !m_timedOut )
+	if( SchedulerAPI()->PyChannel_Send( m_channel, py_status ) < 0 )
 	{
-		if( SchedulerAPI()->PyChannel_Send( m_channel, py_status ) < 0 )
-		{
-			LogError( "StreamSendRequest::send Failed to send status over channel" );
-			PyErr_Clear();
-		}
+		LogError( "StreamSendRequest::send Failed to send status over channel" );
+		PyErr_Clear();
 	}
 }
 
@@ -635,13 +783,14 @@ void SendError(PyChannelObject* channel, std::string_view msg)
 
 PyObject* UdpRecvRequest::execute()
 {
+	acquireReceive("UdpRecvRequest");
+	ON_BLOCK_EXIT([&]{releaseReceive("UdpRecvRequest");});
 	auto ret = startTimeout();
 	if( ret != Py_None )
 	{
 		return nullptr;
 	}
 
-	handleData()->receiveRequest = m_self;
 	auto status = uv_udp_recv_start( handle(), alloc, UdpRecvRequest::receiveCallback );
 	if ( status < 0 )
 	{
@@ -661,9 +810,9 @@ PyObject* UdpRecvRequest::execute()
 void UdpRecvRequest::receiveCallback( uv_udp_t* handle, ssize_t nread, const uv_buf_t* buf, const struct sockaddr* addr, unsigned int flags )
 {
 	auto* data = reinterpret_cast<HandleData*>( handle->data );
-	if( data->receiveRequest )
+	if( data && data->receiveRequest )
 	{
-		auto _this = reinterpret_cast<UdpRecvRequest*>( data->receiveRequest.get() );
+		auto _this = std::reinterpret_pointer_cast<UdpRecvRequest>( data->receiveRequest );
 		auto params = std::make_unique<UdpRecvRequest::Params>( nread, buf, addr, flags );
 		_this->onCallback( params.get() );
 	}
@@ -701,6 +850,12 @@ static PyObject*
 
 void UdpRecvRequest::onCallback( ICallbackParams* callbackParams )
 {
+	if ( m_timedOut )
+	{
+		return;
+	}
+	Ccp::PyGilEnsure gil;
+	ON_BLOCK_EXIT( [&] { clearTimeout(); } );
 	auto params = static_cast<UdpRecvRequest::Params*>(callbackParams);
 	ssize_t nread = params->nread;
 	const uv_buf_t* buf = params->buf;
@@ -708,7 +863,6 @@ void UdpRecvRequest::onCallback( ICallbackParams* callbackParams )
 	unsigned flags = params->flags;
 
 	auto bufferGuard = MakeGuard([&] {delete buf;});
-	auto requestGuard = MakeGuard([&] { finalize();});
 	if ( nread < 0 )
 	{
 		PyErr_FromUvErr( int( nread ) );
@@ -777,7 +931,6 @@ void UdpRecvRequest::onCallback( ICallbackParams* callbackParams )
 
 	if ( ! ( flags & UV_UDP_MMSG_CHUNK ) ) {
 		bufferGuard.Dismiss();
-		requestGuard.Dismiss();
 	}
 }
 
@@ -804,25 +957,28 @@ void UdpRecvRequest::cancel()
 
 PyObject* UdpSendRequest::execute()
 {
-	auto* request = new uv_udp_send_t;
-	ON_BLOCK_EXIT( [&] { delete request; } );
+	acquireSend("UdpSendRequest");
+	ON_BLOCK_EXIT([&]{releaseSend("UdpSendRequest");});
+	CCP_LOG( "Handle %p processing request UdpSendRequest (%p)", this->m_handle, this );
 
-	int status = uv_udp_send( &m_writeRequest, handle(), &m_sendBuffer, 1, m_addr, UdpSendRequest::sendCallback );
+	auto req = new write_req_t;
+
+	int status = uv_udp_send( &m_writeRequest, handle(), &m_sendBuffer, 1, &m_addr, nullptr );
 	if( status < 0 )
 	{
 		return PyLong_FromLong( status );
 	}
-	auto ret = SchedulerAPI()->PyChannel_Receive( m_channel );
-	status = PyLong_AsLong( ret );
-	if ( status < 0 ) {
-		if( !( status == -1 && PyErr_Occurred() ) )
-		{
-			PyErr_FromUvErr( status );
-		}
-		return nullptr;
-	}
+	// auto ret = SchedulerAPI()->PyChannel_Receive( m_channel );
+	// status = PyLong_AsLong( ret );
+	// if ( status < 0 ) {
+		// if( !( status == -1 && PyErr_Occurred() ) )
+		// {
+			// PyErr_FromUvErr( status );
+		// }
+		// return nullptr;
+	// }
 	s_bytesSent += m_sendBuffer.len;
-	ret = PyLong_FromSsize_t(m_sendBuffer.len);
+	auto ret = PyLong_FromSsize_t(m_sendBuffer.len);
 	return ret;
 }
 
@@ -831,7 +987,7 @@ void UdpSendRequest::sendCallback( uv_udp_send_t* request, int status )
 	auto* data = reinterpret_cast<HandleData*>( request->handle->data );
 	if( data->request )
 	{
-		auto _this = reinterpret_cast<UdpSendRequest*>( data->request.get() );
+		auto _this = std::reinterpret_pointer_cast<UdpSendRequest>( data->request );
 		auto params = std::make_unique<UdpSendRequest::Params>( status );
 		_this->onCallback( params.get() );
 	}
@@ -839,7 +995,6 @@ void UdpSendRequest::sendCallback( uv_udp_send_t* request, int status )
 
 void UdpSendRequest::onCallback( ICallbackParams* callbackParams )
 {
-	ON_BLOCK_EXIT( [this] { finalize(); } );
 	if( m_timedOut ) // If we have timed out, the execute method has already been unblocked.
 	{
 		return;
@@ -860,7 +1015,8 @@ void UdpSendRequest::onCallback( ICallbackParams* callbackParams )
 
 PyObject* StreamAcceptRequest::execute()
 {
-	ON_BLOCK_EXIT( [this] { clearTimeout(); finalize(); } );
+	associateWithHandleData();
+	ON_BLOCK_EXIT( [this] { clearTimeout(); } );
 
 	auto result = startTimeout();
 	if( result != Py_None )
@@ -902,19 +1058,18 @@ StreamRecvIntoRequest::StreamRecvIntoRequest( PySocketSockObject* s, char* buf, 
 }
 int StreamRecvIntoRequest::startRead()
 {
-	handleData()->receiveRequest = m_self;
 	return uv_read_start( handle(), StreamRecvIntoRequest::alloc, StreamRecvRequest::readCallback );
 }
 
 void StreamRecvIntoRequest::alloc( uv_handle_t* handle, size_t size, uv_buf_t* buf )
 {
 	auto* data = reinterpret_cast<HandleData*>(handle->data);
-	auto* request = reinterpret_cast<StreamRecvIntoRequest*>(data->request.get());
+	auto request = std::reinterpret_pointer_cast<StreamRecvIntoRequest>(data->receiveRequest);
 
 	buf->base = request->m_buf;
 	buf->len = ULONG( request->m_requested_len );
 
-	ssize_t unreadBytes = data->bufReadPos - data->bufWritePos;
+	ssize_t unreadBytes = data->bufWritePos - data->bufReadPos;
 
 	// StreamRecvRequest's receive function should ensure that uv_read_start
 	// doesn't get called when we already have all the data on hand.
@@ -926,6 +1081,7 @@ void StreamRecvIntoRequest::alloc( uv_handle_t* handle, size_t size, uv_buf_t* b
 		memcpy_s(buf->base, copyAmount, data->buf.base + data->bufReadPos, copyAmount);
 		buf->base += copyAmount;
 		buf->len -= ULONG( copyAmount );
+		data->bufReadPos += copyAmount;
 	}
 }
 
@@ -947,6 +1103,12 @@ StreamConnectRequest::~StreamConnectRequest()
 	delete m_connect;
 }
 
+void StreamConnectRequest::onTimeout()
+{
+	m_connect->data = nullptr;
+	IRequest::onTimeout();
+}
+
 PyObject* StreamConnectRequest::execute()
 {
 	auto ret = startTimeout();
@@ -955,6 +1117,8 @@ PyObject* StreamConnectRequest::execute()
 		return nullptr;
 	}
 	Py_DecRef(ret);
+	handleData()->request = shared_from_this();
+	m_connect->data = this;
 	int status = uv_tcp_connect(m_connect, reinterpret_cast<uv_tcp_t*>( handle() ), m_address, &StreamConnectRequest::connectCallback);
 	if ( status < 0 )
 	{
@@ -983,14 +1147,17 @@ PyObject* StreamConnectRequest::execute()
 
 void StreamConnectRequest::connectCallback( uv_connect_t* connection, int status )
 {
-	auto _this = reinterpret_cast<StreamConnectRequest*>(reinterpret_cast<HandleData*>(connection->handle->data)->request.get());
-	auto params = std::make_unique<StreamConnectRequest::Params>( status );
-	_this->onCallback( params.get() );
+	CCP_LOG( "Handle %p in StreamConnectRequest::readCallback", connection->handle );
+	if ( connection->data )
+	{
+		auto _this = static_cast<StreamConnectRequest*>( connection->data );
+		auto params = std::make_unique<StreamConnectRequest::Params>( status );
+		_this->onCallback( params.get() );
+	}
 }
 
 void StreamConnectRequest::onCallback( ICallbackParams* callbackParams )
 {
-	ON_BLOCK_EXIT( [this] { finalize(); } );
 	if( m_timedOut ) // If we have timed out, the execute method has already been unblocked.
 	{
 		return;
@@ -1026,8 +1193,8 @@ extern "C" int FormatPacket( char* buf, const char* data, const uint32_t dataLen
 PyObject* SendPacket( PySocketSockObject* socket, void* data, Py_ssize_t len )
 {
 	Py_ssize_t bufsize = len + sizeof(uint32_t);
-	char* buf = new char[bufsize];
-	size_t outlen = FormatPacket( buf, static_cast<const char*>( data ), len, nullptr, 0 );
+	std::vector<char> buf(bufsize);
+	size_t outlen = FormatPacket( buf.data(), static_cast<const char*>( data ), len, nullptr, 0 );
 	if ( outlen == 0 )
 	{
 		PyErr_SetString( PyExc_MemoryError, "Failed formatting packet data" );
@@ -1035,8 +1202,10 @@ PyObject* SendPacket( PySocketSockObject* socket, void* data, Py_ssize_t len )
 	}
 
 	auto handleData = reinterpret_cast<HandleData*>(socket->uv_handle->data);
-	auto req = new StreamSendRequest( socket, buf, outlen, 0, handleData->blockingSend );
+	auto req = std::make_shared<StreamSendRequest>( socket, buf.data(), outlen, 0, handleData->blockingSend );
 	s_packetsSent += 1;
+
+	CCP_LOG( "Handle %p sending a packet of size without packet header: %d, size with packet header: %d", req->handle(), len, outlen );
 	return req->execute();
 }
 
@@ -1146,9 +1315,17 @@ void AugmentSocketAPI( PySocketModule_APIObject* apiObject )
 
 bool StreamPacketReceiveRequest::readHeader( char* src )
 {
+	// Only read the header if we haven't read it already
+	if (m_packetHeader != 0)
+	{
+		return true;
+	}
+
 	m_packetHeader = ntohl( *reinterpret_cast<uint32_t*>( src ) );
+	handleData()->bufReadPos += sizeof( m_packetHeader );
 	if ( payloadLen() > handleData()->maxPacketSize )
 	{
+		CCP_LOGERR( "Handle %p readHeader for %p: too large a packet detected (%d bytes)", m_handle, handleData()->request.get(), m_packetHeader );
 		PyErr_Format( PyExc_OSError, "too large a packet detected at %d bytes, max is %llu", payloadLen(), handleData()->maxPacketSize );
 		return false;
 	}
@@ -1158,56 +1335,51 @@ bool StreamPacketReceiveRequest::readHeader( char* src )
 	return true;
 }
 
+bool StreamPacketReceiveRequest::needMore() {
+	auto data = handleData();
+	auto bytesRemaining = data->bufWritePos - data->bufReadPos;
+	if ( !m_packetHeader && bytesRemaining >= sizeof( uint32_t ) )
+	{
+		if( !readHeader( data->buf.base + data->bufReadPos ) )
+		{
+			return false;
+		}
+		bytesRemaining -= sizeof( m_packetHeader );
+	}
+
+	if ( bytesRemaining > 0 ) {
+		// do we have even more bytes remaining that we can already fill into the buffer?
+		auto spaceLeftInBuffer = m_data.size() - m_bytesRead;
+		auto copyAmount = bytesRemaining >= spaceLeftInBuffer ? spaceLeftInBuffer : bytesRemaining;
+		if ( copyAmount > 0 ) {
+			auto bufferStart = copyAmount == data->buf.len ? data->buf.base : data->buf.base + data->bufReadPos;
+			memcpy_s( m_data.data() + m_bytesRead, m_data.size() - m_bytesRead, bufferStart, copyAmount );
+			data->bufReadPos += copyAmount;
+			m_bytesRead += copyAmount;
+		}
+	}
+	return m_data.empty() || m_bytesRead < m_data.size();
+};
+
 PyObject* StreamPacketReceiveRequest::execute()
 {
+	acquireReceive("StreamPacketReceiveRequest");
+	ON_BLOCK_EXIT([&]{releaseReceive("StreamPacketReceiveRequest");});
 	auto* data = handleData();
 
 	auto sequenceNumber = data->packetNumber++;
-
-	// something is already reading, so let's try again at a later point in time
-	if ( data->activePacketReceiveRequests > 0 ) {
-		auto sentinel = SchedulerAPI()->PyChannel_Receive( data->packetReceiveQueue );
-		if ( !sentinel ) {
-			return nullptr;
-		}
-	}
-
-	data->activePacketReceiveRequests++;
-	ON_BLOCK_EXIT( [data]{
-	  data->activePacketReceiveRequests--;
-	} );
 
 	auto ret = startTimeout();
 	if( ret != Py_None )
 	{
 		return nullptr;
 	}
+	ON_BLOCK_EXIT( [&] { clearTimeout(); } );
 
-	// check if we can read the header from existing data
-	auto needMore = [this, data] () -> bool{
-		auto bytesRemaining = data->bufWritePos - data->bufReadPos;
-		if ( bytesRemaining >= sizeof( uint32_t ) ) {
-			if ( ! readHeader( data->buf.base + data->bufReadPos ) )
-			{
-				return false;
-			}
-			data->bufReadPos += sizeof( uint32_t );
-			bytesRemaining -= sizeof( uint32_t );
-
-			// do we have even more bytes remaining that we can already fill into the buffer?
-			if ( bytesRemaining > 0 ) {
-				auto copyAmount= bytesRemaining > m_data.size() ? m_data.size() : bytesRemaining;
-				memcpy_s( m_data.data(), m_data.size(), data->buf.base + data->bufReadPos, copyAmount );
-				data->bufReadPos += (ssize_t)m_data.size();
-			}
-			return bytesRemaining < m_data.size();
-		}
-		return true;
-	};
-
-	while ( needMore() )
+	while ( !m_timedOut && needMore() )
 	{
 		auto status = startRead();
+		CCP_LOG("Handle %p in StreamPacketReceiveRequest::execute() for %p - want more data (have header? %s - size %d), started read (%d = %s)", m_handle, this, m_packetHeader > 0 ? "Yes" : "No", payloadLen(), status, status < 0 ? uv_err_name( status ) : "OK");
 		if ( status == 0 )
 		{
 			auto sentinel = SchedulerAPI()->PyChannel_Receive( m_channel );
@@ -1215,7 +1387,6 @@ PyObject* StreamPacketReceiveRequest::execute()
 			{
 				return nullptr;
 			}
-			break;
 		} else {
 			PyErr_FromUvErr( status );
 			return nullptr;
@@ -1226,9 +1397,8 @@ PyObject* StreamPacketReceiveRequest::execute()
 		return nullptr;
 	}
 
-	size_t payloadLen = m_packetHeader & ceHeaderSizeMask;
 	char* payload = m_data.data();
-	char* payloadEnd = payload + payloadLen;
+	char* payloadEnd = payload + payloadLen();
 	uint32_t oobDataLen{0};
 
 	if ( (m_packetHeader & ceHeaderExpectPayloadOffset) == ceHeaderExpectPayloadOffset)
@@ -1247,7 +1417,7 @@ PyObject* StreamPacketReceiveRequest::execute()
 			auto stop = callback(
 				static_cast<long long>( m_fd ),
 				payload + oobDataLen,
-				payloadLen - oobDataLen,
+				payloadLen() - oobDataLen,
 				oobData,
 				oobDataLen
 			);
@@ -1263,18 +1433,10 @@ PyObject* StreamPacketReceiveRequest::execute()
 
 	Py_IncRef( Py_None );
 	auto packetSize = payloadEnd - payload;
+	CCP_LOG( "Handle %p for request %p - returning packet of size %d", m_handle, this, packetSize );
 	auto* packet = PyTuple_Pack( 3, PyBytes_FromStringAndSize( payload, packetSize ), Py_None, PyLong_FromSize_t( sequenceNumber ) );
 	if ( !packet ) {
 		Py_DecRef( Py_None );
-	}
-
-	auto balance = SchedulerAPI()->PyChannel_GetBalance( handleData()->packetReceiveQueue );
-	if ( balance < 0 ) {
-		if ( SchedulerAPI()->PyChannel_Send( handleData()->packetReceiveQueue, Py_None ) < 0 ) {
-			LogError( "StreamPacketReceiveRequest::stopRead() failed to signal waiting handlers" );
-			PyErr_Format( PyExc_SystemError, "StreamPacketReceiveRequest::stopRead() failed to signal waiting handlers" );
-			return nullptr;
-		}
 	}
 
 	return packet;
@@ -1282,16 +1444,16 @@ PyObject* StreamPacketReceiveRequest::execute()
 
 int StreamPacketReceiveRequest::startRead()
 {
-	handleData()->receiveRequest = m_self;
 	return uv_read_start( handle(), growingBufferAlloc, StreamPacketReceiveRequest::readCallback );
 }
 
 void StreamPacketReceiveRequest::readCallback( uv_stream_t* client, ssize_t nread, const uv_buf_t* buf )
 {
 	auto* data = reinterpret_cast<HandleData*>( client->data );
+	CCP_LOG( "Handle %p triggering StreamPacketReceiveRequest::readCallback for %p with %d bytes (%s)", client, data->receiveRequest.get(), nread, nread < 0 ? uv_err_name( nread ) : "OK" );
 	if( data->receiveRequest )
 	{
-		auto _this = reinterpret_cast<StreamPacketReceiveRequest*>( data->receiveRequest.get() );
+		auto _this = std::reinterpret_pointer_cast<StreamPacketReceiveRequest>( data->receiveRequest );
 		auto params = Params( nread, buf );
 		_this->onCallback( &params );
 	}
@@ -1311,11 +1473,7 @@ void StreamPacketReceiveRequest::onCallback( ICallbackParams* callbackParams )
 {
 	auto params = dynamic_cast<Params*>(callbackParams);
 	ssize_t nread = params->nread;
-	if( nread == 0 ) {
-		return;
-	}
 	Ccp::PyGilEnsure gil;
-	ON_BLOCK_EXIT( [&] { clearTimeout(); finalize();} );
 	SchedulerAPI()->PyChannel_SetPreference(m_channel, PREFER_SENDER );
 	if ( nread < 0 ) {
 		if (nread != UV_EOF) {
@@ -1332,28 +1490,13 @@ void StreamPacketReceiveRequest::onCallback( ICallbackParams* callbackParams )
 			}
 		}
 	}
-	if ( nread > 0 ) {
-		auto* handleData = this->handleData();
+	if ( nread >= 0 ) {
 		s_bytesReceived += nread;
-		handleData->bufWritePos += nread;
-		// start by reading the size of the packet
-		if ( m_data.empty() ) {
-			if ( ! readHeader( params->buf->base ) )
-			{
-				stopRead();
-				sendError( "too large a packet detected" );
-			}
-			handleData->bufReadPos += sizeof( m_packetHeader );
-		}
-
-		if ( nread >= m_data.size() ) {
-			memcpy( m_data.data(), handleData->buf.base + handleData->bufReadPos, m_data.size() );
-			handleData->bufReadPos += m_data.size();
-			stopRead();
-			if ( SchedulerAPI()->PyChannel_Send( m_channel, Py_None ) < 0 ) {
-				LogError( "StreamRecvRequest::onReceive failed to signal sentinel" );
-				PyErr_Clear();
-			}
+		handleData()->bufWritePos += nread;
+		stopRead();
+		if ( SchedulerAPI()->PyChannel_Send( m_channel, Py_None ) < 0 ) {
+			LogError( "StreamRecvRequest::onReceive failed to signal sentinel" );
+			PyErr_Clear();
 		}
 	}
 }
