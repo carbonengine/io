@@ -3442,7 +3442,9 @@ void on_accept(uv_stream_t *handle, int status)
 		return; // may have been closed before this one arrived
 	}
 
-    auto* channel = reinterpret_cast<HandleData*>( handle->data )->channel;
+	auto handleData = reinterpret_cast<HandleData*>( handle->data );
+
+    auto* channel = handleData->channel;
 	Ccp::PyGilEnsure gil;
     if( !channel )
 	{
@@ -3451,86 +3453,21 @@ void on_accept(uv_stream_t *handle, int status)
 		PyErr_Clear();
 		return;
     }
-	auto *client = new uv_tcp_t;
-	uv_tcp_init(handle->loop, client);
-	status = uv_accept(handle, reinterpret_cast<uv_stream_t*>(client));
-	auto guard = MakeGuard([&] {uv_close((uv_handle_t*)client, cleanup_uv_handle);});
-	if( status < 0 ) {
-		PyErr_FromUvErr(status);
-		SendError(channel, "on_accept: uv_accept failed");
+	auto pyStatus = PyLong_FromLong( status );
+	if ( !pyStatus )
+	{
+		LogError( "on_accept failed to create Python object for status code ");
+		PyErr_Clear();
 		return;
 	}
-	client->close_cb = nullptr;
-	SOCKET_T newfd;
-	status = uv_fileno( reinterpret_cast<const uv_handle_t*>( client ), reinterpret_cast<uv_os_fd_t*>( &newfd ) );
-	if( status < 0 )
+	if ( SchedulerAPI()->PyChannel_GetBalance( channel ) < 0 )
 	{
-		PyErr_FromUvErr( status );
-		SendError(channel, "on_accept: uv_fileno failed");
-		return;
+		SchedulerAPI()->PyChannel_Send( channel, pyStatus );
 	}
-	client->data = CreateHandleData();
-	if( !client->data )
+	else
 	{
-		SendError(channel, "on_accept: Failed to create client channel");
-		return;
+		handleData->pendingAccepts.push_back( pyStatus );
 	}
-	AddToLookupTable( newfd, reinterpret_cast<uv_handle_t*>( client ) );
-
-	auto py_fd = PyLong_FromSocket_t( newfd );
-	if( !py_fd )
-	{
-		SendError(channel, "Failed to convert status to python long");
-		return;
-	}
-	ON_BLOCK_EXIT([&] { Py_DecRef(py_fd); } );
-	auto py_status = PyLong_FromLong(status);
-	if( !py_status )
-	{
-		SendError(channel, "Failed to convert status to python long");
-		return;
-	}
-	ON_BLOCK_EXIT( ( [&] { Py_DecRef(py_status);} ) );
-
-    // Get the peer name
-	sock_addr_t addrbuf;
-	int addrlen = sizeof( struct sockaddr_in6 );
-	memset(&addrbuf, 0, addrlen);
-	status = uv_tcp_getpeername( reinterpret_cast<uv_tcp_t*>( client ), SAS2SA(&addrbuf) , &addrlen );
-	if( status < 0 )
-	{
-		PyErr_FromUvErr( status );
-		SendError(channel, "on_accept: Failed to get peer address");
-		return;
-	}
-	auto py_address = makesockaddr(newfd, SAS2SA(&addrbuf), addrlen, 0);
-	if( !py_address )
-	{
-		SendError(channel, "on_accept: Failed to construct peer address");
-		return;
-	}
-	ON_BLOCK_EXIT( [&] { Py_DecRef(py_address); } );
-
-	auto tuple = PyTuple_Pack(3, py_status, py_fd, py_address );
-	if( !tuple )
-	{
-		SendError(channel, "on_accept: Failed to pack tuple");
-		return;
-	}
-
-	// If the socket gets a connection, but accept() hasn't been called, then sending on the channel
-	// would block the dispatch loop.
-	SchedulerAPI()->PyChannel_SetPreference( channel, PREFER_SENDER );
-	if( SchedulerAPI()->PyChannel_GetBalance( channel ) < 0 )
-	{
-		int ret = SchedulerAPI()->PyChannel_Send( channel, tuple );
-		if( ret < 0 )
-		{
-			LogError( "on_accept failed to send status" );
-			PyErr_Clear();
-		}
-	}
-	guard.Dismiss();
 }
 
 /* s.close() method.

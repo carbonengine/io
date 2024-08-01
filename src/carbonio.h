@@ -1,6 +1,7 @@
 #ifndef CARBONIO_H
 #define CARBONIO_H
 
+#include <deque>
 #include <functional>
 #include <Python.h>
 #include <Scheduler.h>
@@ -71,6 +72,8 @@ struct HandleData
 
 	bool receiving{false};
 	bool sending{false};
+
+	std::deque<PyObject*> pendingAccepts;
 };
 
 enum ChannelPreference : int {
