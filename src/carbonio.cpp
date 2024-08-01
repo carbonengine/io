@@ -45,7 +45,6 @@ void AddToLookupTable( SOCKET_T fileDescriptor, uv_handle_t* uvHandle )
 {
 	std::scoped_lock mutex( s_uvHandleLookupLock );
 	s_uvHandleLookup[fileDescriptor] = uvHandle;
-	CCP_LOG( "Handle %p created and added to lookup table", uvHandle );
 }
 
 uv_handle_t* LookupHandle( SOCKET_T fileDescriptor )
@@ -54,7 +53,6 @@ uv_handle_t* LookupHandle( SOCKET_T fileDescriptor )
 	auto iter = s_uvHandleLookup.find( fileDescriptor );
 	if ( iter != s_uvHandleLookup.cend() )
 	{
-		CCP_LOG( "Looking up handle %p", iter->second );
 		return iter->second;
 	}
 
@@ -67,7 +65,6 @@ void RemoveFromLookupTable( SOCKET_T fileDescriptor )
 	auto iter = s_uvHandleLookup.find( fileDescriptor );
 	if ( iter != s_uvHandleLookup.cend() )
 	{
-		CCP_LOG( "Removing handle %p from lookup table", iter->second );
 		s_uvHandleLookup.erase( iter );
 	}
 }
@@ -118,7 +115,6 @@ void cleanup_uv_handle( uv_handle_t* uv_handle )
 	auto data = reinterpret_cast<HandleData*>( uv_handle->data );
 	if( data )
 	{
-		CCP_LOG( "Handle %p about to be cleaned up, outstanding requests: %d", uv_handle, SchedulerAPI()->PyChannel_GetBalance( data->receiveQueue.get() ) );
 		if ( data->request ) {
 			data->request->cancel();
 		}
@@ -301,7 +297,6 @@ IRequest::IRequest( PySocketSockObject* socket ) : m_handle( socket->uv_handle )
 		SchedulerAPI()->PyChannel_SetPreference( m_channel, PREFER_SENDER );
 	}
 	SchedulerAPI()->PyChannel_SetPreference( m_requestQueue.get(), PREFER_SENDER );
-	CCP_LOG( "Handle %p created request %p", m_handle, this );
 }
 
 void IRequest::acquireReceive(const char* context)
@@ -310,19 +305,13 @@ void IRequest::acquireReceive(const char* context)
 
 	// there's already an outstanding request associated with the socket, let's wait until we can perform our operation
 	while ( handleData()->receiving ) {
-		CCP_LOG( "Handle %p waiting for %d outstanding requests to complete before request %s (%p) continues",
-			this->m_handle, SchedulerAPI()->PyChannel_GetBalance( m_requestQueue.get() ), context, this);
 		// something is already reading, so let's try again at a later point in time
 		auto sentinel = SchedulerAPI()->PyChannel_Receive( m_requestQueue.get() );
-		CCP_LOG( "Handle %p woke up in %s (%p), %s. %d outstanding requests remaining in the queue",
-			this->m_handle, context, this, handleData()->receiving ? "but something is still occupying the socket" : "and nothing is receiving, I can continue", SchedulerAPI()->PyChannel_GetBalance( m_requestQueue.get() ));
 		if ( !sentinel ) {
 			LogError("Oh boy");
 		}
 	}
-	CCP_LOG( "Handle %p processing request %s (%p)", this->m_handle, context, this );
 	handleData()->receiving = true;
-	CCP_LOG( "Handle %p associate with request %p", m_handle, this );
 	handleData()->receiveRequest = this->shared_from_this();
 }
 
@@ -332,24 +321,19 @@ void IRequest::acquireSend( const char* context )
 
 	// there's already an outstanding request associated with the socket, let's wait until we can perform our operation
 	while ( handleData()->sending ) {
-		CCP_LOG( "Handle %p waiting for %d outstanding requests to complete before request %s (%p) continues",
-			this->m_handle, SchedulerAPI()->PyChannel_GetBalance( m_sendQueue.get() ), context, this);
 		// something is already reading, so let's try again at a later point in time
 		auto sentinel = SchedulerAPI()->PyChannel_Receive( m_sendQueue.get() );
 		if ( !sentinel ) {
 			LogError("Oh boy");
 		}
 	}
-	CCP_LOG( "Handle %p processing request %s (%p)", this->m_handle, context, this );
 	handleData()->sending = true;
-	CCP_LOG( "Handle %p associate with request %p", m_handle, this );
 	handleData()->request = this->shared_from_this();
 }
 
 
 void IRequest::associateWithHandleData()
 {
-	CCP_LOG( "Handle %p associate with request %p", m_handle, this );
 	handleData()->request = this->shared_from_this();
 }
 
@@ -358,7 +342,6 @@ void IRequest::releaseReceive(const char* context)
 	handleData()->receiving = false;
 	handleData()->receiveRequest = nullptr;
 	auto balance = SchedulerAPI()->PyChannel_GetBalance( m_requestQueue.get() );
-	CCP_LOG( "Handle %p finished request %s (%p), request queue balance = %d", this->m_handle, context, this, balance );
 	if ( balance < 0 ) {
 		if ( SchedulerAPI()->PyChannel_Send( m_requestQueue.get(), Py_None ) < 0 ) {
 			LogError( "IRequest::releaseReceive() failed to signal waiting handlers" );
@@ -372,7 +355,6 @@ void IRequest::releaseSend(const char* context)
 	handleData()->sending = false;
 	handleData()->request = nullptr;
 	auto balance = SchedulerAPI()->PyChannel_GetBalance( m_sendQueue.get() );
-	CCP_LOG( "Handle %p finished request %s (%p), request queue balance = %d", this->m_handle, context, this, balance );
 	if ( balance < 0 ) {
 		if ( SchedulerAPI()->PyChannel_Send( m_sendQueue.get(), Py_None ) < 0 ) {
 			LogError( "IRequest::releaseSend() failed to signal waiting handlers" );
@@ -534,8 +516,6 @@ void StreamRecvRequest::onCallback( ICallbackParams* callbackParams )
 	}
 }
 
-static CcpLogChannel_t allocLog = CCP_LOG_DEFINE_CHANNEL( "growingBufferAlloc" );
-
 void growingBufferAlloc(uv_handle_t* handle, size_t size, uv_buf_t* buf)
 {
 	auto* data = reinterpret_cast<HandleData*>(handle->data);
@@ -543,12 +523,9 @@ void growingBufferAlloc(uv_handle_t* handle, size_t size, uv_buf_t* buf)
 
 	constexpr size_t BUF_SIZE = 4096;
 
-	CCP_LOG_CH( allocLog, "libuv requesting %d bytes for handle %p", size, handle );
-
 	// Scenario 1: We don't have a buffer yet, allocate one.
 	if( !handleBuf.base )
 	{
-		CCP_LOG_CH( allocLog, "First alloc for %p, creating backing buffer", handle );
 		handleBuf.base = new char[BUF_SIZE];
 		handleBuf.len = BUF_SIZE;
 
@@ -556,8 +533,6 @@ void growingBufferAlloc(uv_handle_t* handle, size_t size, uv_buf_t* buf)
 		buf->len = handleBuf.len;
 		return;
 	}
-
-	CCP_LOG_CH( allocLog, "Alloc for %p, base=%p len=%d writePos=%p readPos=%p", handle, data->buf.base, data->buf.len, data->bufWritePos, data->bufReadPos );
 
 	// Scenario 2: We have a buffer, but we have read everything.
 	// Just use it completely.
@@ -569,7 +544,6 @@ void growingBufferAlloc(uv_handle_t* handle, size_t size, uv_buf_t* buf)
 
 		buf->base = handleBuf.base;
 		buf->len = handleBuf.len;
-		CCP_LOG_CH( allocLog, "Alloc for %p, complete buffer re-use. base=%p len=%d writePos=%p readPos=%p", handle, buf->base, buf->len, data->bufWritePos, data->bufReadPos );
 		return;
 	}
 
@@ -581,7 +555,6 @@ void growingBufferAlloc(uv_handle_t* handle, size_t size, uv_buf_t* buf)
 	{
 		buf->base = handleBuf.base + data->bufWritePos;
 		buf->len = handleBuf.len - data->bufWritePos;
-		CCP_LOG_CH( allocLog, "Alloc for %p, partial buffer with %d bytes remaining data. base=%p len=%d writePos=%p readPos=%p", handle, remainingBytes, buf->base, buf->len, data->bufWritePos, data->bufReadPos );
 		return;
 	}
 
@@ -595,7 +568,6 @@ void growingBufferAlloc(uv_handle_t* handle, size_t size, uv_buf_t* buf)
 
 		buf->base = handleBuf.base + data->bufWritePos;
 		buf->len = handleBuf.len - data->bufWritePos;
-		CCP_LOG_CH( allocLog, "Alloc for %p, partial buffer with free space, shifting %d bytes of unread data. base=%p len=%d writePos=%p readPos=%p", handle, unreadBytes, buf->base, buf->len, data->bufWritePos, data->bufReadPos );
 		return;
 	}
 
@@ -610,7 +582,6 @@ void growingBufferAlloc(uv_handle_t* handle, size_t size, uv_buf_t* buf)
 
 	buf->base = handleBuf.base;
 	buf->len = handleBuf.len;
-	CCP_LOG_CH( allocLog, "Alloc for %p, existing buffer is full, expanding current one. base=%p len=%d writePos=%p readPos=%p", handle, unreadBytes, buf->base, buf->len, data->bufWritePos, data->bufReadPos );
 }
 
 void StreamRecvRequest::onTimeout()
@@ -628,7 +599,6 @@ void alloc(uv_handle_t* handle, size_t size, uv_buf_t* buf)
 
 void StreamRecvRequest::readCallback( uv_stream_t* client, ssize_t nread, const uv_buf_t* buf )
 {
-	CCP_LOG( "Handle %p in StreamRecvRequest::readCallback", client);
 	auto* data = reinterpret_cast<HandleData*>( client->data );
 	if( data && data->receiveRequest )
 	{
@@ -669,7 +639,6 @@ typedef struct {
 // libuv needs a callback
 void sendNoopCallback( uv_write_t* req, int )
 {
-	CCP_LOG( "Processing non-blocking callback for write request %p", req );
     auto *wr = (write_req_t*) req;
 	delete[] wr->buf.base;
 	delete wr;
@@ -677,20 +646,11 @@ void sendNoopCallback( uv_write_t* req, int )
 
 PyObject* StreamSendRequest::execute()
 {
-	CCP_LOG( "Handle %p processing request StreamSendRequest (%p) uv_write_t=%p payloadSize=%d", this->m_handle, this, &this->m_writeRequest, m_sendBuffer.len );
 	auto acquireGuard = MakeGuard( [&] { releaseSend( "StreamSendRequest" ); } );
-	// if ( m_blockingSend )
-	// {
 	auto write_req = new write_req_t;
 	write_req->buf = uv_buf_init( new char[m_sendBuffer.len], m_sendBuffer.len );
 	memcpy( write_req->buf.base, m_sendBuffer.base, m_sendBuffer.len );
 	acquireSend("StreamSendRequest");
-	// }
-	// else
-	// {
-		// associateWithHandleData();
-		// acquireGuard.Dismiss();
-	// }
 	if ( m_blockingSend && ! startTimeout() )
 	{
 		delete[] write_req->buf.base;
@@ -728,7 +688,6 @@ PyObject* StreamSendRequest::execute()
 
 void StreamSendRequest::sendCallback( uv_write_t* request, int status )
 {
-	CCP_LOG( "Handle %p in StreamSendRequest::sendCallback (write request: %p)", request->handle, request );
 	if( request->handle && request->handle->data )
 	{
 		auto _this = std::reinterpret_pointer_cast<StreamSendRequest>( reinterpret_cast<HandleData*>( request->handle->data )->request );
@@ -959,7 +918,6 @@ PyObject* UdpSendRequest::execute()
 {
 	acquireSend("UdpSendRequest");
 	ON_BLOCK_EXIT([&]{releaseSend("UdpSendRequest");});
-	CCP_LOG( "Handle %p processing request UdpSendRequest (%p)", this->m_handle, this );
 
 	auto req = new write_req_t;
 
@@ -968,15 +926,6 @@ PyObject* UdpSendRequest::execute()
 	{
 		return PyLong_FromLong( status );
 	}
-	// auto ret = SchedulerAPI()->PyChannel_Receive( m_channel );
-	// status = PyLong_AsLong( ret );
-	// if ( status < 0 ) {
-		// if( !( status == -1 && PyErr_Occurred() ) )
-		// {
-			// PyErr_FromUvErr( status );
-		// }
-		// return nullptr;
-	// }
 	s_bytesSent += m_sendBuffer.len;
 	auto ret = PyLong_FromSsize_t(m_sendBuffer.len);
 	return ret;
@@ -1526,7 +1475,6 @@ PyObject* StreamConnectRequest::execute()
 
 void StreamConnectRequest::connectCallback( uv_connect_t* connection, int status )
 {
-	CCP_LOG( "Handle %p in StreamConnectRequest::readCallback", connection->handle );
 	if ( connection->data )
 	{
 		auto _this = static_cast<StreamConnectRequest*>( connection->data );
@@ -1584,7 +1532,6 @@ PyObject* SendPacket( PySocketSockObject* socket, void* data, Py_ssize_t len )
 	auto req = std::make_shared<StreamSendRequest>( socket, buf.data(), outlen, 0, handleData->blockingSend );
 	s_packetsSent += 1;
 
-	CCP_LOG( "Handle %p sending a packet of size without packet header: %d, size with packet header: %d", req->handle(), len, outlen );
 	return req->execute();
 }
 
@@ -1758,7 +1705,6 @@ PyObject* StreamPacketReceiveRequest::execute()
 	while ( !m_timedOut && needMore() )
 	{
 		auto status = startRead();
-		CCP_LOG("Handle %p in StreamPacketReceiveRequest::execute() for %p - want more data (have header? %s - size %d), started read (%d = %s)", m_handle, this, m_packetHeader > 0 ? "Yes" : "No", payloadLen(), status, status < 0 ? uv_err_name( status ) : "OK");
 		if ( status == 0 )
 		{
 			auto sentinel = SchedulerAPI()->PyChannel_Receive( m_channel );
@@ -1812,7 +1758,6 @@ PyObject* StreamPacketReceiveRequest::execute()
 
 	Py_IncRef( Py_None );
 	auto packetSize = payloadEnd - payload;
-	CCP_LOG( "Handle %p for request %p - returning packet of size %d", m_handle, this, packetSize );
 	auto* packet = PyTuple_Pack( 3, PyBytes_FromStringAndSize( payload, packetSize ), Py_None, PyLong_FromSize_t( sequenceNumber ) );
 	if ( !packet ) {
 		Py_DecRef( Py_None );
@@ -1829,7 +1774,6 @@ int StreamPacketReceiveRequest::startRead()
 void StreamPacketReceiveRequest::readCallback( uv_stream_t* client, ssize_t nread, const uv_buf_t* buf )
 {
 	auto* data = reinterpret_cast<HandleData*>( client->data );
-	CCP_LOG( "Handle %p triggering StreamPacketReceiveRequest::readCallback for %p with %d bytes (%s)", client, data->receiveRequest.get(), nread, nread < 0 ? uv_err_name( nread ) : "OK" );
 	if( data->receiveRequest )
 	{
 		auto _this = std::reinterpret_pointer_cast<StreamPacketReceiveRequest>( data->receiveRequest );
