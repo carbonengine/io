@@ -17,12 +17,19 @@ target_include_directories(SocketCppUnitTests
         ${SCHEDULER_INCLUDE_DIR}
 )
 target_link_libraries(SocketCppUnitTests
+    PRIVATE
         GTest::GTest
         libuv::uv_a
         Python
         ccp::log
         CcpCore
 )
+if(WIN32)
+    target_link_libraries(SocketCppUnitTests
+        PRIVATE
+            Rpcrt4
+    )
+endif()
 
 if(CMAKE_IMPORT_LIBRARY_SUFFIX)
     add_custom_command(TARGET SocketCppUnitTests POST_BUILD
