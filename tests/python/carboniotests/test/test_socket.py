@@ -7055,6 +7055,30 @@ class CarbonIoTest(SocketPairTest):
         self.assertDictEqual(expected_stats, delta_stats)
 
 
+class CarbonIoConnectionTest(SocketTCPTest):
+    num_clients = 100
+
+    def _start_server(self):
+        self.serv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.port = socket_helper.bind_port(self.serv)
+        self.serv.listen()
+
+    def _continue_server(self):
+        for i in range(self.num_clients):
+            conn, _ = self.serv.accept()
+            self.assertEqual(conn.recvpacketoob()[0], MSG)
+
+    def _run_client(self, index):
+        cli = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        cli.connect(("localhost", self.port))
+        cli.sendpacket(MSG)
+
+    def test_connect_and_send_before_accept_does_not_hang_on_receive(self):
+        self._start_server()
+        for i in range(self.num_clients):
+            scheduler.tasklet(self._run_client)(i)
+        self._continue_server()
+
 
 def setUpModule():
     thread_info = threading_helper.threading_setup()
