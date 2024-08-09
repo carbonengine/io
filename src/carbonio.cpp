@@ -1697,7 +1697,7 @@ bool StreamPacketReceiveRequest::needMore() {
 			if ( m_oobDataLen > data->maxPacketSize )
 			{
 				PyErr_Format(PyExc_OSError, "corrupted out-of-band data in packet detected at %d bytes, max is %llu", m_oobDataLen, data->maxPacketSize);
-				return nullptr;
+				return false;
 			}
 
 			m_payload += sizeof(m_oobDataLen);
