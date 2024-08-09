@@ -110,7 +110,6 @@ public:
 
 	virtual ~IRequest()
 	{
-        CCP_LOG( "Handle %p destroying request %p", m_handle, this );
 		clearTimeout();
 		Py_XDECREF(m_channel);
 	}
@@ -356,6 +355,11 @@ private:
 	SOCKET_T m_fd;
 	uint32_t m_packetHeader{0};
 	size_t m_bytesRead{0};
+
+	char* m_payload{nullptr};
+	char* m_payloadEnd{nullptr};
+	char* m_oobData{nullptr};
+	uint32_t m_oobDataLen{0};
 };
 
 void AddToLookupTable(SOCKET_T fileDescriptor, uv_handle_t* uvHandle);

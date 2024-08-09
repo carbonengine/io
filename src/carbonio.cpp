@@ -1555,7 +1555,7 @@ void SendFormattedPacketWriteCallback(uv_write_t* request, int status)
 	}
 
 	auto* bufs = static_cast<uv_buf_t*>( request->data );
-	delete bufs; // clean up the buffer array
+	delete[] bufs; // clean up the buffer array
 	delete request; // clean up the request
 }
 
@@ -1684,6 +1684,43 @@ bool StreamPacketReceiveRequest::needMore() {
 			m_bytesRead += copyAmount;
 		}
 	}
+
+	if ( m_bytesRead == m_data.size() )
+	{
+		m_payload = m_data.data();
+		m_payloadEnd = m_payload + payloadLen();
+
+		if ( (m_packetHeader & ceHeaderExpectPayloadOffset) == ceHeaderExpectPayloadOffset)
+		{
+			m_oobDataLen = ntohl( *reinterpret_cast<decltype( m_oobDataLen )*>( m_payload ) );
+
+			if ( m_oobDataLen > data->maxPacketSize )
+			{
+				PyErr_Format(PyExc_OSError, "corrupted out-of-band data in packet detected at %d bytes, max is %llu", m_oobDataLen, data->maxPacketSize);
+				return nullptr;
+			}
+
+			m_payload += sizeof(m_oobDataLen);
+			m_oobData = m_payload;
+			for ( auto callback : s_oobDataCallbacks ) {
+				auto stop = callback(
+					static_cast<long long>( m_fd ),
+					m_payload + m_oobDataLen,
+					payloadLen() - m_oobDataLen,
+					m_oobData,
+					m_oobDataLen
+				);
+				if (stop != 0) {
+					// BlueNet ate the packet, so reset our internal state
+					m_data.clear();
+					m_packetHeader = 0;
+					m_bytesRead = 0;
+				}
+			}
+			m_payload += m_oobDataLen;
+		}
+	}
+
 	return m_data.empty() || m_bytesRead < m_data.size();
 };
 
@@ -1722,43 +1759,12 @@ PyObject* StreamPacketReceiveRequest::execute()
 		return nullptr;
 	}
 
-	char* payload = m_data.data();
-	char* payloadEnd = payload + payloadLen();
-	uint32_t oobDataLen{0};
-
-	if ( (m_packetHeader & ceHeaderExpectPayloadOffset) == ceHeaderExpectPayloadOffset)
-	{
-		oobDataLen = ntohl( *reinterpret_cast<decltype( oobDataLen )*>( payload ) );
-
-		if ( oobDataLen > data->maxPacketSize )
-		{
-			PyErr_Format(PyExc_OSError, "corrupted out-of-band data in packet detected at %d bytes, max is %llu", oobDataLen, data->maxPacketSize);
-			return nullptr;
-		}
-
-		payload += sizeof(oobDataLen);
-		auto* oobData = payload;
-		for ( auto callback : s_oobDataCallbacks ) {
-			auto stop = callback(
-				static_cast<long long>( m_fd ),
-				payload + oobDataLen,
-				payloadLen() - oobDataLen,
-				oobData,
-				oobDataLen
-			);
-			if (stop != 0) {
-				// BlueNet ate the packet, so reset our internal state ... is this correct? When would bluenet eat the packet?
-				Py_RETURN_NONE;
-			}
-		}
-		payload += oobDataLen;
-	}
-
 	s_packetsReceived += 1;
 
 	Py_IncRef( Py_None );
-	auto packetSize = payloadEnd - payload;
-	auto* packet = PyTuple_Pack( 3, PyBytes_FromStringAndSize( payload, packetSize ), Py_None, PyLong_FromSize_t( sequenceNumber ) );
+	auto packetSize = m_payloadEnd - m_payload;
+
+	auto* packet = PyTuple_Pack( 3, PyBytes_FromStringAndSize( m_payload, packetSize ), PyBytes_FromStringAndSize( m_oobData, m_oobDataLen ), PyLong_FromSize_t( sequenceNumber ) );
 	if ( !packet ) {
 		Py_DecRef( Py_None );
 	}
