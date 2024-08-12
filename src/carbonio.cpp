@@ -160,6 +160,7 @@ HandleData::~HandleData()
 	buf.len = 0;
 	bufReadPos = -1;
 	bufWritePos = -1;
+	socket = nullptr;
 }
 
 
