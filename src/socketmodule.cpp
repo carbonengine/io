@@ -5760,7 +5760,6 @@ void add_socket_to_set( uv_handle_t* handle, void* arg )
 
 	if( !handleData->socket )
 	{
-		LogError( "add_socket_to_set: A valid handle has no corresponding Python socket" );
 		return;
 	}
 	auto* socket = reinterpret_cast<PySocketSockObject*>( handleData->socket );
