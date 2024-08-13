@@ -6907,7 +6907,10 @@ class CarbonIoTest(SocketPairTest):
         self.assertSetEqual({self.serv, self.cli, u}, _socket.getsockets())
         u.close()
         self.assertSetEqual({self.serv, self.cli}, _socket.getsockets())
-        
+
+        self.cli.detach()
+        self.assertSetEqual({self.serv}, _socket.getsockets())
+
         result = _socket.getsockets()
         with self.assertRaises(AttributeError):
             result.add(u)

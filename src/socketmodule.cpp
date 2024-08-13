@@ -3529,6 +3529,13 @@ sock_detach(PySocketSockObject *s, PyObject *Py_UNUSED(ignored))
 {
     SOCKET_T fd = s->sock_fd;
     s->sock_fd = INVALID_SOCKET;
+
+	if( s->uv_handle && s->uv_handle->data )
+	{
+		auto* handleData = reinterpret_cast<HandleData*>( s->uv_handle->data );
+		handleData->socket = nullptr;
+	}
+
     return PyLong_FromSocket_t(fd);
 }
 
