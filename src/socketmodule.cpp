@@ -3529,6 +3529,13 @@ sock_detach(PySocketSockObject *s, PyObject *Py_UNUSED(ignored))
 {
     SOCKET_T fd = s->sock_fd;
     s->sock_fd = INVALID_SOCKET;
+
+	if( s->uv_handle && s->uv_handle->data )
+	{
+		auto* handleData = reinterpret_cast<HandleData*>( s->uv_handle->data );
+		handleData->socket = nullptr;
+	}
+
     return PyLong_FromSocket_t(fd);
 }
 
@@ -5742,6 +5749,43 @@ When clear, send operations return immediately withoug blocking, \n\
 but then no return values are available.\n\
 Returns the old value of the flag.  Call with no arguments to query..");
 
+void add_socket_to_set( uv_handle_t* handle, void* arg )
+{
+	if( !is_valid_uv_handle( handle ) )
+	{
+		return;
+	}
+	auto* socketObjects = reinterpret_cast<PyObject*>( arg );
+	auto* handleData = reinterpret_cast<HandleData*>( handle->data );
+
+	if( !handleData->socket )
+	{
+		return;
+	}
+	auto* socket = reinterpret_cast<PySocketSockObject*>( handleData->socket );
+	if( PySet_Add( socketObjects, reinterpret_cast<PyObject*>( socket ) ) < 0 )
+	{
+		LogError( "Failed to add socket to set for getsockets() call" );
+	}
+}
+
+static PyObject* socket_getsockets( PyObject* self, PyObject* )
+{
+	PyObject* socketObjects = PySet_New( nullptr );
+	if( !socketObjects )
+	{
+		return nullptr;
+	}
+	ON_BLOCK_EXIT( [socketObjects] { Py_DECREF(socketObjects); } );
+	uv_walk( GetUvLoop(), add_socket_to_set, socketObjects );
+	return PyFrozenSet_New( socketObjects );
+}
+
+PyDoc_STRVAR( socket_getsockets_doc,
+			  "getsockets()\n\
+\n\
+Return a tuple containing sockets managed by libuv that live on the current thread" );
+
 static PyObject* socket_getstats(PyObject* self, PyObject*)
 {
 	return GetStatistics();
@@ -6414,6 +6458,12 @@ sock_initobj_impl(PySocketSockObject *self, int family, int type, int proto,
         SOCKETCLOSE(fd);
         return -1;
     }
+
+	if( s->uv_handle && s->uv_handle->data )
+	{
+		auto* handleData = reinterpret_cast<HandleData*>( s->uv_handle->data );
+		handleData->socket = self;
+	}
 
     return 0;
 
@@ -8386,6 +8436,7 @@ static PyMethodDef socket_methods[] = {
 #endif
 #endif
 	{ "dispatch", socket_dispatch, METH_NOARGS, "Tick the network event loop once"},
+	{ "getsockets", socket_getsockets, METH_NOARGS, socket_getsockets_doc },
 	{ "getstats", socket_getstats, METH_NOARGS, socket_getstats_doc},
     {NULL,                      NULL}            /* Sentinel */
 };

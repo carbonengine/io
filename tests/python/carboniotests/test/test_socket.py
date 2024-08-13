@@ -6890,6 +6890,31 @@ class CarbonIoTest(SocketPairTest):
             scheduler.getcurrent().block_trap = False
             self.serv.setblockingsend(False)
 
+    def test_getsockets(self):
+        self.assertSetEqual({self.serv, self.cli}, _socket.getsockets())
+
+        s = _socket.socket()
+        self.assertSetEqual({self.serv, self.cli, s}, _socket.getsockets())
+        s.close()
+        self.assertSetEqual({self.serv, self.cli}, _socket.getsockets())
+
+        t = _socket.socket()
+        self.assertSetEqual({self.serv, self.cli, t}, _socket.getsockets())
+        del t
+        self.assertSetEqual({self.serv, self.cli}, _socket.getsockets())
+
+        u = self.cli.dup()
+        self.assertSetEqual({self.serv, self.cli, u}, _socket.getsockets())
+        u.close()
+        self.assertSetEqual({self.serv, self.cli}, _socket.getsockets())
+
+        self.cli.detach()
+        self.assertSetEqual({self.serv}, _socket.getsockets())
+
+        result = _socket.getsockets()
+        with self.assertRaises(AttributeError):
+            result.add(u)
+
     def test_stats(self):
         expected_stats_per_module = {
             'BytesReceived': len(MSG) * 2,

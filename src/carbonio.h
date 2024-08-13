@@ -33,6 +33,9 @@ struct HandleData
 	HandleData();
 	~HandleData();
 
+	// The Python socket object. We do not keep a strong reference to it, so handle with care.
+	PySocketSockObject* socket{nullptr};
+
 	// This channel is for accepting connections.
 	PyChannelObject* channel{nullptr};
 
