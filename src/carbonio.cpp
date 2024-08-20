@@ -666,6 +666,7 @@ PyObject* StreamSendRequest::execute()
 		return nullptr;
 	}
 	auto currentTasklet = reinterpret_cast<PyTaskletObject*>( g_scheduler->PyScheduler_GetCurrent() );
+	ON_BLOCK_EXIT( [currentTasklet] {  Py_DECREF(currentTasklet);} );
 	if( m_blockingSend && g_scheduler->PyTasklet_GetBlockTrap( currentTasklet ) )
 	{
 		delete[] write_req->buf.base;
@@ -680,7 +681,6 @@ PyObject* StreamSendRequest::execute()
 		PyErr_SetString(PyExc_RuntimeError, "Can't perform blocking send on the main tasklet");
 		return nullptr;
 	}
-	Py_DECREF(currentTasklet);
 	int status = uv_write( reinterpret_cast<uv_write_t*>( write_req ), handle(), &write_req->buf, 1, m_blockingSend ? StreamSendRequest::sendCallback : sendNoopCallback );
 	if( status < 0 ){
 		return PyLong_FromLong(status);
