@@ -1563,6 +1563,7 @@ void SendFormattedPacketWriteCallback(uv_write_t* request, int status)
 	}
 
 	auto* bufs = static_cast<uv_buf_t*>( request->data );
+	delete[] bufs[0].base;
 	delete[] bufs; // clean up the buffer array
 	delete request; // clean up the request
 }
@@ -1584,7 +1585,8 @@ extern "C" int SendFormattedPacket( long long fd, const char* data, unsigned int
 	}
 
 	auto* bufs = new uv_buf_t[1];
-	bufs[0] = uv_buf_init( (char*)data, len );
+	bufs[0] = uv_buf_init( new char[len], len );
+	memcpy( bufs[0].base, data, len );
 	auto* write_req = new uv_write_t;
 	write_req->data = bufs;
 	int status = uv_write( write_req, reinterpret_cast<uv_stream_t*>( uv_handle ), bufs, 1, SendFormattedPacketWriteCallback );
