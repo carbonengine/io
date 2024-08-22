@@ -7106,6 +7106,11 @@ class CarbonIoTest(SocketPairTest):
         msg_2, _, _ = self.cli.recvpacketoob()
         self.assertEqual(MSG_2, msg_2)
 
+    def test_recvpacket_empty_message(self):
+        self.serv.sendpacket(b"")
+        msg, _, _ = self.cli.recvpacketoob()
+        self.assertEqual(b"", msg)
+
 
 class CarbonIoConnectionTest(SocketTCPTest):
     num_clients = 100
