@@ -96,13 +96,11 @@ PyObject* GetStatistics()
 	return ret;
 }
 
-
 bool InitScheduler()
 {
 	g_scheduler = SchedulerAPI();
 	return g_scheduler != nullptr;
 }
-
 
 int InitUvLoop() {
 	// uv_loop instances aren't thread-safe, thus we keep a loop instance per thread for which we need to initialize TLS

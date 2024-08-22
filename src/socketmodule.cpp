@@ -8614,7 +8614,7 @@ socket_exec(PyObject *m)
     if (capi == NULL) {
         goto error;
     }
-	if ( ! InitScheduler() )
+	if ( !InitScheduler() )
 	{
 		goto error;
 	}
