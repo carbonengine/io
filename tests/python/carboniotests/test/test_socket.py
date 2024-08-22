@@ -7077,6 +7077,58 @@ class CarbonIoTest(SocketPairTest):
         self.assertEqual(MSG, msg)
         self.assertDictEqual(expected_stats, delta_stats)
 
+    def test_recvpacket_with_consumed_oob_data(self):
+        import sockettesthelper
+        # Install a callback that eats oobData packets of length 5,
+        # that contain the string "eatme". The callback is set globally
+        # on the module, but should not cause issues, so long as we
+        # don't write tests with this exact OOB Data packet. 
+        sockettesthelper.addpacketeatingcallback()
+        self.addCleanup(sockettesthelper.removepacketeatingcallback)
+
+        # Hand-crafted payload, setting `ceHeaderExpectPayloadOffset` to indicate existence of OOB data
+        oobData = b'eatme'
+        oobDataLen = len(oobData)
+        payload = struct.pack("!ll", (len(MSG) + oobDataLen + 4) | 1<<28, oobDataLen)
+        payload += oobData
+        payload += MSG
+        self.serv.send(payload)
+
+        msg, _, _ = self.cli.recvpacketoob()
+        self.assertEqual(MSG, msg)
+
+    def test_consecutive_recvpacket_with_consumed_oob_data(self):
+        import sockettesthelper
+        # Install a callback that eats oobData packets of length 5,
+        # that contain the string "eatme". The callback is set globally
+        # on the module, but should not cause issues, so long as we
+        # don't write tests with this exact OOB Data packet. 
+        sockettesthelper.addpacketeatingcallback()
+        self.addCleanup(sockettesthelper.removepacketeatingcallback)
+
+        # Hand-crafted payload, setting `ceHeaderExpectPayloadOffset` to indicate existence of OOB data
+        oobData = b'eatme'
+        oobDataLen = len(oobData)
+        MSG_1 = b"YO!"
+        payload = struct.pack("!ll", (len(MSG_1) + oobDataLen + 4) | 1<<28, oobDataLen)
+        payload += oobData
+        payload += MSG_1
+        self.serv.send(payload)
+        
+        oobData_2 = b'ignoreme'
+        oobDataLen_2 = len(oobData_2)
+        MSG_2 = b"WHAZZUP?"
+        payload_2 = struct.pack("!ll", (len(MSG_2) + oobDataLen_2 + 4) | 1<<28, oobDataLen_2)
+        payload_2 += oobData_2
+        payload_2 += MSG_2
+        self.serv.send(payload_2)
+
+        msg_1, _, _ = self.cli.recvpacketoob()
+        self.assertEqual(MSG_1, msg_1)
+
+        msg_2, _, _ = self.cli.recvpacketoob()
+        self.assertEqual(MSG_2, msg_2)
+
 
 class CarbonIoConnectionTest(SocketTCPTest):
     num_clients = 100

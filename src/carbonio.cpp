@@ -1712,10 +1712,11 @@ bool StreamPacketReceiveRequest::needMore() {
 
 			m_payload += sizeof(m_oobDataLen);
 			m_oobData = m_payload;
+			m_payload += m_oobDataLen;
 			for ( auto callback : s_oobDataCallbacks ) {
 				auto stop = callback(
 					static_cast<long long>( m_fd ),
-					m_payload + m_oobDataLen,
+					m_oobData + m_oobDataLen,
 					payloadLen() - m_oobDataLen,
 					m_oobData,
 					m_oobDataLen
@@ -1725,9 +1726,9 @@ bool StreamPacketReceiveRequest::needMore() {
 					m_data.clear();
 					m_packetHeader = 0;
 					m_bytesRead = 0;
+					return false;
 				}
 			}
-			m_payload += m_oobDataLen;
 		}
 	}
 
