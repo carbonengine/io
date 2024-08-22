@@ -1726,7 +1726,7 @@ bool StreamPacketReceiveRequest::needMore() {
 					m_data.clear();
 					m_packetHeader = 0;
 					m_bytesRead = 0;
-					return false;
+					return needMore();
 				}
 			}
 		}
