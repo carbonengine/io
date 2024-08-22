@@ -2,6 +2,11 @@ import sys
 import unittest
 
 
+# mock scheduler module for test discovery; it just needs to be importable at that point.
+# The alternative is to modify the PYTHONPATH
+sys.modules['scheduler'] = sys
+
+
 def print_suite(suite):
     if hasattr(suite, '_exception'):
         print(suite._exception)

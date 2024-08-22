@@ -3460,9 +3460,9 @@ void on_accept(uv_stream_t *handle, int status)
 		PyErr_Clear();
 		return;
 	}
-	if ( SchedulerAPI()->PyChannel_GetBalance( channel ) < 0 )
+	if ( g_scheduler->PyChannel_GetBalance( channel ) < 0 )
 	{
-		SchedulerAPI()->PyChannel_Send( channel, pyStatus );
+		g_scheduler->PyChannel_Send( channel, pyStatus );
 	}
 	else
 	{
@@ -8614,6 +8614,10 @@ socket_exec(PyObject *m)
     if (capi == NULL) {
         goto error;
     }
+	if ( !InitScheduler() )
+	{
+		goto error;
+	}
     AugmentSocketAPI(capi);
     capsule = PyCapsule_New(capi,
                                       PySocket_CAPSULE_NAME,

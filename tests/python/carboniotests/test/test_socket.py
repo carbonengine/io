@@ -1,8 +1,3 @@
-import _scheduler
-import sys
-# Scheduler needs to exist in sys.modules as "scheduler" in order that we may load the c api.
-sys.modules["scheduler"] = _scheduler
-import scheduler
 import unittest
 from test import support
 from test.support import os_helper
@@ -6879,6 +6874,7 @@ class CarbonIoTest(SocketPairTest):
         s.close()
 
     def test_blockingsend_behaviour(self):
+        import scheduler
         scheduler.getcurrent().block_trap = True
         try:
             self.serv.setblockingsend(True)
@@ -6978,6 +6974,7 @@ class CarbonIoTest(SocketPairTest):
             _ = self.serv.recvpacketoob()
 
     def test_recvpacket_async_interleaved(self):
+        import scheduler
         smallPacket = b'A' * 256
         mediumPacket = b'C' * 32768
         largePacket = b'1' * 65535
@@ -7018,6 +7015,7 @@ class CarbonIoTest(SocketPairTest):
 
 
     def test_recvpacket_async(self):
+        import scheduler
         numPackets = 10
         headerSize = 4
         expected_stats_per_module = {
@@ -7099,6 +7097,7 @@ class CarbonIoConnectionTest(SocketTCPTest):
         cli.sendpacket(MSG)
 
     def test_connect_and_send_before_accept_does_not_hang_on_receive(self):
+        import scheduler
         self._start_server()
         for i in range(self.num_clients):
             scheduler.tasklet(self._run_client)(i)
