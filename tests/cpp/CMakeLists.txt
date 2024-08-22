@@ -1,3 +1,4 @@
+add_subdirectory(pythonmodules)
 find_package(GTest REQUIRED)
 add_executable(SocketCppUnitTests
         main.cpp

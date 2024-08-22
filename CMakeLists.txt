@@ -58,26 +58,6 @@ set_target_properties(_socket
         INTERNAL_POSTFIX ""
 )
 
-# --- sockettesthelper ---
-ccp_add_library(sockettesthelper SHARED
-        src/sockettesthelper.cpp
-)
-
-target_link_libraries(sockettesthelper
-        PRIVATE
-        Python
-)
-
-set_target_properties(sockettesthelper
-        PROPERTIES
-        DEBUG_POSTFIX ""
-        INTERNAL_POSTFIX ""
-)
-
-target_include_directories(sockettesthelper
-        PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/include
-)
 # ---
 
 get_target_property(SCHEDULER_INCLUDE_DIR Scheduler INTERFACE_INCLUDE_DIRECTORIES)
