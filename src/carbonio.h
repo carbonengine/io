@@ -11,6 +11,9 @@
 #include <BluePyCpp.h>
 #include <socketmodule.h>
 
+extern SchedulerCAPI* g_scheduler;
+extern bool InitScheduler();
+
 void cleanup_uv_handle( uv_handle_t* uv_handle );
 bool is_valid_uv_handle( uv_handle_t* handle );
 

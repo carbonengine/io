@@ -1,6 +1,6 @@
 import unittest
 import socket
-import _scheduler
+import scheduler
 
 
 def main():
@@ -21,9 +21,9 @@ def main():
             super().__init__(*args, **kwargs)
 
         def run(self, test):
-            _scheduler.tasklet(self._run_impl)(test)
+            scheduler.tasklet(self._run_impl)(test)
             while self.result is None:
-                _scheduler.run()
+                scheduler.run()
                 socket.dispatch()
 
             return self.result

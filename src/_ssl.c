@@ -6583,5 +6583,9 @@ __attribute__((visibility("default")))
 PyMODINIT_FUNC
 PyInit__ssl(void)
 {
+	if ( InitScheduler() == 0 )
+	{
+		return NULL;
+	}
     return PyModuleDef_Init(&_sslmodule_def);
 }
