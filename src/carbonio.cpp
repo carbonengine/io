@@ -666,6 +666,7 @@ PyObject* StreamSendRequest::execute()
 		return nullptr;
 	}
 	auto currentTasklet = reinterpret_cast<PyTaskletObject*>( g_scheduler->PyScheduler_GetCurrent() );
+	ON_BLOCK_EXIT( [currentTasklet] {  Py_DECREF(currentTasklet);} );
 	if( m_blockingSend && g_scheduler->PyTasklet_GetBlockTrap( currentTasklet ) )
 	{
 		delete[] write_req->buf.base;
@@ -680,7 +681,6 @@ PyObject* StreamSendRequest::execute()
 		PyErr_SetString(PyExc_RuntimeError, "Can't perform blocking send on the main tasklet");
 		return nullptr;
 	}
-	Py_DECREF(currentTasklet);
 	int status = uv_write( reinterpret_cast<uv_write_t*>( write_req ), handle(), &write_req->buf, 1, m_blockingSend ? StreamSendRequest::sendCallback : sendNoopCallback );
 	if( status < 0 ){
 		return PyLong_FromLong(status);
@@ -1563,6 +1563,7 @@ void SendFormattedPacketWriteCallback(uv_write_t* request, int status)
 	}
 
 	auto* bufs = static_cast<uv_buf_t*>( request->data );
+	delete[] bufs[0].base;
 	delete[] bufs; // clean up the buffer array
 	delete request; // clean up the request
 }
@@ -1584,7 +1585,8 @@ extern "C" int SendFormattedPacket( long long fd, const char* data, unsigned int
 	}
 
 	auto* bufs = new uv_buf_t[1];
-	bufs[0] = uv_buf_init( (char*)data, len );
+	bufs[0] = uv_buf_init( new char[len], len );
+	memcpy( bufs[0].base, data, len );
 	auto* write_req = new uv_write_t;
 	write_req->data = bufs;
 	int status = uv_write( write_req, reinterpret_cast<uv_stream_t*>( uv_handle ), bufs, 1, SendFormattedPacketWriteCallback );
@@ -1679,6 +1681,14 @@ bool StreamPacketReceiveRequest::needMore() {
 			return false;
 		}
 		bytesRemaining -= sizeof( m_packetHeader );
+		if( !payloadLen() )
+		{
+			// The packet is empty, so there is no more data to receive.
+			// While this is a valid, well-formed packet, machoNet
+			// won't know what to do with it, so sending one may
+			// result in the connection getting dropped.
+			return false;
+		}
 	}
 
 	if ( bytesRemaining > 0 ) {
@@ -1710,10 +1720,11 @@ bool StreamPacketReceiveRequest::needMore() {
 
 			m_payload += sizeof(m_oobDataLen);
 			m_oobData = m_payload;
+			m_payload += m_oobDataLen;
 			for ( auto callback : s_oobDataCallbacks ) {
 				auto stop = callback(
 					static_cast<long long>( m_fd ),
-					m_payload + m_oobDataLen,
+					m_oobData + m_oobDataLen,
 					payloadLen() - m_oobDataLen,
 					m_oobData,
 					m_oobDataLen
@@ -1723,9 +1734,16 @@ bool StreamPacketReceiveRequest::needMore() {
 					m_data.clear();
 					m_packetHeader = 0;
 					m_bytesRead = 0;
+					// When the callback returns a non-zero value, this is an
+					// indication that the contents of the package have been processed
+					// and dealt with by BlueNet, and should not be delivered.
+					// From the callers perspective it should be as if the packet
+					// never got sent, and it should wait until the next one arrives.
+					// If the packet were to be returned, it could cause serious
+					// issues such as connection drops, since machoNet won't know how to deal with them.
+					return needMore();
 				}
 			}
-			m_payload += m_oobDataLen;
 		}
 	}
 
