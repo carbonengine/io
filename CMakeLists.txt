@@ -58,8 +58,6 @@ set_target_properties(_socket
         INTERNAL_POSTFIX ""
 )
 
-# ---
-
 get_target_property(SCHEDULER_INCLUDE_DIR Scheduler INTERFACE_INCLUDE_DIRECTORIES)
 
 target_include_directories(_socket
