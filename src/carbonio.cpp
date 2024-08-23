@@ -1683,6 +1683,10 @@ bool StreamPacketReceiveRequest::needMore() {
 		bytesRemaining -= sizeof( m_packetHeader );
 		if( !payloadLen() )
 		{
+			// The packet is empty, so there is no more data to receive.
+			// While this is a valid, well-formed packet, machoNet
+			// won't know what to do with it, so sending one may
+			// result in the connection getting dropped.
 			return false;
 		}
 	}
@@ -1730,6 +1734,13 @@ bool StreamPacketReceiveRequest::needMore() {
 					m_data.clear();
 					m_packetHeader = 0;
 					m_bytesRead = 0;
+					// When the callback returns a non-zero value, this is an
+					// indication that the contents of the package have been processed
+					// and dealt with by BlueNet, and should not be delivered.
+					// From the callers perspective it should be as if the packet
+					// never got sent, and it should wait until the next one arrives.
+					// If the packet were to be returned, it could cause serious
+					// issues such as connection drops, since machoNet won't know how to deal with them.
 					return needMore();
 				}
 			}
