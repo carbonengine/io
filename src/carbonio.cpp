@@ -1681,7 +1681,7 @@ bool StreamPacketReceiveRequest::needMore() {
 			return false;
 		}
 		bytesRemaining -= sizeof( m_packetHeader );
-		if( !bytesRemaining )
+		if( !payloadLen() )
 		{
 			return false;
 		}
