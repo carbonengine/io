@@ -1661,8 +1661,8 @@ bool StreamPacketReceiveRequest::readHeader( char* src )
 	handleData()->bufReadPos += sizeof( m_packetHeader );
 	if ( payloadLen() > handleData()->maxPacketSize )
 	{
-		CCP_LOGERR( "Handle %p readHeader for %p: too large a packet detected (%d bytes)", m_handle, handleData()->request.get(), m_packetHeader );
-		PyErr_Format( PyExc_OSError, "too large a packet detected at %d bytes, max is %llu", payloadLen(), handleData()->maxPacketSize );
+		CCP_LOGERR( "Too large a packet detected (%d bytes)", m_packetHeader );
+		m_packetHeader = 0;
 		return false;
 	}
 
@@ -1678,7 +1678,10 @@ bool StreamPacketReceiveRequest::needMore() {
 	{
 		if( !readHeader( data->buf.base + data->bufReadPos ) )
 		{
-			return false;
+			// This is not a valid header, so we have received garbage.
+			// Flush the entire buffer and hope for the best.
+			data->bufReadPos = data->bufWritePos;
+			return true;
 		}
 		bytesRemaining -= sizeof( m_packetHeader );
 		if( !payloadLen() )

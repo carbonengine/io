@@ -6967,11 +6967,35 @@ class CarbonIoTest(SocketPairTest):
         delta_stats = { k: new_stats[k] - old_stats[k] for k in old_stats }
         self.assertDictEqual(expected_stats_per_module, delta_stats)
 
-        self.assertGreater(len(MSG), 1)
-        self.serv.setmaxpacketsize(len(MSG)-1)
-        self.cli.sendpacket(MSG)
-        with self.assertRaises(OSError):
-            _ = self.serv.recvpacketoob()
+    def test_recvpacket_eats_data_starting_with_malformed_packet(self):
+        import scheduler
+
+        BOMB = b"!@#%!@#%!@#%!"
+
+        msg = None
+        sequence = None
+
+        def receive_packet():
+            nonlocal msg
+            nonlocal sequence
+            msg, _, sequence = self.serv.recvpacketoob()
+
+        scheduler.tasklet(self.cli.send)(BOMB)
+        scheduler.tasklet(self.cli.sendpacket)(b"This should get dropped")
+        receive_tasklet = scheduler.tasklet(receive_packet)
+        receive_tasklet()
+
+        # Make sure data sent so far gets delivered.
+        scheduler.tasklet(socket.dispatch)()
+
+        scheduler.tasklet(self.cli.sendpacket)(MSG)
+
+        while receive_tasklet.alive:
+            scheduler.schedule()
+            socket.dispatch()
+
+        self.assertEqual(0, sequence)
+        self.assertEqual(MSG, msg)
 
     def test_recvpacket_async_interleaved(self):
         import scheduler
@@ -7049,12 +7073,6 @@ class CarbonIoTest(SocketPairTest):
         new_stats = socket.getstats()
         delta_stats = { k: new_stats[k] - old_stats[k] for k in old_stats }
         self.assertDictEqual(expected_stats_per_module, delta_stats)
-
-        self.assertGreater(len(MSG), 1)
-        self.serv.setmaxpacketsize(len(MSG)-1)
-        self.cli.sendpacket(MSG)
-        with self.assertRaises(OSError):
-            _ = self.serv.recvpacketoob()
 
     def test_recvpacket_with_oob_data(self):
         # Hand-crafted payload, setting `ceHeaderExpectPayloadOffset` to indicate existence of OOB data
