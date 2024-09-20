@@ -529,7 +529,7 @@ void growingBufferAlloc(uv_handle_t* handle, size_t size, uv_buf_t* buf)
 	auto* data = reinterpret_cast<HandleData*>(handle->data);
 	auto& handleBuf = data->buf;
 
-	constexpr size_t BUF_SIZE = 4096;
+	constexpr size_t BUF_SIZE = 65536;
 
 	// Scenario 1: We don't have a buffer yet, allocate one.
 	if( !handleBuf.base )
