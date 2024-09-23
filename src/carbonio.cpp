@@ -1661,7 +1661,6 @@ bool StreamPacketReceiveRequest::readHeader( char* src )
 	handleData()->bufReadPos += sizeof( m_packetHeader );
 	if ( payloadLen() > handleData()->maxPacketSize )
 	{
-		CCP_LOGERR( "Too large a packet detected (%d bytes)", m_packetHeader );
 		m_packetHeader = 0;
 		return false;
 	}
