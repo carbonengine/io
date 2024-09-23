@@ -7156,6 +7156,20 @@ class CarbonIoConnectionTest(SocketTCPTest):
         self._continue_server()
 
 
+class CcpSocketPairTest(SocketPairTest):
+    """
+    Additional Socket pair tests to
+    cover edge cases not tested by
+    the standard Python tests.
+    """
+    def test_incremental_reads(self):
+        self.serv.send(MSG)
+        x = self.cli.recv(10)
+        y = self.cli.recv(len(MSG))
+        self.assertEqual(MSG[:10], x)
+        self.assertEqual(MSG[10:], y)
+
+
 def setUpModule():
     thread_info = threading_helper.threading_setup()
     unittest.addModuleCleanup(threading_helper.threading_cleanup, *thread_info)

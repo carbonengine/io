@@ -454,7 +454,7 @@ PyObject* StreamRecvRequest::execute()
 
 	auto bufferedAmount = data->bufWritePos - data->bufReadPos;
 
-	if ( m_requested_len > bufferedAmount )
+	if ( m_requested_len && !bufferedAmount )
 	{
 		auto ret = startTimeout();
 		if( ret != Py_None )
