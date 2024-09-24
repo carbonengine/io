@@ -366,6 +366,7 @@ private:
 	char* m_payloadEnd{nullptr};
 	char* m_oobData{nullptr};
 	uint32_t m_oobDataLen{0};
+	bool m_eof{false};
 };
 
 void AddToLookupTable(SOCKET_T fileDescriptor, uv_handle_t* uvHandle);

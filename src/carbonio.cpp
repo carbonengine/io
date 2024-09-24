@@ -1778,6 +1778,10 @@ PyObject* StreamPacketReceiveRequest::execute()
 			{
 				return nullptr;
 			}
+			if (m_eof)
+			{
+				break;
+			}
 		} else {
 			PyErr_FromUvErr( status );
 			return nullptr;
@@ -1842,6 +1846,7 @@ void StreamPacketReceiveRequest::onCallback( ICallbackParams* callbackParams )
 		else {
 			stopRead();
 			// Nothing left to read
+			m_eof = true;
 			if ( g_scheduler->PyChannel_Send( m_channel, Py_None ) < 0 ) {
 				LogError( "StreamRecvRequest::onReceive failed to signal sentinel" );
 				PyErr_Clear();
