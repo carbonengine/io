@@ -76,11 +76,6 @@ void DeleteRequestQueueChannel(PyChannelObject* obj)
 {
 	if ( obj )
 	{
-		// Ensure nobody is left waiting
-		auto balance = g_scheduler->PyChannel_GetBalance( obj );
-		while ( g_scheduler->PyChannel_GetBalance( obj ) < 0 ) {
-			g_scheduler->PyChannel_Send( obj, Py_None );
-		}
 		Py_DecRef( (PyObject*) obj );
 	}
 }
@@ -1792,13 +1787,13 @@ PyObject* StreamPacketReceiveRequest::execute()
 	}
 
 	s_packetsReceived += 1;
-
-	Py_IncRef( Py_None );
+	PyObject* packet{};
 	auto packetSize = m_payloadEnd - m_payload;
-
-	auto* packet = PyTuple_Pack( 3, PyBytes_FromStringAndSize( m_payload, packetSize ), PyBytes_FromStringAndSize( m_oobData, m_oobDataLen ), PyLong_FromSize_t( sequenceNumber ) );
-	if ( !packet ) {
-		Py_DecRef( Py_None );
+	if (packetSize == 0 && m_eof) {
+		// closing packet received, signal connection closed
+		packet = PyTuple_Pack( 3, Py_None, Py_None, PyLong_FromLong( 0 ) );
+	} else {
+		packet = PyTuple_Pack( 3, PyBytes_FromStringAndSize( m_payload, packetSize ), PyBytes_FromStringAndSize( m_oobData, m_oobDataLen ), PyLong_FromSize_t( sequenceNumber ) );
 	}
 
 	return packet;

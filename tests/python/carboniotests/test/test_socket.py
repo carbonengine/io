@@ -7156,7 +7156,7 @@ class CarbonIoConnectionTest(SocketTCPTest):
         self._continue_server()
 
 
-class QueuedReceivesTest(SocketTCPTest):
+class PacketReceiveOOBTest(SocketTCPTest):
     num_messages = 5
 
     def _accept(self, channel):
@@ -7167,12 +7167,6 @@ class QueuedReceivesTest(SocketTCPTest):
         cli = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         cli.connect(('localhost', self.port))
         channel.send(cli)
-
-    def _receive(self, connection, channel):
-        channel.send(connection.recvpacketoob()[0])
-
-    def _send(self, connection):
-        connection.sendpacket(MSG)
 
     def test_packetrecvoob_does_not_hang_on_closed_connection(self):
         import scheduler
@@ -7187,10 +7181,13 @@ class QueuedReceivesTest(SocketTCPTest):
         client_connection = client_connection_channel.receive()
         server_connection = server_connection_channel.receive()
 
-        for i in range(self.num_messages):
-            scheduler.tasklet(self._receive)(server_connection, receive_channel)
+        def _receive(connection, channel):
+            channel.send(connection.recvpacketoob()[0])
 
-        self._send(client_connection)
+        for i in range(self.num_messages):
+            scheduler.tasklet(_receive)(server_connection, receive_channel)
+
+        client_connection.sendpacket(MSG)
         self.assertEqual(receive_channel.receive(), MSG)
 
         # Outstanding requests should break from execution once the connection is closed
@@ -7198,6 +7195,26 @@ class QueuedReceivesTest(SocketTCPTest):
         for i in range(self.num_messages - 1):
             receive_channel.receive()
 
+    def test_EOF_returns_closing_packet(self):
+        import scheduler
+
+        client_connection_channel = scheduler.channel()
+        server_connection_channel = scheduler.channel()
+        receive_channel = scheduler.channel()
+
+        scheduler.tasklet(self._connect)(client_connection_channel)
+        scheduler.tasklet(self._accept)(server_connection_channel)
+
+        client_connection = client_connection_channel.receive()
+        server_connection = server_connection_channel.receive()
+
+        def _receive(connection, channel):
+            channel.send(connection.recvpacketoob())
+
+        scheduler.tasklet(_receive)(server_connection, receive_channel)
+        client_connection.close()
+
+        self.assertEqual(receive_channel.receive(), (None, None, 0))
 
 class CcpSocketPairTest(SocketPairTest):
     """
