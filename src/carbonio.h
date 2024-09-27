@@ -340,6 +340,7 @@ public:
 	{}
 
 	PyObject* execute() override;
+	void cancel() override;
 
 private:
 	struct Params : public ICallbackParams {

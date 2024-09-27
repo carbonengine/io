@@ -124,6 +124,14 @@ void cleanup_uv_handle( uv_handle_t* uv_handle )
 		{
 			data->receiveRequest->cancel();
 		}
+		// Unblock any outstanding receives so that they don't operate
+		// on an invalid handle once they finally wake up.
+		while( g_scheduler->PyChannel_GetBalance( data->receiveQueue.get() ) < 0 )
+		{
+			// The receive tasklets need to finish before the handle gets invalidated.
+			g_scheduler->PyChannel_SetPreference( data->receiveQueue.get(), PREFER_RECEIVER );
+			g_scheduler->PyChannel_Send( data->receiveQueue.get(), Py_None);
+		}
 		delete data;
 	}
 	uv_handle->data = nullptr;
@@ -313,6 +321,13 @@ void IRequest::acquireReceive(const char* context)
 		if ( !sentinel ) {
 			LogError("Oh boy");
 		}
+
+		// There may be multiple tasklets waiting for waking up, but the underlying socket - and thus uv_handle - may
+		// be in the process of closing. In that case, simply early out.
+		if ( !is_valid_uv_handle( m_handle ) )
+		{
+			return;
+		}
 	}
 	handleData()->receiving = true;
 	handleData()->receiveRequest = this->shared_from_this();
@@ -342,8 +357,13 @@ void IRequest::associateWithHandleData()
 
 void IRequest::releaseReceive(const char* context)
 {
-	handleData()->receiving = false;
-	handleData()->receiveRequest = nullptr;
+	// Only reset the lock and associated request when the uv_handle - and thus socket - isn't in the process of shutting down.
+	if ( is_valid_uv_handle( m_handle ) )
+	{
+		handleData()->receiving = false;
+		handleData()->receiveRequest = nullptr;
+	}
+
 	auto balance = g_scheduler->PyChannel_GetBalance( m_requestQueue.get() );
 	if ( balance < 0 ) {
 		if ( g_scheduler->PyChannel_Send( m_requestQueue.get(), Py_None ) < 0 ) {
@@ -1763,7 +1783,7 @@ PyObject* StreamPacketReceiveRequest::execute()
 	}
 	ON_BLOCK_EXIT( [&] { clearTimeout(); } );
 
-	while ( !m_timedOut && needMore() )
+	while ( !m_timedOut && is_valid_uv_handle( m_handle ) && needMore() )
 	{
 		auto status = startRead();
 		if ( status == 0 )
@@ -1790,7 +1810,8 @@ PyObject* StreamPacketReceiveRequest::execute()
 	s_packetsReceived += 1;
 	PyObject* packet{};
 	auto packetSize = m_payloadEnd - m_payload;
-	if (packetSize == 0 && m_eof) {
+	if( packetSize == 0 && m_eof || !is_valid_uv_handle( m_handle ) )
+	{
 		// closing packet received, signal connection closed
 		packet = PyTuple_Pack( 3, Py_None, Py_None, PyLong_FromLong( 0 ) );
 	} else {
@@ -1857,4 +1878,14 @@ void StreamPacketReceiveRequest::onCallback( ICallbackParams* callbackParams )
 			PyErr_Clear();
 		}
 	}
+}
+
+void StreamPacketReceiveRequest::cancel()
+{
+	stopRead();
+	if ( g_scheduler->PyChannel_Send( m_channel, Py_None ) < 0 ) {
+		LogError( "StreamRecvRequest::onReceive failed to signal sentinel" );
+		PyErr_Clear();
+	}
+	IRequest::cancel();
 }

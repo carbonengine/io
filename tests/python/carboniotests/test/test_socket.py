@@ -7195,6 +7195,35 @@ class PacketReceiveOOBTest(SocketTCPTest):
         for i in range(self.num_messages - 1):
             receive_channel.receive()
 
+    def test_packetrecvoob_does_not_crash_on_closed_connection(self):
+        import scheduler
+
+        client_connection_channel = scheduler.channel()
+        server_connection_channel = scheduler.channel()
+        receive_channel = scheduler.channel()
+
+        scheduler.tasklet(self._connect)(client_connection_channel)
+        scheduler.tasklet(self._accept)(server_connection_channel)
+
+        client_connection = client_connection_channel.receive()
+        server_connection = server_connection_channel.receive()
+
+        def _receive(connection, channel):
+            channel.send(connection.recvpacketoob()[0])
+
+        for i in range(self.num_messages):
+            scheduler.tasklet(_receive)(server_connection, receive_channel)
+
+        client_connection.sendpacket(MSG)
+        self.assertEqual(receive_channel.receive(), MSG)
+
+        # Outstanding requests should break from execution once the connection is closed
+        client_connection.close()
+        server_connection.close()
+        socket.dispatch()
+        for i in range(self.num_messages - 1):
+            receive_channel.receive()
+
     def test_EOF_returns_closing_packet(self):
         import scheduler
 
