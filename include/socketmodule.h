@@ -315,6 +315,7 @@ typedef union sock_addr {
    arguments properly. */
 
 typedef struct uv_handle_s uv_handle_t; // forward declare
+typedef struct uv_loop_s uv_loop_t; // forward declare
 typedef struct PySocketSockObject_t {
     PyObject_HEAD
     SOCKET_T sock_fd;           /* Socket file descriptor */
@@ -395,6 +396,7 @@ typedef struct {
     int (*format_packet)(char* buf, const char* data, const uint32_t dataLen, const char* OOBData, const uint32_t OOBLen);
     int (*send_formatted_packet)(const long long fd, const char* data, const unsigned int len);
     int (*send_packet)(const long long fd, const char* data, const unsigned int len, const char* OOBData, const unsigned int OOBLen);
+	uv_loop_t* (*get_uv_loop)();
 } PySocketModule_APIObject;
 
 #define PySocketModule_ImportModuleAndAPI() PyCapsule_Import(PySocket_CAPSULE_NAME, 1)
