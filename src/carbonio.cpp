@@ -1642,6 +1642,7 @@ void AugmentSocketAPI( PySocketModule_APIObject* apiObject )
 	apiObject->format_packet = FormatPacket;
 	apiObject->send_formatted_packet = SendFormattedPacket;
 	apiObject->send_packet = SendPacket;
+	apiObject->get_uv_loop = GetUvLoop;
 }
 
 bool StreamPacketReceiveRequest::readHeader( char* src )
