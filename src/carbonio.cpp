@@ -1772,9 +1772,6 @@ PyObject* StreamPacketReceiveRequest::execute()
 {
 	acquireReceive("StreamPacketReceiveRequest");
 	ON_BLOCK_EXIT([&]{releaseReceive("StreamPacketReceiveRequest");});
-	auto* data = handleData();
-
-	auto sequenceNumber = data->packetNumber++;
 
 	auto ret = startTimeout();
 	if( ret != Py_None )
@@ -1815,6 +1812,8 @@ PyObject* StreamPacketReceiveRequest::execute()
 		// closing packet received, signal connection closed
 		packet = PyTuple_Pack( 3, Py_None, Py_None, PyLong_FromLong( 0 ) );
 	} else {
+		auto* data = handleData();
+		auto sequenceNumber = data->packetNumber++;
 		packet = PyTuple_Pack( 3, PyBytes_FromStringAndSize( m_payload, packetSize ), PyBytes_FromStringAndSize( m_oobData, m_oobDataLen ), PyLong_FromSize_t( sequenceNumber ) );
 	}
 
