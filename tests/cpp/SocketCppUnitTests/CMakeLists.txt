@@ -19,7 +19,7 @@ target_include_directories(SocketCppUnitTests
 target_link_libraries(SocketCppUnitTests
         PRIVATE
         GTest::GTest
-        libuv::uv_a
+        libuv::uv
         Python
         ccp::log
         CcpCore

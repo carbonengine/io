@@ -41,7 +41,7 @@ target_precompile_headers(_socket PRIVATE
 )
 target_link_libraries(_socket
         PRIVATE
-        libuv::uv_a
+        libuv::uv
         ccp::log
         CcpCore
         Python
