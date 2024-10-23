@@ -1,3 +1,19 @@
+import sys
+
+# Patch carbon-io exports
+import _carbonsocket
+import _carbonssl
+import carbonselect
+sys.modules['_socket'] = _carbonsocket
+sys.modules['_ssl'] = _carbonssl
+sys.modules['select'] = carbonselect
+
+# Reload socket module with patched _socket module
+from importlib import reload
+if 'socket' in sys.modules:
+    import socket
+    reload(socket)
+
 import unittest
 import socket
 import scheduler
