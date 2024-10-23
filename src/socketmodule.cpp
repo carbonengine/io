@@ -10112,7 +10112,7 @@ __attribute__((visibility("default")))
 #endif
 
 PyMODINIT_FUNC
-PyInit__socket(void)
+PyInit__carbonsocket(void)
 {
     if ( InitUvLoop() != 0 ) {
         return nullptr;

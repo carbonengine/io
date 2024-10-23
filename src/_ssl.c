@@ -6581,7 +6581,7 @@ static struct PyModuleDef _sslmodule_def = {
 __attribute__((visibility("default")))
 #endif
 PyMODINIT_FUNC
-PyInit__ssl(void)
+PyInit__carbonssl(void)
 {
 	if ( InitScheduler() == 0 )
 	{

@@ -2801,7 +2801,7 @@ static struct PyModuleDef selectmodule = {
 };
 
 PyMODINIT_FUNC
-PyInit_select(void)
+PyInit_carbonselect(void)
 {
     return PyModuleDef_Init(&selectmodule);
 }

@@ -56,6 +56,7 @@ set_target_properties(_socket
         PROPERTIES
         DEBUG_POSTFIX ""
         INTERNAL_POSTFIX ""
+        OUTPUT_NAME _carbonsocket
 )
 
 get_target_property(SCHEDULER_INCLUDE_DIR Scheduler INTERFACE_INCLUDE_DIRECTORIES)
@@ -123,6 +124,7 @@ set_target_properties(_ssl
         PROPERTIES
         DEBUG_POSTFIX ""
         INTERNAL_POSTFIX ""
+        OUTPUT_NAME _carbonssl
 )
 target_include_directories(_ssl
         PUBLIC
@@ -140,7 +142,7 @@ set_target_properties(_select
         PROPERTIES
         DEBUG_POSTFIX ""
         INTERNAL_POSTFIX ""
-        OUTPUT_NAME select
+        OUTPUT_NAME carbonselect
 )
 get_target_property(_SOURCES _select SOURCES)
 source_group("_select" FILES
