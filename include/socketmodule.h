@@ -227,7 +227,7 @@ extern "C" {
 #endif
 
 /* Python module and C API name */
-#define PySocket_MODULE_NAME    "_socket"
+#define PySocket_MODULE_NAME    "_carbonsocket"
 #define PySocket_CAPI_NAME      "CAPI"
 #define PySocket_CAPSULE_NAME   PySocket_MODULE_NAME "." PySocket_CAPI_NAME
 

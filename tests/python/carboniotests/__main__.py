@@ -1,3 +1,16 @@
+import sys
+
+# Patch carbon-io exports
+import _carbonsocket
+import _carbonssl
+import carbonselect
+sys.modules['_socket'] = _carbonsocket
+sys.modules['_ssl'] = _carbonssl
+sys.modules['select'] = carbonselect
+
+if 'socket' in sys.modules:
+    raise RuntimeError("Socket module should not be loaded before patching `carbon-io` exports")
+
 import unittest
 import socket
 import scheduler
