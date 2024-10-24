@@ -8,11 +8,8 @@ sys.modules['_socket'] = _carbonsocket
 sys.modules['_ssl'] = _carbonssl
 sys.modules['select'] = carbonselect
 
-# Reload socket module with patched _socket module
-from importlib import reload
 if 'socket' in sys.modules:
-    import socket
-    reload(socket)
+    raise RuntimeError("Socket module should not be loaded before patching `carbon-io` exports")
 
 import unittest
 import socket
