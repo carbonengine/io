@@ -5672,9 +5672,12 @@ PyDoc_STRVAR( recvpacketoob_doc,
 			  "recvpacketoob()\n\
 \n\
 Recieve a single packet/oob data from the socket, which has been sent with\n\
-sendpacket. Returns a tuple (packet, oob, sequence) where 'oob' can be None\n\
-and 'sequence' is a continuously growing index representing the sequence\n\
-of packes received on the socket.");
+sendpacket.\n\
+\n\
+:return: a tuple (packet, oob, sequence) where data is bytes, 'oob' can be bytes or None \
+and 'sequence' is a continuously growing index representing the sequence \
+of packes received on the socket.\n\
+:rtype: tuple");
 
 static PyObject *sock_sendpacket(PySocketSockObject *s, PyObject *args)
 {
@@ -5708,7 +5711,12 @@ PyDoc_STRVAR(sendpacket_doc,
 \n\
 Send a packet to the socket, prepended with a simple internal header.\n\
 This calls send() repeatedly until all data is sent.\n\
-If an error occurs, it's impossible to tell how much data has been sent.");
+If an error occurs, it's impossible to tell how much data has been sent.\n\
+\n\
+:param data: A formatted macho packet\n\
+:type data: bytes\n\
+:return: 0 when the send succeeds. Error code when it fails.\n\
+:rtype: int");
 
 static PyObject *sock_setblockingsend(PySocketSockObject *s, PyObject *args)
 {
@@ -5745,9 +5753,12 @@ PyDoc_STRVAR(setblockingsend_doc,
 			  "setblockingsend(flag)\n\
 \n\
 Sets or clears the blocking send flag on the stackless socket.\n\
-When clear, send operations return immediately withoug blocking, \n\
-but then no return values are available.\n\
-Returns the old value of the flag.  Call with no arguments to query..");
+When clear, send operations return immediately without blocking, \n\
+but then no return values are available. Call with no arguments to query.\n\n\
+:param flag: (Optional), the new value for the blocking send flag.\n\
+:type flag: bool\n\
+:return: the old value of the flag.\n\
+:rtype: bool");
 
 void add_socket_to_set( uv_handle_t* handle, void* arg )
 {
@@ -5784,7 +5795,8 @@ static PyObject* socket_getsockets( PyObject* self, PyObject* )
 PyDoc_STRVAR( socket_getsockets_doc,
 			  "getsockets()\n\
 \n\
-Return a tuple containing sockets managed by libuv that live on the current thread" );
+:return: Sockets managed by libuv that live on the current thread\n\
+:rtype: tuple" );
 
 static PyObject* socket_getstats(PyObject* self, PyObject*)
 {
@@ -5794,7 +5806,8 @@ static PyObject* socket_getstats(PyObject* self, PyObject*)
 PyDoc_STRVAR(socket_getstats_doc,
 			  "getstats()\n\
 \n\
-Return usage statsistics for all sockets");
+:return: Usage statistics for all sockets\n\
+:rtype: dict");
 
 static PyObject *sock_setzerobytereads(PySocketSockObject *s, PyObject *args)
 {
@@ -5810,8 +5823,16 @@ PyDoc_STRVAR(setzerobytereads_doc,
 \n\
 Sets or clears the flag for the use of zero byte reads.\n\
 This can be used to handle a high number of connections\n\
-on windows.\n\
-The default is true.  Call with no arguments to query..");
+on Windows.\n\
+The default is true.  Call with no arguments to query.\n\
+\n\
+:param flag: The new value for the zero byte reads flag\n\
+:type flag: bool\n\
+:return: The previous value of the flag \n\
+:rtype: bool\n\
+\n\
+.. deprecated:: 1.0.0\n\
+   This functionality is no longer required since we use libUV. Calling this no longer has any effect.");
 
 static PyObject* sock_setmaxpacketsize(PySocketSockObject *s, PyObject *args)
 {
@@ -5844,7 +5865,12 @@ PyDoc_STRVAR(setmaxpacketsize_doc,
 \n\
 Sets the maximum datasize sent or received with sendpacket\n\
 and recvpacket.  Returns the old value.\n\
-The default is 1Mb.  Call with no arguments to query..");
+The default is 1Mb.  Call with no arguments to query.\n\
+\n\
+:param length: The new maximum packet size in bytes\n\
+:type length: int\n\
+:return: the previous maximum packet size in bytes\n\
+:rtype: int");
 
 /* CCP Extensions end */
 
@@ -8344,6 +8370,13 @@ PyObject* socket_dispatch(PyObject*, PyObject*) {
 	Py_RETURN_NONE;
 }
 
+PyDoc_STRVAR(socket_dispatch_doc,
+"dispatch()\n\
+\n\
+Tick the network event loop once. This unblocks any IO blocked tasklets on the current thread that have completed their blocking IO operations.\
+This will also dispatch events for any external modules that may have retrieved the uv_loop through the C API.\n\n\
+:returns: None");
+
 /* List of functions exported by this module. */
 
 static PyMethodDef socket_methods[] = {
@@ -8435,7 +8468,7 @@ static PyMethodDef socket_methods[] = {
      METH_VARARGS, CMSG_SPACE_doc},
 #endif
 #endif
-	{ "dispatch", socket_dispatch, METH_NOARGS, "Tick the network event loop once"},
+	{ "dispatch", socket_dispatch, METH_NOARGS, socket_dispatch_doc },
 	{ "getsockets", socket_getsockets, METH_NOARGS, socket_getsockets_doc },
 	{ "getstats", socket_getstats, METH_NOARGS, socket_getstats_doc},
     {NULL,                      NULL}            /* Sentinel */

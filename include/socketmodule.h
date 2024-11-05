@@ -383,22 +383,81 @@ typedef struct PySocketSockObject_t {
 
 /* C API for usage by other Python modules.
  * Always add new things to the end for binary compatibility. */
+
+/**
+*   A callback method that gets called with data from received packets before they get received on the Python side.
+*   If one of these returns a truthy value, the packet gets "swallowed", and will not be received through the Python
+*   `recvpacketoob` call.
+*/
 typedef int(*OobDataCallback)(long long descriptor, const char* data, int len, const char* OOBdata, int OOBLen );
 
 typedef struct {
     PyTypeObject *Sock_Type;
     PyObject *error;
     PyObject *timeout_error;
+
+    /**
+    *   @brief Unblock any IO blocked tasklets that have finished their blocking operations.
+    */
     void (*dispatch)();
+
+    /**
+    *  @brief Add a callback for handling packets when they are received. The callbacks will get called in order before the packet gets returned to Python.
+    *  If one of the callbacks returns `true`, no further callbacks will be called and the packet will not make its way to the receiver,
+    *  which will continue to wait for the next packet.
+    *  @param OobDataCallback the callback to register
+    */
+
     void (*add_oob_data_callback)(OobDataCallback);
+    /**
+    *  @brief Remove a callback that was added using `add_oob_data_callback`. The callback will no longer get called to process received packets.
+    *  @param OobDataCallback the callback to remove
+    */
     void (*remove_oob_data_callback)(OobDataCallback);
-	// these are supposed to bypass Python!
+
+    /**
+    *  @brief Formats a macho packet containing the data as well as any out-of-band data.
+    *  The results are placed inside the buffer pointed to by the `buf` parameter.
+    *  The buffer is assumed to be large enough to hold the formatted packet.
+    *  @param buf The buffer into which to place the formatted packet
+    *  @param data The data to place into the packet
+    *  @param data The length of the data to place into the packet in bytes.
+    *  @param OOBData out-of-band data to place into the packet, or nullptr if there is no OOBData.
+    *  @param OOBDataLen Length of the out-of-band data in bytes.
+    *  @returns The size of the formatted packet in bytes
+    */
     int (*format_packet)(char* buf, const char* data, const uint32_t dataLen, const char* OOBData, const uint32_t OOBLen);
+
+    /**
+    *  @brief Sends a macho packet. Assumes the packet is already formatted according to FormatPacket.
+    *  @param fd The file descriptor of the socket to use.
+    *  @param data A formatted macho packet
+    *  @param len The length of the packet to send in bytes
+    */
     int (*send_formatted_packet)(const long long fd, const char* data, const unsigned int len);
+
+    /**
+    *  @brief Creates a formatted macho packet, and sends it.
+    *  @param fd The file descriptor of the socket to use.
+    *  @param data A formatted macho packet
+    *  @param len The length of the data to send in bytes
+    *  @param OOBData out-of-band data to place into the packet, or nullptr if there is no OOBData.
+    *  @param OOBDataLen Length of the out-of-band data in bytes.
+    */
     int (*send_packet)(const long long fd, const char* data, const unsigned int len, const char* OOBData, const unsigned int OOBLen);
+
+    /**
+    *  @returns a pointer to the UV loop used for managing the socket IO events.
+    *  @note Allows other libraries to share the UV loop for potentially improved performance.
+    */
 	uv_loop_t* (*get_uv_loop)();
+
 } PySocketModule_APIObject;
 
+
+/**
+*  Import the module and return a pointer to the C [capsule](https://docs.python.org/3.12/c-api/capsule.html) object.
+*/
 #define PySocketModule_ImportModuleAndAPI() PyCapsule_Import(PySocket_CAPSULE_NAME, 1)
 
 #ifdef __cplusplus
