@@ -3040,6 +3040,12 @@ sock_setblocking(PySocketSockObject *s, PyObject *arg)
         return NULL;
 
     s->sock_timeout = _PyTime_FromSeconds(block ? -1 : 0);
+	if( is_managed_by_libuv(s) )
+	{
+		// Sockets managed by LibUV should always be in nonblocking mode
+		// except when performing operations that can not be performed asynchronously.
+		block = 0;
+	}
     if (internal_setblocking(s, block) == -1) {
         return NULL;
     }
@@ -3153,6 +3159,12 @@ sock_settimeout(PySocketSockObject *s, PyObject *arg)
         ``> 0``              ``True``              non-blocking
     */
 
+	if( is_managed_by_libuv( s ) )
+	{
+		// Sockets managed by LibUV should always be in nonblocking mode
+		// except when performing operations that can not be performed asynchronously.
+		block = 0;
+	}
 	if( internal_setblocking( s, block ) == -1 )
 	{
         return NULL;
