@@ -4897,7 +4897,6 @@ sock_sendall(PySocketSockObject *s, PyObject *args)
 		{
 			PyErr_BadInternalCall();
 			LogError( "StreamSendRequest::send failed to convert Python status" );
-			return nullptr;
 		}
 		if( status < 0 )
 		{
