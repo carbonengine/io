@@ -5590,6 +5590,15 @@ class TestExceptions(unittest.TestCase):
         with self.assertRaises(OSError):
             sock.setblocking(False)
 
+    def testSendOnClosedSocket(self):
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM, 0)
+        sock.close()
+        socket.dispatch()
+        with self.assertRaises(OSError):
+            sock.send(MSG)
+        with self.assertRaises(OSError):
+            sock.sendall(MSG)
+
 
 @unittest.skipUnless(sys.platform == 'linux', 'Linux specific test')
 class TestLinuxAbstractNamespace(unittest.TestCase):
