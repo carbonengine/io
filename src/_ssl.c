@@ -934,7 +934,7 @@ long bio_write_callback( BIO* b, int oper, const char* argp, size_t len, int arg
 			pyErrno = PyObject_GetAttrString( val, "errno" );
 		}
 		PyErr_Restore( exc, val, tb );
-		if( pyErrno )
+		if( pyErrno && PyLong_Check( pyErrno ) )
 		{
 			int err = PyLong_AsLong( pyErrno );
 			Py_DECREF(pyErrno);
