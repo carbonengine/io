@@ -195,8 +195,18 @@ void* CreateHandleData()
 
 void PyErr_FromUvErr( int uv_status )
 {
+	if( PyErr_Occurred() )
+	{
+		// Importing the errno module will fail if a Python exception has been raised.
+		// Instead of clearing the exception, let's bubble up the original error.
+		return;
+	}
 	auto errnoModule = PyImport_ImportModule("errno");
 	auto errnoObj = PyObject_GetAttrString( errnoModule, uv_err_name( uv_status ) );
+	if( !errnoObj )
+	{
+		return;
+	}
 	errno = PyLong_AsLong( errnoObj );
 	PyObject* exc_type = PyExc_OSError;
 	if ( errno == EWOULDBLOCK ) {
