@@ -36,6 +36,8 @@
 
 #include "_ssl.h"
 
+#include <uv.h>
+
 /* Redefined below for Windows debug builds after important #includes */
 #define _PySSL_FIX_ERRNO
 
@@ -1183,7 +1185,7 @@ _ssl__SSLSocket_do_handshake_impl(PySSLSocket *self)
             PyErr_SetString(get_state_sock(self)->PySSLErrorObject,
                             ERRSTR("Underlying socket too large for select()."));
             goto error;
-        } else if (sockstate == SOCKET_IS_NONBLOCKING || sockstate == SOCKET_IS_BLOCKING) {
+        } else if (sockstate == SOCKET_IS_NONBLOCKING || sockstate == SOCKET_IS_BLOCKING || sockstate == SOCKET_HAS_BEEN_CLOSED) {
             break;
         }
     } while (err.ssl == SSL_ERROR_WANT_READ ||
@@ -2448,6 +2450,16 @@ PySSL_select(PySocketSockObject *s, int writing, _PyTime_t timeout)
     fd_set fds;
     struct timeval tv;
 #endif
+	if( s && s->uv_handle )
+	{
+		// For sockets managed by libuv either we have a handle, which is handled here
+		// or the file descriptor is invalid, which gets handled below.
+		if( uv_is_closing( s->uv_handle ) )
+		{
+			return SOCKET_HAS_BEEN_CLOSED;
+		}
+		return SOCKET_IS_NONBLOCKING;
+	}
 
     /* Nothing to do unless we're in timeout mode (not non-blocking) */
     if ((s == NULL) || (timeout == 0))
@@ -2620,7 +2632,7 @@ _ssl__SSLSocket_write_impl(PySSLSocket *self, Py_buffer *b)
             PyErr_SetString(get_state_sock(self)->PySSLErrorObject,
                             "Underlying socket has been closed.");
             goto write_error;
-        } else if (sockstate == SOCKET_IS_NONBLOCKING || sockstate == SOCKET_IS_BLOCKING) {
+        } else if (sockstate == SOCKET_IS_NONBLOCKING || sockstate == SOCKET_IS_BLOCKING || sockstate == SOCKET_HAS_BEEN_CLOSED) {
             break;
         }
     } while (err.ssl == SSL_ERROR_WANT_READ ||
@@ -2781,7 +2793,7 @@ _ssl__SSLSocket_read_impl(PySSLSocket *self, Py_ssize_t len,
             PyErr_SetString(PyExc_TimeoutError,
                             "The read operation timed out");
             goto error;
-        } else if (sockstate == SOCKET_IS_NONBLOCKING || sockstate == SOCKET_IS_BLOCKING) {
+        } else if (sockstate == SOCKET_IS_NONBLOCKING || sockstate == SOCKET_IS_BLOCKING || sockstate == SOCKET_HAS_BEEN_CLOSED) {
             break;
         }
     } while (err.ssl == SSL_ERROR_WANT_READ ||
@@ -2835,7 +2847,11 @@ _ssl__SSLSocket_shutdown_impl(PySSLSocket *self)
 
     if (sock != NULL) {
         /* Guard against closed socket */
-        if ((((PyObject*)sock) == Py_None) || (sock->sock_fd == INVALID_SOCKET)) {
+    	// A socket closed through `socket.close()` on the module level
+    	// will not have its sock_fd attribute set to INVALID_SOCKET.
+    	// This behavior is covered by the CPython tests, so instead of changing those,
+    	// add the extra check to see if the uv handle is closing.
+        if ((((PyObject*)sock) == Py_None) || (sock->sock_fd == INVALID_SOCKET || sock->uv_handle && uv_is_closing( sock->uv_handle ))) {
             _setSSLError(get_state_sock(self),
                          "Underlying socket connection gone",
                          PY_SSL_ERROR_NO_SOCKET, __FILE__, __LINE__);
