@@ -4793,6 +4793,12 @@ sock_send_impl(PySocketSockObject *s, void *data)
 
 PyObject* uv_sendall_impl(PySocketSockObject* s, char* buf, Py_ssize_t len, int flags)
 {
+	if( s->sock_fd == INVALID_SOCKET || !is_valid_uv_handle( s->uv_handle ) )
+	{
+		errno = EBADF;
+		PyErr_SetFromErrno( PyExc_OSError );
+		return nullptr;
+	}
 	auto handleData = reinterpret_cast<HandleData*>(s->uv_handle->data);
 	auto request = std::make_shared<StreamSendRequest>(s, buf, len, flags, handleData->blockingSend);
 	auto status = request->execute();
@@ -4882,6 +4888,10 @@ sock_sendall(PySocketSockObject *s, PyObject *args)
 	if( is_managed_by_libuv( s ) )
 	{
 		auto py_status = uv_sendall_impl(s, buf, len, flags);
+		if( !py_status )
+		{
+			return nullptr;
+		}
 		auto status = PyLong_AsLong( py_status );
 		if( status == -1 && PyErr_Occurred() )
 		{
