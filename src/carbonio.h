@@ -133,9 +133,9 @@ public:
 	virtual void onCallback( ICallbackParams* params ) = 0;
 
 protected:
-	void acquireReceive(const char*);
+	bool acquireReceive(const char*);
 	void releaseReceive(const char*);
-	void acquireSend(const char*);
+	bool acquireSend(const char*);
 	void releaseSend(const char*);
     void associateWithHandleData();
 
@@ -152,6 +152,9 @@ protected:
 	// operations to complete.
 	PyChannelObject* m_channel{nullptr};
 
+	// Channels used for acquireSend / acquireReceive which allows tasklets to queue up to send / receive data.
+	// When it's OK to receive data Py_True is sent over the channel.
+	// In the case where the socket has been closed and the uv_handle has been invalidated, Py_False is sent instead.
 	std::shared_ptr<PyChannelObject> m_requestQueue{nullptr};
 	std::shared_ptr<PyChannelObject> m_sendQueue{nullptr};
 };

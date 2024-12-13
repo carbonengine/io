@@ -128,9 +128,8 @@ void cleanup_uv_handle( uv_handle_t* uv_handle )
 		// on an invalid handle once they finally wake up.
 		while( g_scheduler->PyChannel_GetBalance( data->receiveQueue.get() ) < 0 )
 		{
-			// The receive tasklets need to finish before the handle gets invalidated.
-			g_scheduler->PyChannel_SetPreference( data->receiveQueue.get(), PREFER_RECEIVER );
-			g_scheduler->PyChannel_Send( data->receiveQueue.get(), Py_None);
+			// Let the receive tasklets know the handle has been invalidated.
+			g_scheduler->PyChannel_Send( data->receiveQueue.get(), Py_False);
 		}
 		delete data;
 	}
@@ -320,30 +319,43 @@ IRequest::IRequest( PySocketSockObject* socket ) : m_handle( socket->uv_handle )
 	g_scheduler->PyChannel_SetPreference( m_requestQueue.get(), PREFER_SENDER );
 }
 
-void IRequest::acquireReceive(const char* context)
+bool IRequest::acquireReceive(const char* context)
 {
 	auto keepAlive = shared_from_this();
 
-	// there's already an outstanding request associated with the socket, let's wait until we can perform our operation
+	// There's already an outstanding request associated with the socket, let's wait until we can perform our operation.
 	while ( handleData()->receiving ) {
-		// something is already reading, so let's try again at a later point in time
+		// Something is already reading, so let's try again at a later point in time.
 		auto sentinel = g_scheduler->PyChannel_Receive( m_requestQueue.get() );
 		if ( !sentinel ) {
-			LogError("Oh boy");
+			LogError("Unexpected error received over request queue.");
+			return false;
+		}
+		else if( Py_IsFalse( sentinel ) )
+		{
+			// The socket has been closed and the uv_handle is invalid.
+			return false;
+		}
+		else if( !Py_IsTrue( sentinel ) )
+		{
+			CCP_LOGERR("Unexpected sentinel value sent over request queue");
+			return false;
 		}
 
-		// There may be multiple tasklets waiting for waking up, but the underlying socket - and thus uv_handle - may
-		// be in the process of closing. In that case, simply early out.
+		// In between the sender putting the sentinel on the channel and the time this gets run
+		// the underlying socket - and thus uv_handle - may have started the process of closing.
+		// In that case, simply early out.
 		if ( !is_valid_uv_handle( m_handle ) )
 		{
-			return;
+			return false;
 		}
 	}
 	handleData()->receiving = true;
 	handleData()->receiveRequest = this->shared_from_this();
+	return true;
 }
 
-void IRequest::acquireSend( const char* context )
+bool IRequest::acquireSend( const char* context )
 {
 	auto keepAlive = shared_from_this();
 
@@ -352,11 +364,30 @@ void IRequest::acquireSend( const char* context )
 		// something is already reading, so let's try again at a later point in time
 		auto sentinel = g_scheduler->PyChannel_Receive( m_sendQueue.get() );
 		if ( !sentinel ) {
-			LogError("Oh boy");
+			LogError("Unexpected error received over send queue.");
+			return false;
+		}
+		else if( Py_IsFalse( sentinel ) )
+		{
+			// The socket has been closed and the uv_handle is invalid.
+			return false;
+		}
+		else if( !Py_IsTrue( sentinel ) )
+		{
+			CCP_LOGERR("Unexpected sentinel value sent over send queue");
+		}
+
+		// In between the sender putting the sentinel on the channel and the time this gets run
+		// the underlying socket - and thus uv_handle - may have started the process of closing.
+		// In that case, simply early out.
+		if ( !is_valid_uv_handle( m_handle ) )
+		{
+			return false;
 		}
 	}
 	handleData()->sending = true;
 	handleData()->request = this->shared_from_this();
+	return true;
 }
 
 
@@ -376,7 +407,7 @@ void IRequest::releaseReceive(const char* context)
 
 	auto balance = g_scheduler->PyChannel_GetBalance( m_requestQueue.get() );
 	if ( balance < 0 ) {
-		if ( g_scheduler->PyChannel_Send( m_requestQueue.get(), Py_None ) < 0 ) {
+		if ( g_scheduler->PyChannel_Send( m_requestQueue.get(), Py_True ) < 0 ) {
 			LogError( "IRequest::releaseReceive() failed to signal waiting handlers" );
 			PyErr_Format( PyExc_SystemError, "IRequest::releaseReceive() failed to signal waiting handlers" );
 		}
@@ -389,7 +420,7 @@ void IRequest::releaseSend(const char* context)
 	handleData()->request = nullptr;
 	auto balance = g_scheduler->PyChannel_GetBalance( m_sendQueue.get() );
 	if ( balance < 0 ) {
-		if ( g_scheduler->PyChannel_Send( m_sendQueue.get(), Py_None ) < 0 ) {
+		if ( g_scheduler->PyChannel_Send( m_sendQueue.get(), Py_True ) < 0 ) {
 			LogError( "IRequest::releaseSend() failed to signal waiting handlers" );
 			PyErr_Format( PyExc_SystemError, "IRequest::releaseSend() failed to signal waiting handlers" );
 		}
@@ -473,7 +504,10 @@ void IRequest::clearTimeout()
 
 PyObject* StreamRecvRequest::execute()
 {
-	acquireReceive("StreamRecvRequest");
+	if( !acquireReceive( "StreamRecvRequest" ) )
+	{
+		return PyBytes_FromString( "" );
+	}
 	ON_BLOCK_EXIT([&]{releaseReceive("StreamRecvRequest");});
 	auto* data = handleData();
 
@@ -775,7 +809,16 @@ void SendError(PyChannelObject* channel, std::string_view msg)
 
 PyObject* UdpRecvRequest::execute()
 {
-	acquireReceive("UdpRecvRequest");
+	if( !acquireReceive( "UdpRecvRequest" ) )
+	{
+		auto buf = PyBytes_FromString( "" );
+		ON_BLOCK_EXIT([buf]{Py_XDECREF( buf );});
+		if(!buf)
+		{
+			return nullptr;
+		}
+		return PyTuple_Pack( 2, buf, m_addr );
+	}
 	ON_BLOCK_EXIT([&]{releaseReceive("UdpRecvRequest");});
 	auto ret = startTimeout();
 	if( ret != Py_None )
@@ -1780,7 +1823,11 @@ bool StreamPacketReceiveRequest::needMore() {
 
 PyObject* StreamPacketReceiveRequest::execute()
 {
-	acquireReceive("StreamPacketReceiveRequest");
+	if( !acquireReceive( "StreamPacketReceiveRequest" ) )
+	{
+		// Socket has most likely been closed, signal connection closed.
+		return PyTuple_Pack( 3, Py_None, Py_None, PyLong_FromLong( 0 ) );
+	}
 	ON_BLOCK_EXIT([&]{releaseReceive("StreamPacketReceiveRequest");});
 
 	auto ret = startTimeout();
