@@ -539,8 +539,16 @@ PyObject* StreamRecvRequest::execute()
 			return nullptr;
 		}
 		auto sentinel = g_scheduler->PyChannel_Receive( m_channel );
-		if( !sentinel )
+		if( !sentinel || Py_IsFalse( sentinel ) )
 		{
+			errno = ECONNRESET;
+			PyErr_SetFromErrno( PyExc_OSError );
+			return nullptr;
+		}
+		else if( !Py_IsTrue( sentinel ) )
+		{
+			CCP_LOGERR( "StreamRecvRequest received unexpected sentinel value" );
+			PyErr_BadInternalCall();
 			return nullptr;
 		}
 	}
@@ -579,7 +587,7 @@ void StreamRecvRequest::onCallback( ICallbackParams* callbackParams )
 			sendError( "OnReceive failed to read data." );
 		}
 		else {
-			if ( g_scheduler->PyChannel_Send( m_channel, Py_None ) < 0 ) {
+			if ( g_scheduler->PyChannel_Send( m_channel, Py_True ) < 0 ) {
 				LogError( "StreamRecvRequest::onReceive failed to signal sentinel" );
 				PyErr_Clear();
 			}
@@ -588,7 +596,7 @@ void StreamRecvRequest::onCallback( ICallbackParams* callbackParams )
 	if ( nread > 0 ) {
 		m_received_len += nread;
 		uv_read_stop( handle() );
-		if ( g_scheduler->PyChannel_Send( m_channel, Py_None ) < 0 ) {
+		if ( g_scheduler->PyChannel_Send( m_channel, Py_True ) < 0 ) {
 			LogError( "StreamRecvRequest::onReceive failed to signal sentinel" );
 			PyErr_Clear();
 		}
@@ -693,7 +701,7 @@ void StreamRecvRequest::cancel()
 	// Check the balance, as this could be called after the request has finished executing.
 	if( g_scheduler->PyChannel_GetBalance( m_channel ) < 0 )
 	{
-		if( g_scheduler->PyChannel_Send( m_channel, Py_None ) < 0 )
+		if( g_scheduler->PyChannel_Send( m_channel, Py_False ) < 0 )
 		{
 			LogError( "StreamRecvRequest::cancel failed to signal sentinel" );
 		}
@@ -846,8 +854,16 @@ PyObject* UdpRecvRequest::execute()
 	}
 
 	auto sentinel = g_scheduler->PyChannel_Receive( m_channel );
-	if( !sentinel )
+	if( !sentinel || Py_IsFalse( sentinel ) )
 	{
+		errno = ECONNRESET;
+		PyErr_SetFromErrno( PyExc_OSError );
+		return nullptr;
+	}
+	else if( !Py_IsTrue( sentinel ) )
+	{
+		CCP_LOGERR( "UdpRecvRequest received unexpected sentinel value" );
+		PyErr_BadInternalCall();
 		return nullptr;
 	}
 
@@ -968,7 +984,7 @@ void UdpRecvRequest::onCallback( ICallbackParams* callbackParams )
 
 	// no more data, let's signal that we're done
 	if (nread == 0) {
-		if ( g_scheduler->PyChannel_Send( m_channel, Py_None ) < 0 )
+		if ( g_scheduler->PyChannel_Send( m_channel, Py_True ) < 0 )
 		{
 			LogError( "UdpRecvRequest::onRead failed sending sentinel value on channel" );
 			PyErr_Clear();
@@ -994,7 +1010,7 @@ void UdpRecvRequest::cancel()
 	// after the request has finished executing.
 	if( g_scheduler->PyChannel_GetBalance( m_channel ) < 0 )
 	{
-		if( g_scheduler->PyChannel_Send( m_channel, Py_None ) < 0 )
+		if( g_scheduler->PyChannel_Send( m_channel, Py_False ) < 0 )
 		{
 			LogError( "UdpRecvRequest::cancel failed sending sentinel value on channel" );
 		}
@@ -1855,8 +1871,16 @@ PyObject* StreamPacketReceiveRequest::execute()
 		if ( status == 0 )
 		{
 			auto sentinel = g_scheduler->PyChannel_Receive( m_channel );
-			if( !sentinel )
+			if( !sentinel || Py_IsFalse( sentinel ) )
 			{
+				errno = ECONNRESET;
+				PyErr_SetFromErrno( PyExc_OSError );
+				return nullptr;
+			}
+			else if( !Py_IsTrue(sentinel) )
+			{
+				CCP_LOGERR( "StreamPacketReceiveRequest received unexpected sentinel value" );
+				PyErr_BadInternalCall();
 				return nullptr;
 			}
 			if (m_eof)
@@ -1931,7 +1955,7 @@ void StreamPacketReceiveRequest::onCallback( ICallbackParams* callbackParams )
 			stopRead();
 			// Nothing left to read
 			m_eof = true;
-			if ( g_scheduler->PyChannel_Send( m_channel, Py_None ) < 0 ) {
+			if ( g_scheduler->PyChannel_Send( m_channel, Py_True ) < 0 ) {
 				LogError( "StreamRecvRequest::onReceive failed to signal sentinel" );
 				PyErr_Clear();
 			}
@@ -1941,7 +1965,7 @@ void StreamPacketReceiveRequest::onCallback( ICallbackParams* callbackParams )
 		s_bytesReceived += nread;
 		handleData()->bufWritePos += nread;
 		stopRead();
-		if ( g_scheduler->PyChannel_Send( m_channel, Py_None ) < 0 ) {
+		if ( g_scheduler->PyChannel_Send( m_channel, Py_True ) < 0 ) {
 			LogError( "StreamRecvRequest::onReceive failed to signal sentinel" );
 			PyErr_Clear();
 		}
@@ -1951,7 +1975,7 @@ void StreamPacketReceiveRequest::onCallback( ICallbackParams* callbackParams )
 void StreamPacketReceiveRequest::cancel()
 {
 	stopRead();
-	if ( g_scheduler->PyChannel_Send( m_channel, Py_None ) < 0 ) {
+	if ( g_scheduler->PyChannel_Send( m_channel, Py_False ) < 0 ) {
 		LogError( "StreamRecvRequest::onReceive failed to signal sentinel" );
 		PyErr_Clear();
 	}
