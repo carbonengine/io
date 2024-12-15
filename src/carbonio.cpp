@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <atomic>
 #include <mutex>
+#include <set>
 #include <vector>
 
 #include "socketmodule.h"
@@ -32,6 +33,7 @@ typedef unsigned int ULONG;
 #endif
 
 static uv_key_t s_tlsKey;
+static std::set<uv_loop_t*> s_runningLoops;
 
 static std::atomic_size_t s_bytesReceived{0};
 static std::atomic_size_t s_bytesSent{0};
@@ -108,6 +110,16 @@ int InitUvLoop() {
 
 void TickUvLoop()
 {
+	uv_loop_t* loop = GetUvLoop();
+	if(s_runningLoops.find( loop ) != s_runningLoops.end() )
+	{
+		// We could end up here if we block the tasklet during dispatch, but we really shouldn't do that
+		// because uv_run is not reentrant. See: https://docs.libuv.org/en/v1.x/loop.html#c.uv_run
+		CCP_LOGERR("Attempting to run a uv loop that is already running");
+		return;
+	}
+	s_runningLoops.insert( loop );
+	ON_BLOCK_EXIT([loop]{s_runningLoops.erase( loop );});
 	uv_run(GetUvLoop(), UV_RUN_NOWAIT);
 }
 
