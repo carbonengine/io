@@ -115,6 +115,7 @@ source_group("_ssl" FILES
 )
 target_link_libraries(_ssl
         PRIVATE
+        libuv::uv
         Python
         PUBLIC
         OpenSSL::Crypto
