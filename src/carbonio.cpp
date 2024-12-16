@@ -545,9 +545,13 @@ PyObject* StreamRecvRequest::execute()
 			return nullptr;
 		}
 		auto sentinel = g_scheduler->PyChannel_Receive( m_channel );
-		if( !sentinel || Py_IsFalse( sentinel ) )
+		if( !sentinel )
 		{
-			errno = ECONNRESET;
+			return nullptr;
+		}
+		else if( Py_IsFalse( sentinel ) )
+		{
+			errno = ECANCELED;
 			PyErr_SetFromErrno( PyExc_OSError );
 			return nullptr;
 		}
@@ -860,9 +864,13 @@ PyObject* UdpRecvRequest::execute()
 	}
 
 	auto sentinel = g_scheduler->PyChannel_Receive( m_channel );
-	if( !sentinel || Py_IsFalse( sentinel ) )
+	if( !sentinel )
 	{
-		errno = ECONNRESET;
+		return nullptr;
+	}
+	else if( Py_IsFalse( sentinel ) )
+	{
+		errno = ECANCELED;
 		PyErr_SetFromErrno( PyExc_OSError );
 		return nullptr;
 	}
@@ -1877,9 +1885,13 @@ PyObject* StreamPacketReceiveRequest::execute()
 		if ( status == 0 )
 		{
 			auto sentinel = g_scheduler->PyChannel_Receive( m_channel );
-			if( !sentinel || Py_IsFalse( sentinel ) )
+			if( !sentinel )
 			{
-				errno = ECONNRESET;
+				return nullptr;
+			}
+			else if( Py_IsFalse( sentinel ) )
+			{
+				errno = ECANCELED;
 				PyErr_SetFromErrno( PyExc_OSError );
 				return nullptr;
 			}
