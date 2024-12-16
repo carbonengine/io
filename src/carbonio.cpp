@@ -410,20 +410,26 @@ void IRequest::associateWithHandleData()
 
 void IRequest::releaseReceive(const char* context)
 {
+	auto balance = g_scheduler->PyChannel_GetBalance( m_requestQueue.get() );
 	// Only reset the lock and associated request when the uv_handle - and thus socket - isn't in the process of shutting down.
-	if ( is_valid_uv_handle( m_handle ) )
+	if ( !is_valid_uv_handle( m_handle ) )
 	{
-		handleData()->receiving = false;
-		handleData()->receiveRequest = nullptr;
+		while ( balance++ < 0 ) {
+			if ( g_scheduler->PyChannel_Send( m_requestQueue.get(), Py_False ) < 0 ) {
+				LogError( "IRequest::releaseReceive() failed to signal waiting handlers" );
+				PyErr_Format( PyExc_SystemError, "IRequest::releaseReceive() failed to signal waiting handlers" );
+			}
+		}
 	}
 
-	auto balance = g_scheduler->PyChannel_GetBalance( m_requestQueue.get() );
 	if ( balance < 0 ) {
 		if ( g_scheduler->PyChannel_Send( m_requestQueue.get(), Py_True ) < 0 ) {
 			LogError( "IRequest::releaseReceive() failed to signal waiting handlers" );
 			PyErr_Format( PyExc_SystemError, "IRequest::releaseReceive() failed to signal waiting handlers" );
 		}
 	}
+	handleData()->receiving = false;
+	handleData()->receiveRequest = nullptr;
 }
 
 void IRequest::releaseSend(const char* context)
