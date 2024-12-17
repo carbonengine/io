@@ -29,35 +29,15 @@ struct PyObjectDeleter
 };
 
 typedef std::unique_ptr<PyObject, PyObjectDeleter> PyObjectPtr;
-
 struct IRequest;
-struct HandleData
+
+
+// The part of the HandleData that may need to be accessed by requests after the uv_handle has become invalid.
+struct RequestData
 {
-	HandleData();
-	~HandleData();
-
-	// The Python socket object. We do not keep a strong reference to it, so handle with care.
-	PySocketSockObject* socket{nullptr};
-
-	// This channel is for accepting connections.
-	PyChannelObject* channel{nullptr};
-
-	// This will always point to the associated _non-receiving_ request while there is one
-	std::shared_ptr<IRequest> request{nullptr};
-
-	// This will always point to the associated _receiving_ request while there is one
-	std::shared_ptr<IRequest> receiveRequest{nullptr};
-
-	// Receive from this when starting to receive macho packet, send to this when done.
-	std::shared_ptr<PyChannelObject> receiveQueue;
-
-	//
-	std::shared_ptr<PyChannelObject> sendQueue;
-
-	// This backing buffer needs to outlive any potential request so that
-	// we can correctly re-construct multiple `receive()` requests.
-	uv_buf_t buf{};
-
+	RequestData();
+	~RequestData();
+	
 	// When receiving on a socket, libuv returns us more data than might have
 	// been requested by the user. Since the buffer outlives the request, then
 	// we also need to do some bookkeeping on where we are in the buffer.
@@ -69,15 +49,47 @@ struct HandleData
 	// returned to the user yet.
 	ssize_t bufReadPos{0};
 	ssize_t bufWritePos{0};
-
-	bool blockingSend{false};
-	size_t maxPacketSize{1024*1024}; //one megabyte
-
+	
+	// This backing buffer needs to outlive any potential request so that
+	// we can correctly re-construct multiple `receive()` requests.
+	uv_buf_t buf{};
+	
 	// in case the socket deals with packets, it needs to keep track of a packet's sequence number.
 	size_t packetNumber{0};
-
+	
+	// This will always point to the associated _non-receiving_ request while there is one
+	std::shared_ptr<IRequest> request{nullptr};
+	
+	// This will always point to the associated _receiving_ request while there is one
+	std::shared_ptr<IRequest> receiveRequest{nullptr};
+	
+	size_t maxPacketSize{1024*1024}; //one megabyte
+	
 	bool receiving{false};
 	bool sending{false};
+};
+
+
+struct HandleData
+{
+	HandleData();
+	~HandleData();
+
+	// The Python socket object. We do not keep a strong reference to it, so handle with care.
+	PySocketSockObject* socket{nullptr};
+
+	// This channel is for accepting connections.
+	PyChannelObject* channel{nullptr};
+
+	// Receive from this when starting to receive data from the uv_handle, send to this when done.
+	std::shared_ptr<PyChannelObject> receiveQueue;
+
+	// Receive from this when starting to send data using the uv_handle, send to this when done.
+	std::shared_ptr<PyChannelObject> sendQueue;
+	
+	std::shared_ptr<RequestData> requestData{nullptr};
+
+	bool blockingSend{false};
 
 	std::deque<PyObject*> pendingAccepts;
 };
@@ -157,6 +169,12 @@ protected:
 	// In the case where the socket has been closed and the uv_handle has been invalidated, Py_False is sent instead.
 	std::shared_ptr<PyChannelObject> m_requestQueue{nullptr};
 	std::shared_ptr<PyChannelObject> m_sendQueue{nullptr};
+	
+	// The uv handle might close while there is still readable data in the buffer.
+	// When that happens, if we have the required data on hand, we serve it to the reader.
+	// m_requestData should contain whatever part of the HandleData that needs to
+	// outlive the uv_handle until any outstanding requests have finished.
+	std::shared_ptr<RequestData> m_requestData{nullptr};
 };
 
 class IStreamRequest : public IRequest
