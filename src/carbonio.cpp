@@ -129,6 +129,7 @@ void cleanup_uv_handle( uv_handle_t* uv_handle )
 	auto data = reinterpret_cast<HandleData*>( uv_handle->data );
 	if( data )
 	{
+		data->requestData->handle = nullptr; // Invalidate the handle.
 		auto request = data->requestData->request;
 		if ( request ) {
 			request->cancel();
@@ -196,23 +197,37 @@ HandleData::~HandleData()
 }
 
 
-void* CreateHandleData()
+bool CreateHandleData(uv_handle_t* handle)
 {
+	handle->data = nullptr;
 	auto* data = new HandleData;
 	if( data->channel == nullptr )
 	{
 		delete data;
-		return nullptr;
+		return false;
 	}
 	if( data->receiveQueue == nullptr )
 	{
 		Py_DECREF( data->channel );
 		delete data;
-		return nullptr;
+		return false;
 	}
+	
+	if( !data->requestData )
+	{
+		Py_DECREF( data->channel );
+		Py_DECREF( data->receiveQueue.get() );
+		delete data;
+		CCP_LOGERR( "CreateHandleData called without request data" );
+		PyErr_BadInternalCall();
+		return false;
+	}
+		
+	data->requestData->handle = handle;
 
 	g_scheduler->PyChannel_SetPreference( data->receiveQueue.get(), PREFER_SENDER );
-	return data;
+	handle->data = data;
+	return true;
 }
 
 void PyErr_FromUvErr( int uv_status )
@@ -328,7 +343,7 @@ void SetTimeoutErrorType( PyObject* value )
 	s_timeout_error = value;
 }
 
-IRequest::IRequest( PySocketSockObject* socket ) : m_handle( socket->uv_handle ), m_timeout_nanoseconds(socket->sock_timeout), m_requestQueue( handleData()->receiveQueue ), m_sendQueue( handleData()->sendQueue )
+IRequest::IRequest( PySocketSockObject* socket ) : m_timeout_nanoseconds(socket->sock_timeout)
 {
 	m_channel = g_scheduler->PyChannel_New( nullptr );
 	if( !m_channel )
@@ -339,8 +354,11 @@ IRequest::IRequest( PySocketSockObject* socket ) : m_handle( socket->uv_handle )
 	{
 		g_scheduler->PyChannel_SetPreference( m_channel, PREFER_SENDER );
 	}
+	auto data = reinterpret_cast<HandleData*>(socket->uv_handle->data);
+	m_requestData = data->requestData;
+	m_requestQueue = handleData()->receiveQueue;
+	m_sendQueue = handleData()->sendQueue;
 	g_scheduler->PyChannel_SetPreference( m_requestQueue.get(), PREFER_SENDER );
-	m_requestData = handleData()->requestData;
 }
 
 bool IRequest::acquireReceive(const char* context)
@@ -369,7 +387,7 @@ bool IRequest::acquireReceive(const char* context)
 		// In between the sender putting the sentinel on the channel and the time this gets run
 		// the underlying socket - and thus uv_handle - may have started the process of closing.
 		// In that case, simply early out.
-		if ( !is_valid_uv_handle( m_handle ) )
+		if ( !handle() )
 		{
 			return false;
 		}
@@ -404,7 +422,7 @@ bool IRequest::acquireSend( const char* context )
 		// In between the sender putting the sentinel on the channel and the time this gets run
 		// the underlying socket - and thus uv_handle - may have started the process of closing.
 		// In that case, simply early out.
-		if ( !is_valid_uv_handle( m_handle ) )
+		if ( !handle() )
 		{
 			return false;
 		}
@@ -424,7 +442,7 @@ void IRequest::releaseReceive(const char* context)
 {
 	auto balance = g_scheduler->PyChannel_GetBalance( m_requestQueue.get() );
 	// Only reset the lock and associated request when the uv_handle - and thus socket - isn't in the process of shutting down.
-	if ( !is_valid_uv_handle( m_handle ) )
+	if ( !handle() )
 	{
 		while ( balance++ < 0 ) {
 			if ( g_scheduler->PyChannel_Send( m_requestQueue.get(), Py_False ) < 0 ) {
@@ -529,6 +547,26 @@ void IRequest::clearTimeout()
 		uv_close( reinterpret_cast<uv_handle_t*>( m_timeout ), cleanup_uv_handle);
 		m_timeout = nullptr;
 	}
+}
+
+uv_handle_t* IRequest::handle()
+{
+	auto handle = m_requestData->handle;
+	if( !handle || !is_valid_uv_handle( handle ) )
+	{
+		return nullptr;
+	}
+	return handle; 
+}
+
+HandleData* IRequest::handleData()
+{
+	auto handle = IRequest::handle();
+	if( !handle )
+	{
+		return nullptr;
+	}
+	return reinterpret_cast<HandleData*>(handle->data);
 }
 
 
@@ -1466,8 +1504,8 @@ PyObject* StreamAcceptRequest::execute()
 		PyErr_FromUvErr( status );
 		return nullptr;
 	}
-	client->data = CreateHandleData();
-	if( !client->data )
+	
+	if( !CreateHandleData( reinterpret_cast<uv_handle_t*>( client ) ) )
 	{
 		return nullptr;
 	}
@@ -1891,7 +1929,7 @@ PyObject* StreamPacketReceiveRequest::execute()
 	}
 	ON_BLOCK_EXIT( [&] { clearTimeout(); } );
 
-	while ( !m_timedOut && is_valid_uv_handle( m_handle ) && needMore() )
+	while ( !m_timedOut && handle() && needMore() )
 	{
 		auto status = startRead();
 		if ( status == 0 )
@@ -1935,7 +1973,6 @@ PyObject* StreamPacketReceiveRequest::execute()
 		// closing packet received, signal connection closed
 		packet = PyTuple_Pack( 3, Py_None, Py_None, PyLong_FromLong( 0 ) );
 	} else {
-		auto* data = handleData();
 		auto sequenceNumber = m_requestData->packetNumber++;
 		packet = PyTuple_Pack( 3, PyBytes_FromStringAndSize( m_payload, packetSize ), PyBytes_FromStringAndSize( m_oobData, m_oobDataLen ), PyLong_FromSize_t( sequenceNumber ) );
 	}

@@ -67,6 +67,8 @@ struct RequestData
 	
 	bool receiving{false};
 	bool sending{false};
+	
+	uv_handle_t* handle{nullptr}; // This exists here as a way for the requests to safely retrieve the handle if it is valid.
 };
 
 
@@ -111,7 +113,7 @@ extern void TickUvLoop();
 extern uv_loop_t * GetUvLoop();
 extern PyObject* GetStatistics();
 
-void* CreateHandleData();
+bool CreateHandleData(uv_handle_t* handle);
 
 extern "C" typedef struct PySocketSockObject_t PySocketSockObject;
 
@@ -152,10 +154,10 @@ protected:
     void associateWithHandleData();
 
 	void clearTimeout();
-	HandleData* handleData() { return reinterpret_cast<HandleData*>(m_handle->data); }
+	uv_handle_t * handle();
+	HandleData* handleData();
 	void sendError(std::string_view msg);
 
-	uv_handle_t* m_handle{nullptr};
 	uv_timer_t* m_timeout{nullptr};
 	_PyTime_t m_timeout_nanoseconds{-1};
 	bool m_timedOut{false};
@@ -181,7 +183,7 @@ class IStreamRequest : public IRequest
 {
 public:
 	explicit IStreamRequest( PySocketSockObject* socket ) : IRequest( socket ){}
-	uv_stream_t* handle() { return reinterpret_cast<uv_stream_t*>( m_handle ); }
+	uv_stream_t* handle() { return reinterpret_cast<uv_stream_t*>( IRequest::handle() ); }
 };
 
 class StreamConnectRequest : public IStreamRequest
@@ -211,7 +213,7 @@ class StreamRecvRequest : public IStreamRequest
 public:
 	StreamRecvRequest( PySocketSockObject* socket, Py_ssize_t length, int flags );
 	PyObject* execute() override;
-	uv_stream_t* handle() { return reinterpret_cast<uv_stream_t*>( m_handle ); }
+	uv_stream_t* handle() { return reinterpret_cast<uv_stream_t*>( IRequest::handle() ); }
 	void onTimeout() override;
 	void cancel() override;
 
@@ -275,7 +277,7 @@ class IUdpRequest : public IRequest
 {
 public:
 	IUdpRequest( PySocketSockObject* socket ) : IRequest( socket ){}
-	uv_udp_t* handle() { return reinterpret_cast<uv_udp_t*>( m_handle ); }
+	uv_udp_t* handle() { return reinterpret_cast<uv_udp_t*>( IRequest::handle() ); }
 };
 
 class UdpRecvRequest : public IUdpRequest
