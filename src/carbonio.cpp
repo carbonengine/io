@@ -226,6 +226,7 @@ bool CreateHandleData(uv_handle_t* handle)
 	data->requestData->handle = handle;
 
 	g_scheduler->PyChannel_SetPreference( data->receiveQueue.get(), PREFER_SENDER );
+	g_scheduler->PyChannel_SetPreference( data->sendQueue.get(), PREFER_SENDER );
 	handle->data = data;
 	return true;
 }
@@ -358,7 +359,6 @@ IRequest::IRequest( PySocketSockObject* socket ) : m_timeout_nanoseconds(socket-
 	m_requestData = data->requestData;
 	m_requestQueue = handleData()->receiveQueue;
 	m_sendQueue = handleData()->sendQueue;
-	g_scheduler->PyChannel_SetPreference( m_requestQueue.get(), PREFER_SENDER );
 }
 
 bool IRequest::acquireReceive(const char* context)
@@ -471,7 +471,6 @@ void IRequest::sendError(std::string_view msg)
 {
 	PyObject *exc, *val, *tb;
 	PyErr_Fetch( &exc, &val, &tb );
-	g_scheduler->PyChannel_SetPreference( m_channel, PREFER_SENDER );
 	auto ret = g_scheduler->PyChannel_SendThrow( m_channel, exc, val, tb);
 	if( ret < 0 )
 	{
@@ -632,7 +631,6 @@ void StreamRecvRequest::onCallback( ICallbackParams* callbackParams )
 	if( nread == 0 ) {
 		return;
 	}
-	g_scheduler->PyChannel_SetPreference( m_channel, PREFER_SENDER );
 	if ( nread < 0 ) {
 		if ( nread != UV_EOF ) {
 			PyErr_FromUvErr( int( nread ) );
@@ -2024,7 +2022,6 @@ void StreamPacketReceiveRequest::onCallback( ICallbackParams* callbackParams )
 	auto params = dynamic_cast<Params*>(callbackParams);
 	ssize_t nread = params->nread;
 	Ccp::PyGilEnsure gil;
-	g_scheduler->PyChannel_SetPreference(m_channel, PREFER_SENDER );
 	if ( nread < 0 ) {
 		if (nread != UV_EOF) {
 			stopRead();

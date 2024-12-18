@@ -81,10 +81,10 @@ struct HandleData
 	PyChannelObject* channel{nullptr};
 
 	// Receive from this when starting to receive data from the uv_handle, send to this when done.
-	std::shared_ptr<PyChannelObject> receiveQueue;
+	std::shared_ptr<PyChannelObject> receiveQueue{nullptr};
 
 	// Receive from this when starting to send data using the uv_handle, send to this when done.
-	std::shared_ptr<PyChannelObject> sendQueue;
+	std::shared_ptr<PyChannelObject> sendQueue{nullptr};
 	
 	std::shared_ptr<RequestData> requestData{nullptr};
 
