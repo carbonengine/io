@@ -1,4 +1,6 @@
 # carbon-io
-GitHub Template Repository for Carbon C++ projects
+Tasklet-blocking sockets for use with carbon-scheduler. This module exists in order to allow for tasklet-friendly asynchronous IO with an interface as close to the standard Python socket module as possible. Tasklet-blocking behavior is supported for TCP and UDP connections only. Other socket types will exhibit the standard blocking behavior. Some functionality to support sending / receiving of machoNet packets has been added.
 
-Remember to rename everything!
+This project provides modified versions of the C part of the Python [socket](https://docs.python.org/3.12/library/socket.html) and [ssl](https://docs.python.org/3.12/library/ssl.html) modules, as well as an unmodified version of the [select](https://docs.python.org/3.12/library/select.html) module. The modules have the prefix "_carbon" in order to distinguish them from their unmodified counterparts. In order to use them with the standard socket and ssl modules, they need to be injected into `sys.modules` with the carbon prefix removed.
+
+To build this project set the `CCP_EVE_PERFORCE_BRANCH_PATH` variable to the root of the Perforce branch you are working in and then run CMake.

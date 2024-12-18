@@ -1,0 +1,248 @@
+diff --git a/tests/test_ssl.py b/tests/test_ssl.py
+index 9b59ddd..fa3ec3b 100644
+--- a/tests/test_ssl.py
++++ b/tests/test_ssl.py
+@@ -1,3 +1,8 @@
++import _scheduler
++import sys
++# Scheduler needs to exist in sys.modules as "scheduler" in order that we may load the c api.
++sys.modules["scheduler"] = _scheduler
++
+ # Test the support for SSL and sockets
+ 
+ import sys
+@@ -1808,6 +1813,7 @@ class SSLObjectTests(unittest.TestCase):
+         c_in.write(s_out.read())
+         client.unwrap()
+ 
++@unittest.skip("Moves socket between threads")
+ class SimpleBackgroundTests(unittest.TestCase):
+     """Tests that connect to a simple server running in the background"""
+ 
+@@ -2238,7 +2244,7 @@ def _test_get_server_certificate_fail(test, host, port):
+             test.fail("Got server certificate %s for %s:%s!" % (pem, host, port))
+ 
+ 
+-from test.ssl_servers import make_https_server
++from ssl_servers import make_https_server
+ 
+ class ThreadedEchoServer(threading.Thread):
+ 
+@@ -2339,6 +2345,13 @@ class ThreadedEchoServer(threading.Thread):
+                 self.sock.close()
+ 
+         def run(self):
++            import scheduler
++            scheduler.tasklet(self._run)()
++            while getattr(self._run, "running", True):
++                scheduler.run()
++                socket.dispatch()
++
++        def _run(self):
+             self.running = True
+             if not self.server.starttls_server:
+                 if not self.wrap_conn():
+@@ -2444,6 +2457,7 @@ class ThreadedEchoServer(threading.Thread):
+                  chatty=True, connectionchatty=False, starttls_server=False,
+                  alpn_protocols=None,
+                  ciphers=None, context=None):
++        raise unittest.SkipTest("Moves socket between threads")
+         if context:
+             self.context = context
+         else:
+@@ -2595,6 +2609,7 @@ class AsyncoreEchoServer(threading.Thread):
+             raise
+ 
+     def __init__(self, certfile):
++        raise unittest.SkipTest("Asyncore deprecated since 3.6 to be removed in 3.12")
+         self.flag = None
+         self.active = False
+         self.server = self.EchoServer(certfile)
+@@ -3139,20 +3154,29 @@ class ThreadedTests(unittest.TestCase):
+         listener_ready = threading.Event()
+         listener_gone = threading.Event()
+ 
+-        s = socket.socket()
+-        port = socket_helper.bind_port(s, HOST)
++        port = socket_helper.find_unused_port()
+ 
+         # `listener` runs in a thread.  It sits in an accept() until
+         # the main thread connects.  Then it rudely closes the socket,
+         # and sets Event `listener_gone` to let the main thread know
+         # the socket is gone.
+-        def listener():
++        def _listener():
++            s = socket.socket()
++            s.bind((HOST, port))
+             s.listen()
+             listener_ready.set()
+             newsock, addr = s.accept()
+             newsock.close()
+             s.close()
+             listener_gone.set()
++            _listener.running = False
++
++        def listener():
++            import scheduler
++            scheduler.tasklet(_listener)()
++            while getattr(_listener, "running", True):
++                scheduler.run()
++                socket.dispatch()
+ 
+         def connector():
+             listener_ready.wait()
+@@ -3172,6 +3196,9 @@ class ThreadedTests(unittest.TestCase):
+             connector()
+         finally:
+             t.join()
++            # Delete the thread explicitly to make sure it gets removed from the threading._dangling weakset.
++            # If the thread is not deleted, dangling thread warnings get logged in support.threading_cleanup()
++            del t
+ 
+     def test_ssl_cert_verify_error(self):
+         if support.verbose:
+@@ -3617,6 +3644,7 @@ class ThreadedTests(unittest.TestCase):
+             s.setblocking(True)
+             s.close()
+ 
++    @unittest.skip("Uses select, shares socket between threads")
+     def test_handshake_timeout(self):
+         # Issue #5103: SSL handshake must respect the socket timeout
+         server = socket.socket(socket.AF_INET)
+@@ -3670,22 +3698,31 @@ class ThreadedTests(unittest.TestCase):
+         # Issue #16357: accept() on a SSLSocket created through
+         # SSLContext.wrap_socket().
+         client_ctx, server_ctx, hostname = testing_context()
+-        server = socket.socket(socket.AF_INET)
+         host = "127.0.0.1"
+-        port = socket_helper.bind_port(server)
+-        server = server_ctx.wrap_socket(server, server_side=True)
+-        self.assertTrue(server.server_side)
++        port = socket_helper.find_unused_port()
+ 
+         evt = threading.Event()
+         remote = None
+         peer = None
+-        def serve():
++        def _serve():
+             nonlocal remote, peer
++            server = socket.socket(socket.AF_INET)
++            server = server_ctx.wrap_socket(server, server_side=True)
++            self.assertTrue(server.server_side)
++            server.bind((host, port))
+             server.listen()
+             # Block on the accept and wait on the connection to close.
+             evt.set()
+             remote, peer = server.accept()
+             remote.send(remote.recv(4))
++            server.close()
++            _serve.running = False
++        def serve():
++            import scheduler
++            scheduler.tasklet(_serve)()
++            while getattr(_serve, "running", True):
++                scheduler.run()
++                socket.dispatch()
+ 
+         t = threading.Thread(target=serve)
+         t.start()
+@@ -3701,7 +3738,6 @@ class ThreadedTests(unittest.TestCase):
+         client.close()
+         t.join()
+         remote.close()
+-        server.close()
+         # Sanity checks.
+         self.assertIsInstance(remote, ssl.SSLSocket)
+         self.assertEqual(peer, client_addr)
+@@ -4623,6 +4659,7 @@ class TestSSLDebug(unittest.TestCase):
+         with self.assertRaises(TypeError):
+             ctx.keylog_filename = 1
+ 
++    @unittest.skip("Creating ThreadedEchoServer raises unittest.SkipTest, which causes cleanup errors")
+     @requires_keylog
+     @unittest.skipIf(Py_DEBUG_WIN32, "Avoid mixing debug/release CRT on Windows")
+     def test_keylog_filename(self):
+@@ -4747,7 +4784,6 @@ class TestSSLDebug(unittest.TestCase):
+ def set_socket_so_linger_on_with_zero_timeout(sock):
+     sock.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack('ii', 1, 0))
+ 
+-
+ class TestPreHandshakeClose(unittest.TestCase):
+     """Verify behavior of close sockets with received data before to the handshake.
+     """
+@@ -4784,13 +4820,24 @@ class TestPreHandshakeClose(unittest.TestCase):
+             self.ssl_ctx.verify_mode = ssl.CERT_REQUIRED
+             self.ssl_ctx.load_verify_locations(cafile=ONLYCERT)
+             self.ssl_ctx.load_cert_chain(certfile=ONLYCERT, keyfile=ONLYKEY)
++            self.listener_ready = threading.Event()
++            self.listener_sockname = None
++            super().start()
++
++        def run(self):
++            import scheduler
++            t = scheduler.tasklet(self._run)()
++            while t.alive:
++                scheduler.run()
++                socket.dispatch()
++
++        def _run(self):
+             self.listener = socket.socket()
+             self.port = socket_helper.bind_port(self.listener)
+             self.listener.settimeout(self.timeout)
+             self.listener.listen(1)
+-            super().start()
+-
+-        def run(self):
++            self.listener_sockname = self.listener.getsockname()
++            self.listener_ready.set()
+             try:
+                 conn, address = self.listener.accept()
+             except TimeoutError:
+@@ -4817,7 +4864,7 @@ class TestPreHandshakeClose(unittest.TestCase):
+             return  # Expect the full test setup to always work on Linux.
+         if (isinstance(err, ConnectionResetError) or
+             (isinstance(err, OSError) and err.errno == errno.EINVAL) or
+-            re.search('wrong.version.number', getattr(err, "reason", ""), re.I)):
++            isinstance(err, ssl.SSLError)):
+             # On Windows the TCP RST leads to a ConnectionResetError
+             # (ECONNRESET) which Linux doesn't appear to surface to userspace.
+             # If wrap_socket() winds up on the "if connected:" path and doing
+@@ -4853,7 +4900,8 @@ class TestPreHandshakeClose(unittest.TestCase):
+         self.enterContext(server)  # starts it & unittest.TestCase stops it.
+ 
+         with socket.socket() as client:
+-            client.connect(server.listener.getsockname())
++            server.listener_ready.wait()
++            client.connect(server.listener_sockname)
+             # This forces an immediate connection close via RST on .close().
+             set_socket_so_linger_on_with_zero_timeout(client)
+             client.setblocking(False)
+@@ -4907,6 +4955,7 @@ class TestPreHandshakeClose(unittest.TestCase):
+         set_socket_so_linger_on_with_zero_timeout(server.listener)
+ 
+         with socket.socket() as client:
++            server.listener_ready.wait()
+             client.connect(server.listener.getsockname())
+             server_can_continue_with_wrap_socket.set()
+ 
+@@ -4974,8 +5023,9 @@ class TestPreHandshakeClose(unittest.TestCase):
+         # Redundant; call_after_accept sets SO_LINGER on the accepted conn.
+         set_socket_so_linger_on_with_zero_timeout(server.listener)
+ 
++        server.listener_ready.wait()
+         connection = SynchronizedHTTPSConnection(
+-                server.listener.getsockname()[0],
++                server.listener_sockname[0],
+                 port=server.port,
+                 context=ssl.create_default_context(),
+                 timeout=timeout,
+@@ -5181,4 +5231,8 @@ def setUpModule():
+ 
+ 
+ if __name__ == "__main__":
+-    unittest.main()
++    import scheduler
++    t = scheduler.tasklet(unittest.main)(verbosity=2)
++    while t.alive:
++        scheduler.run()
++        socket.dispatch()

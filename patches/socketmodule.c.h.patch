@@ -1,0 +1,20 @@
+diff --git a/src/clinic/socketmodule.c.h b/src/clinic/socketmodule.c.h
+index 8ff1044..670f80c 100644
+--- a/src/clinic/socketmodule.c.h
++++ b/src/clinic/socketmodule.c.h
+@@ -35,11 +35,10 @@ sock_initobj(PyObject *self, PyObject *args, PyObject *kwargs)
+     #endif  // !Py_BUILD_CORE
+ 
+     static const char * const _keywords[] = {"family", "type", "proto", "fileno", NULL};
+-    static _PyArg_Parser _parser = {
+-        .keywords = _keywords,
+-        .fname = "socket",
+-        .kwtuple = KWTUPLE,
+-    };
++    static _PyArg_Parser _parser{0};
++    _parser.keywords = _keywords;
++    _parser.fname = "socket";
++    _parser.kwtuple = KWTUPLE;
+     #undef KWTUPLE
+     PyObject *argsbuf[4];
+     PyObject * const *fastargs;

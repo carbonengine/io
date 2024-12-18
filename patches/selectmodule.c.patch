@@ -1,0 +1,17 @@
+diff --git a/src/selectmodule.c b/src/selectmodule.c
+index 97f1db2..f7b87eb 100644
+--- a/src/selectmodule.c
++++ b/src/selectmodule.c
+@@ -13,9 +13,9 @@
+ #endif
+ 
+ #include "Python.h"
+-#include "pycore_fileutils.h"     // _Py_set_inheritable()
+-#include "pycore_import.h"        // _PyImport_GetModuleAttrString()
+-#include "pycore_time.h"          // _PyTime_t
++#include "internal/pycore_fileutils.h"     // _Py_set_inheritable()
++#include "internal/pycore_import.h"        // _PyImport_GetModuleAttrString()
++#include "internal/pycore_time.h"          // _PyTime_t
+ #include "structmember.h"         // PyMemberDef
+ 
+ #include <stdbool.h>
