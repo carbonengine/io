@@ -366,7 +366,7 @@ bool IRequest::acquireReceive(const char* context)
 	auto keepAlive = shared_from_this();
 
 	// There's already an outstanding request associated with the socket, let's wait until we can perform our operation.
-	while ( m_requestData->receiving ) {
+	while ( m_requestData->receiveRequest ) {
 		// Something is already reading, so let's try again at a later point in time.
 		auto sentinel = g_scheduler->PyChannel_Receive( m_requestQueue.get() );
 		if ( !sentinel ) {
@@ -392,7 +392,6 @@ bool IRequest::acquireReceive(const char* context)
 			return false;
 		}
 	}
-	m_requestData->receiving = true;
 	m_requestData->receiveRequest = this->shared_from_this();
 	return true;
 }
@@ -402,7 +401,7 @@ bool IRequest::acquireSend( const char* context )
 	auto keepAlive = shared_from_this();
 
 	// there's already an outstanding request associated with the socket, let's wait until we can perform our operation
-	while ( m_requestData->sending ) {
+	while ( m_requestData->request ) {
 		// something is already reading, so let's try again at a later point in time
 		auto sentinel = g_scheduler->PyChannel_Receive( m_sendQueue.get() );
 		if ( !sentinel ) {
@@ -427,7 +426,6 @@ bool IRequest::acquireSend( const char* context )
 			return false;
 		}
 	}
-	m_requestData->sending = true;
 	m_requestData->request = this->shared_from_this();
 	return true;
 }
@@ -458,13 +456,11 @@ void IRequest::releaseReceive(const char* context)
 			PyErr_Format( PyExc_SystemError, "IRequest::releaseReceive() failed to signal waiting handlers" );
 		}
 	}
-	m_requestData->receiving = false;
 	m_requestData->receiveRequest = nullptr;
 }
 
 void IRequest::releaseSend(const char* context)
 {
-	m_requestData->sending = false;
 	m_requestData->request = nullptr;
 	auto balance = g_scheduler->PyChannel_GetBalance( m_sendQueue.get() );
 	if ( balance < 0 ) {
@@ -1450,8 +1446,13 @@ static PyObject *
 
 PyObject* StreamAcceptRequest::execute()
 {
-	associateWithHandleData();
-	ON_BLOCK_EXIT( [this] { clearTimeout(); } );
+    if(!acquireSend("StreamAcceptRequest"))
+    {
+        errno = EBADF;
+        PyErr_SetFromErrno( PyExc_OSError );
+        return nullptr;
+    }
+	ON_BLOCK_EXIT( [this] { clearTimeout(); releaseSend("StreamAcceptRequest"); } );
 
 	auto result = startTimeout();
 	if( result != Py_None )
@@ -1597,7 +1598,6 @@ StreamConnectRequest::StreamConnectRequest( PySocketSockObject* socket, struct s
 }
 StreamConnectRequest::~StreamConnectRequest()
 {
-	delete m_connect;
 }
 
 void StreamConnectRequest::onTimeout()
@@ -1614,7 +1614,13 @@ PyObject* StreamConnectRequest::execute()
 		return nullptr;
 	}
 	Py_DecRef(ret);
-	m_requestData->request = shared_from_this();
+    if( !acquireSend("StreamConnectRequest") )
+    {
+        errno = EBADF;
+        PyErr_SetFromErrno( PyExc_OSError );
+        return nullptr;
+    }
+    ON_BLOCK_EXIT([this]{ releaseSend("StreamConnectRequest"); });
 	m_connect->data = this;
 	int status = uv_tcp_connect(m_connect, reinterpret_cast<uv_tcp_t*>( handle() ), m_address, &StreamConnectRequest::connectCallback);
 	if ( status < 0 )
@@ -1650,6 +1656,7 @@ void StreamConnectRequest::connectCallback( uv_connect_t* connection, int status
 		auto params = std::make_unique<StreamConnectRequest::Params>( status );
 		_this->onCallback( params.get() );
 	}
+    delete connection;
 }
 
 void StreamConnectRequest::onCallback( ICallbackParams* callbackParams )

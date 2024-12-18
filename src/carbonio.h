@@ -65,9 +65,6 @@ struct RequestData
 	
 	size_t maxPacketSize{1024*1024}; //one megabyte
 	
-	bool receiving{false};
-	bool sending{false};
-	
 	uv_handle_t* handle{nullptr}; // This exists here as a way for the requests to safely retrieve the handle if it is valid.
 };
 
