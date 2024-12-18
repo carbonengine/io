@@ -789,11 +789,16 @@ void sendNoopCallback( uv_write_t* req, int )
 
 PyObject* StreamSendRequest::execute()
 {
+    if(!acquireSend("StreamSendRequest"))
+    {
+        errno = EBADF;
+        PyErr_SetFromErrno( PyExc_OSError );
+        return nullptr;
+    }
 	auto acquireGuard = MakeGuard( [&] { releaseSend( "StreamSendRequest" ); } );
 	auto write_req = new write_req_t;
 	write_req->buf = uv_buf_init( new char[m_sendBuffer.len], m_sendBuffer.len );
 	memcpy( write_req->buf.base, m_sendBuffer.base, m_sendBuffer.len );
-	acquireSend("StreamSendRequest");
 	if ( m_blockingSend && ! startTimeout() )
 	{
 		delete[] write_req->buf.base;
@@ -1080,7 +1085,12 @@ void UdpRecvRequest::cancel()
 
 PyObject* UdpSendRequest::execute()
 {
-	acquireSend("UdpSendRequest");
+	if(!acquireSend("UdpSendRequest"))
+    {
+        errno = EBADF;
+        PyErr_SetFromErrno( PyExc_OSError );
+        return nullptr;
+    }
 	ON_BLOCK_EXIT([&]{releaseSend("UdpSendRequest");});
 
 	auto req = new write_req_t;
