@@ -203,20 +203,30 @@ bool CreateHandleData(uv_handle_t* handle)
 	auto* data = new HandleData;
 	if( data->channel == nullptr )
 	{
+		Py_XDECREF( data->receiveQueue.get() );
+		Py_XDECREF( data->sendQueue.get() );
 		delete data;
 		return false;
 	}
 	if( data->receiveQueue == nullptr )
 	{
 		Py_DECREF( data->channel );
+		Py_XDECREF( data->sendQueue.get() );
 		delete data;
 		return false;
+	}
+
+	if( data->sendQueue == nullptr )
+	{
+		Py_DECREF( data->channel );
+		Py_DECREF( data->receiveQueue.get() );
 	}
 	
 	if( !data->requestData )
 	{
 		Py_DECREF( data->channel );
 		Py_DECREF( data->receiveQueue.get() );
+		Py_DECREF( data->sendQueue.get() );
 		delete data;
 		CCP_LOGERR( "CreateHandleData called without request data" );
 		PyErr_BadInternalCall();
