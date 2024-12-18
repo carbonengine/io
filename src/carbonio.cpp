@@ -363,8 +363,6 @@ IRequest::IRequest( PySocketSockObject* socket ) : m_timeout_nanoseconds(socket-
 
 bool IRequest::acquireReceive(const char* context)
 {
-	auto keepAlive = shared_from_this();
-
 	// There's already an outstanding request associated with the socket, let's wait until we can perform our operation.
 	while ( m_requestData->receiveRequest ) {
 		// Something is already reading, so let's try again at a later point in time.
@@ -398,8 +396,6 @@ bool IRequest::acquireReceive(const char* context)
 
 bool IRequest::acquireSend( const char* context )
 {
-	auto keepAlive = shared_from_this();
-
 	// there's already an outstanding request associated with the socket, let's wait until we can perform our operation
 	while ( m_requestData->request ) {
 		// something is already reading, so let's try again at a later point in time
