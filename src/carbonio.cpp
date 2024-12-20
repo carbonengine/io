@@ -665,7 +665,7 @@ void StreamRecvRequest::onCallback( ICallbackParams* callbackParams )
 
 void growingBufferAlloc(uv_handle_t* handle, size_t size, uv_buf_t* buf)
 {
-	auto* data = reinterpret_cast<HandleData*>(handle->data)->requestData.get();
+	auto data = std::reinterpret_pointer_cast<RequestData>( reinterpret_cast<HandleData*>(handle->data)->requestData );
 	auto& handleBuf = data->buf;
 
 	constexpr size_t BUF_SIZE = 65536;
@@ -1576,7 +1576,7 @@ void StreamRecvIntoRequest::alloc( uv_handle_t* handle, size_t size, uv_buf_t* b
 {
 	auto* data = reinterpret_cast<HandleData*>(handle->data);
 	auto request = std::reinterpret_pointer_cast<StreamRecvIntoRequest>(data->requestData->receiveRequest);
-	auto requestData = data->requestData.get();
+	auto requestData = std::reinterpret_pointer_cast<RequestData>( data->requestData );
 
 	buf->base = request->m_buf;
 	buf->len = ULONG( request->m_requested_len );
@@ -1670,7 +1670,7 @@ void StreamConnectRequest::connectCallback( uv_connect_t* connection, int status
 		auto params = std::make_unique<StreamConnectRequest::Params>( status );
 		_this->onCallback( params.get() );
 	}
-    delete connection;
+	delete connection;
 }
 
 void StreamConnectRequest::onCallback( ICallbackParams* callbackParams )
