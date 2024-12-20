@@ -5718,9 +5718,9 @@ static PyObject *sock_sendpacket(PySocketSockObject *s, PyObject *args)
 	}
 
 	auto* handleData = reinterpret_cast<HandleData*>( s->uv_handle->data );
-	if ( pbuf.len > handleData->maxPacketSize )
+	if ( pbuf.len > handleData->requestData->maxPacketSize )
 	{
-		PyErr_Format( PyExc_ValueError, "Cannot send packet of size %llu. Maximum packet size is %llu", pbuf.len, handleData->maxPacketSize );
+		PyErr_Format( PyExc_ValueError, "Cannot send packet of size %llu. Maximum packet size is %llu", pbuf.len, handleData->requestData->maxPacketSize );
 		return nullptr;
 	}
 
@@ -5869,7 +5869,7 @@ static PyObject* sock_setmaxpacketsize(PySocketSockObject *s, PyObject *args)
 	{
 		return nullptr;
 	}
-	size_t& maxPacketSize = reinterpret_cast<HandleData*>( s->uv_handle->data )->maxPacketSize;
+	size_t& maxPacketSize = reinterpret_cast<HandleData*>( s->uv_handle->data )->requestData->maxPacketSize;
 	size_t ret{maxPacketSize};
 	if( o )
 	{
@@ -6146,8 +6146,8 @@ uv_tcp_t* create_uv_tcp_handle( SOCKET_T* fd, int family )
 		return nullptr;
 	}
 
-	handle->data = CreateHandleData();
-	if( handle->data == nullptr )
+	
+	if( !CreateHandleData( reinterpret_cast<uv_handle_t*>( handle ) ) )
 	{
 		uv_close((uv_handle_t*)handle, cleanup_uv_handle);
 		// create_handle_data should have set an error.
@@ -6181,8 +6181,7 @@ uv_udp_t* create_uv_udp_handle(SOCKET_T* fd, int family)
 		uv_close((uv_handle_t*)handle, cleanup_uv_handle);
 		return nullptr;
 	}
-	handle->data = CreateHandleData();
-	if( handle->data == nullptr )
+	if( !CreateHandleData( reinterpret_cast<uv_handle_t*>( handle ) ) )
 	{
 		uv_close((uv_handle_t*)handle, cleanup_uv_handle);
 		// create_handle_data should have set an error.
@@ -7236,9 +7235,8 @@ uv_tcp_t* dup_uv_tcp_handle( SOCKET_T newfd )
 		PyErr_FromUvErr( status );
 		return nullptr;
 	}
-
-	handle->data = CreateHandleData();
-	if( handle->data == nullptr )
+	
+	if( !CreateHandleData( reinterpret_cast<uv_handle_t*>( handle ) ) )
 	{
 		uv_close( (uv_handle_t*)handle, cleanup_uv_handle );
 		// create_handle_data should have set an error.
@@ -7267,9 +7265,8 @@ uv_udp_t* dup_uv_udp_handle( SOCKET_T newfd )
 	
 	// at this point we need to delegate cleaning up the libuv handle to libuv
 	handle_guard.Dismiss();
-
-	handle->data = CreateHandleData();
-	if( handle->data == nullptr )
+	
+	if( !CreateHandleData( reinterpret_cast<uv_handle_t*>( handle ) ) )
 	{
 		uv_close( (uv_handle_t*)handle, cleanup_uv_handle );
 		// create_handle_data should have set an error.
