@@ -793,12 +793,12 @@ void sendNoopCallback( uv_write_t* req, int )
 
 PyObject* StreamSendRequest::execute()
 {
-    if(!acquireSend("StreamSendRequest"))
-    {
-        errno = EBADF;
-        PyErr_SetFromErrno( PyExc_OSError );
-        return nullptr;
-    }
+	if(!acquireSend("StreamSendRequest"))
+	{
+		errno = EBADF;
+		PyErr_SetFromErrno( PyExc_OSError );
+		return nullptr;
+	}
 	auto acquireGuard = MakeGuard( [&] { releaseSend( "StreamSendRequest" ); } );
 	auto write_req = new write_req_t;
 	write_req->buf = uv_buf_init( new char[m_sendBuffer.len], m_sendBuffer.len );
@@ -1090,11 +1090,11 @@ void UdpRecvRequest::cancel()
 PyObject* UdpSendRequest::execute()
 {
 	if(!acquireSend("UdpSendRequest"))
-    {
-        errno = EBADF;
-        PyErr_SetFromErrno( PyExc_OSError );
-        return nullptr;
-    }
+	{
+		errno = EBADF;
+		PyErr_SetFromErrno( PyExc_OSError );
+		return nullptr;
+	}
 	ON_BLOCK_EXIT([&]{releaseSend("UdpSendRequest");});
 
 	auto req = new write_req_t;
@@ -1460,12 +1460,12 @@ static PyObject *
 
 PyObject* StreamAcceptRequest::execute()
 {
-    if(!acquireSend("StreamAcceptRequest"))
-    {
-        errno = EBADF;
-        PyErr_SetFromErrno( PyExc_OSError );
-        return nullptr;
-    }
+	if(!acquireSend("StreamAcceptRequest"))
+	{
+		errno = EBADF;
+		PyErr_SetFromErrno( PyExc_OSError );
+		return nullptr;
+	}
 	ON_BLOCK_EXIT( [this] { clearTimeout(); releaseSend("StreamAcceptRequest"); } );
 
 	auto result = startTimeout();
@@ -1628,13 +1628,13 @@ PyObject* StreamConnectRequest::execute()
 		return nullptr;
 	}
 	Py_DecRef(ret);
-    if( !acquireSend("StreamConnectRequest") )
-    {
-        errno = EBADF;
-        PyErr_SetFromErrno( PyExc_OSError );
-        return nullptr;
-    }
-    ON_BLOCK_EXIT([this]{ releaseSend("StreamConnectRequest"); });
+	if( !acquireSend("StreamConnectRequest") )
+	{
+		errno = EBADF;
+		PyErr_SetFromErrno( PyExc_OSError );
+		return nullptr;
+	}
+	ON_BLOCK_EXIT([this]{ releaseSend("StreamConnectRequest"); });
 	m_connect->data = this;
 	int status = uv_tcp_connect(m_connect, reinterpret_cast<uv_tcp_t*>( handle() ), m_address, &StreamConnectRequest::connectCallback);
 	if ( status < 0 )
