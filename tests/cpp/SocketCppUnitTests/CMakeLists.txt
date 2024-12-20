@@ -51,4 +51,5 @@ endif()
 # extensions are located. That way we can avoid copying them around.
 gtest_discover_tests(SocketCppUnitTests
         DISCOVERY_MODE PRE_TEST
+        DISCOVERY_TIMEOUT 30 # The default timeout is 5 seconds. Increasing to 30 because sometimes test discovery on macOS takes longer.
 )
