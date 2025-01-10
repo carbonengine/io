@@ -211,6 +211,7 @@ public:
 	StreamRecvRequest( PySocketSockObject* socket, Py_ssize_t length, int flags );
 	PyObject* execute() override;
 	uv_stream_t* handle() { return reinterpret_cast<uv_stream_t*>( IRequest::handle() ); }
+	void stopRead();
 	void onTimeout() override;
 	void cancel() override;
 
