@@ -300,6 +300,7 @@ public:
 private:
 	void onCallback( ICallbackParams *callbackParams ) override;
 	void onTimeout() override;
+	void stopRead();
 
 	Py_ssize_t m_len;
 	int m_flags;

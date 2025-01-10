@@ -1075,15 +1075,24 @@ void UdpRecvRequest::onCallback( ICallbackParams* callbackParams )
 	}
 }
 
+void UdpRecvRequest::stopRead()
+{
+	auto streamHandle = handle();
+	if( streamHandle != nullptr )
+	{
+		uv_udp_recv_stop( streamHandle );
+	}
+}
+
 void UdpRecvRequest::onTimeout()
 {
-	uv_udp_recv_stop(handle());
+	stopRead();
 	IRequest::onTimeout();
 }
 
 void UdpRecvRequest::cancel()
 {
-	uv_udp_recv_stop( handle() );
+	stopRead();
 	// Check the balance, as this could be called
 	// after the request has finished executing.
 	if( g_scheduler->PyChannel_GetBalance( m_channel ) < 0 )
