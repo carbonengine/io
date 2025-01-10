@@ -655,7 +655,7 @@ void StreamRecvRequest::onCallback( ICallbackParams* callbackParams )
 	}
 	if ( nread > 0 ) {
 		m_received_len += nread;
-		uv_read_stop( handle() );
+		stopRead();
 		if ( g_scheduler->PyChannel_Send( m_channel, Py_True ) < 0 ) {
 			LogError( "StreamRecvRequest::onReceive failed to signal sentinel" );
 			PyErr_Clear();
@@ -731,9 +731,18 @@ void growingBufferAlloc(uv_handle_t* handle, size_t size, uv_buf_t* buf)
 	buf->len = handleBuf.len;
 }
 
+void StreamRecvRequest::stopRead()
+{
+	auto streamHandle = handle();
+	if( streamHandle != nullptr )
+	{
+		uv_read_stop( streamHandle );
+	}
+}
+
 void StreamRecvRequest::onTimeout()
 {
-	uv_read_stop(handle());
+	stopRead();
 	IRequest::onTimeout();
 }
 
@@ -757,7 +766,7 @@ void StreamRecvRequest::readCallback( uv_stream_t* client, ssize_t nread, const 
 
 void StreamRecvRequest::cancel()
 {
-	uv_read_stop( handle() );
+	stopRead();
 	// Check the balance, as this could be called after the request has finished executing.
 	if( g_scheduler->PyChannel_GetBalance( m_channel ) < 0 )
 	{
@@ -1066,15 +1075,24 @@ void UdpRecvRequest::onCallback( ICallbackParams* callbackParams )
 	}
 }
 
+void UdpRecvRequest::stopRead()
+{
+	auto streamHandle = handle();
+	if( streamHandle != nullptr )
+	{
+		uv_udp_recv_stop( streamHandle );
+	}
+}
+
 void UdpRecvRequest::onTimeout()
 {
-	uv_udp_recv_stop(handle());
+	stopRead();
 	IRequest::onTimeout();
 }
 
 void UdpRecvRequest::cancel()
 {
-	uv_udp_recv_stop( handle() );
+	stopRead();
 	// Check the balance, as this could be called
 	// after the request has finished executing.
 	if( g_scheduler->PyChannel_GetBalance( m_channel ) < 0 )
@@ -2024,7 +2042,11 @@ size_t StreamPacketReceiveRequest::payloadLen() const
 
 void StreamPacketReceiveRequest::stopRead()
 {
-	uv_read_stop( handle() );
+	auto streamHandle = handle();
+	if( streamHandle != nullptr )
+	{
+		uv_read_stop( streamHandle );
+	}
 }
 
 void StreamPacketReceiveRequest::onCallback( ICallbackParams* callbackParams )
