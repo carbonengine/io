@@ -21,7 +21,6 @@ target_link_libraries(SocketCppUnitTests
         GTest::GTest
         libuv::uv
         Python
-        ccp::log
         CcpCore
 )
 if(WIN32)
