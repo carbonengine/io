@@ -1,0 +1,35 @@
+{
+  "version": 3,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 31,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "carbon_windows_vcpkg_vs",
+      "toolchainFile": "${sourceDir}/cmake/orchestration_toolchain.cmake",
+      "binaryDir": "./.cmake-build-${generator}-${presetName}",
+      "generator": "Ninja Multi-Config",
+      "toolset": {
+        "value": "v141"
+      },
+      "cacheVariables": {
+        "VCPKG_OVERLAY_TRIPLETS": "${sourceDir}/cmake/vcpkg/triplets",
+        "VCPKG_TARGET_TRIPLET": "x64-windows-carbon",
+        "VCPKG_HOST_TRIPLET": "x64-windows-carbon"
+      }
+    },
+    {
+      "name": "carbon_osx_vcpkg",
+      "toolchainFile": "${sourceDir}/cmake/orchestration_toolchain.cmake",
+      "binaryDir": "./.cmake-build-${generator}-${presetName}",
+      "generator": "Ninja Multi-Config",
+      "cacheVariables": {
+        "VCPKG_OVERLAY_TRIPLETS": "${sourceDir}/cmake/vcpkg/triplets",
+        "VCPKG_TARGET_TRIPLET": "arm64-osx-carbon",
+        "VCPKG_HOST_TRIPLET": "arm64-osx-carbon"
+      }
+    }
+  ]
+}

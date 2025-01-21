@@ -1,17 +1,14 @@
-#[[
-Defines our supported build configurations, also known as build flavors.
-]]
 # this applies to multi-configuration build system, e.g. XCode, Visual Studio, Ninja Multi-Config
 set(CMAKE_CONFIGURATION_TYPES Debug TrinityDev Internal Release)
 
 get_property(is_multi_config GLOBAL PROPERTY GENERATOR_IS_MULTI_CONFIG)
 if(is_multi_config)
     set(CMAKE_CONFIGURATION_TYPES "${CMAKE_CONFIGURATION_TYPES}"
-        CACHE
-        STRING
-        "Reset the configurations to what we need"
-        FORCE
-        )
+            CACHE
+            STRING
+            "Reset the configurations to what we need"
+            FORCE
+    )
 else()
     if (NOT CMAKE_BUILD_TYPE)
         message(STATUS "No CMAKE_BUILD_TYPE was specified, defaulting to 'Debug'")
@@ -19,11 +16,11 @@ else()
     endif()
     # Update the documentation string of CMAKE_BUILD_TYPE for GUIs
     set(CMAKE_BUILD_TYPE "${CMAKE_BUILD_TYPE}"
-        CACHE
-        STRING
-        "Choose the type of build, options are: ${CMAKE_CONFIGURATION_TYPES}."
-        FORCE
-        )
+            CACHE
+            STRING
+            "Choose the type of build, options are: ${CMAKE_CONFIGURATION_TYPES}."
+            FORCE
+    )
 
     # check if a valid build type was supplied
     if (CMAKE_BUILD_TYPE IN_LIST CMAKE_CONFIGURATION_TYPES)
@@ -41,26 +38,26 @@ function(create_new_build_config config prototype)
     string(TOUPPER ${prototype} PROTOTYPE)
 
     set(CMAKE_CXX_FLAGS_${CONFIG}
-        ${CMAKE_CXX_FLAGS_${PROTOTYPE}} CACHE STRING
-        "Flags used by the C++ compiler during ${config} builds."
-        FORCE)
+            ${CMAKE_CXX_FLAGS_${PROTOTYPE}} CACHE STRING
+            "Flags used by the C++ compiler during ${config} builds."
+            FORCE)
     set(CMAKE_C_FLAGS_${CONFIG}
-        ${CMAKE_C_FLAGS_${PROTOTYPE}} CACHE STRING
-        "Flags used by the C compiler during ${config} builds."
-        FORCE)
+            ${CMAKE_C_FLAGS_${PROTOTYPE}} CACHE STRING
+            "Flags used by the C compiler during ${config} builds."
+            FORCE)
     set(CMAKE_EXE_LINKER_FLAGS_${CONFIG}
-        ${CMAKE_EXE_LINKER_FLAGS_${PROTOTYPE}} CACHE STRING
-        "Flags used for linking binaries during ${config} builds."
-        FORCE)
+            ${CMAKE_EXE_LINKER_FLAGS_${PROTOTYPE}} CACHE STRING
+            "Flags used for linking binaries during ${config} builds."
+            FORCE)
     set(CMAKE_SHARED_LINKER_FLAGS_${CONFIG}
-        ${CMAKE_SHARED_LINKER_FLAGS_${PROTOTYPE}} CACHE STRING
-        "Flags used by the shared libraries linker during ${config} builds."
-        FORCE)
+            ${CMAKE_SHARED_LINKER_FLAGS_${PROTOTYPE}} CACHE STRING
+            "Flags used by the shared libraries linker during ${config} builds."
+            FORCE)
     mark_as_advanced(
-        CMAKE_CXX_FLAGS_${CONFIG}
-        CMAKE_C_FLAGS_${CONFIG}
-        CMAKE_EXE_LINKER_FLAGS_${CONFIG}
-        CMAKE_SHARED_LINKER_FLAGS_${CONFIG})
+            CMAKE_CXX_FLAGS_${CONFIG}
+            CMAKE_C_FLAGS_${CONFIG}
+            CMAKE_EXE_LINKER_FLAGS_${CONFIG}
+            CMAKE_SHARED_LINKER_FLAGS_${CONFIG})
 endfunction()
 
 create_new_build_config(Internal Release)
@@ -143,5 +140,9 @@ elseif(APPLE)
     # Manually add debug symbols to builds
     add_compile_options(-g)
 
-    set(MATH_OPTIMIZE_FLAG -ffast-math -ffp-model=fast)
+    if(CMAKE_CXX_COMPILER_VERSION VERSION_LESS "13")
+        set(MATH_OPTIMIZE_FLAG -ffast-math -fhonor-infinities -fhonor-nans)
+    else()
+        set(MATH_OPTIMIZE_FLAG -ffast-math -ffp-model=fast -fhonor-infinities -fhonor-nans)
+    endif()
 endif()

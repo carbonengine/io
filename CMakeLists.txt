@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.16)
+cmake_minimum_required(VERSION 3.31)
 project(io VERSION 1.0.0)
 
 if(NOT DEFINED ENV{CCP_EVE_PERFORCE_BRANCH_PATH})
@@ -16,15 +16,25 @@ endif()
 file(TO_CMAKE_PATH "$ENV{CCP_EVE_PERFORCE_BRANCH_PATH}" BRANCH_ROOT_DIR)
 list(INSERT CMAKE_MODULE_PATH 0 ${BRANCH_ROOT_DIR}/cmake)
 
-include(CcpGlobalSettings)
+include(CcpCmakePackageRoots)
 include(CcpPackageConfigHelpers)
+
+include(cmake/CcpToolchainFlags.cmake)
+include(cmake/CcpVendorUtilities.cmake)
+include(cmake/CcpAutobuildDirs.cmake)
+include(cmake/CcpBuildConfigurations.cmake)
+
+
+include(cmake/CcpTargetConfigurations.cmake)
 
 find_package(libuv CONFIG REQUIRED)
 find_package(Python CONFIG REQUIRED)
 find_package(OpenSSL CONFIG REQUIRED)
 find_package(CcpLog CONFIG REQUIRED)
-find_package(CcpCore CONFIG REQUIRED)
+find_package(carbon-core CONFIG REQUIRED)
 find_package(Scheduler CONFIG REQUIRED)
+#find_package(Tracy CONFIG REQUIRED)
+
 
 # --- _socket ---
 ccp_add_library(_socket SHARED

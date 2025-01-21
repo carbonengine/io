@@ -1,0 +1,15 @@
+{
+  "default-registry": {
+    "kind": "git",
+    "baseline": "e8f4970c2820b19a4eadf817762920dcc15154c5",
+    "repository": "git@github.com:ccpgames/carbon-vcpkg-registry.git"
+  },
+  "registries": [
+    {
+      "kind": "git",
+      "repository": "https://github.com/microsoft/vcpkg.git",
+      "baseline": "eefee7408133f3a0fef711ef9c6a3677b7e06fd7",
+      "packages": ["vcpkg-cmake", "vcpkg-cmake-config", "zlib"]
+    }
+  ]
+}
