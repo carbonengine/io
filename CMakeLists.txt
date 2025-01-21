@@ -21,9 +21,7 @@ include(CcpPackageConfigHelpers)
 
 include(cmake/CcpToolchainFlags.cmake)
 include(cmake/CcpVendorUtilities.cmake)
-include(cmake/CcpAutobuildDirs.cmake)
 include(cmake/CcpBuildConfigurations.cmake)
-
 
 include(cmake/CcpTargetConfigurations.cmake)
 
@@ -33,7 +31,6 @@ find_package(OpenSSL CONFIG REQUIRED)
 find_package(CcpLog CONFIG REQUIRED)
 find_package(carbon-core CONFIG REQUIRED)
 find_package(Scheduler CONFIG REQUIRED)
-#find_package(Tracy CONFIG REQUIRED)
 
 
 # --- _socket ---
