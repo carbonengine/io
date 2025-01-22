@@ -8,9 +8,9 @@
   "configurePresets": [
     {
       "name": "carbon_windows_vcpkg_vs",
-      "toolchainFile": "${sourceDir}/cmake/orchestration_toolchain.cmake",
+      "toolchainFile": "${sourceDir}/vendor/github.com/microsoft/vcpkg/scripts/buildsystems/vcpkg.cmake",
       "binaryDir": "./.cmake-build-${generator}-${presetName}",
-      "generator": "Ninja Multi-Config",
+      "generator": "Visual Studio 17 2022",
       "toolset": {
         "value": "v141"
       },
@@ -22,7 +22,7 @@
     },
     {
       "name": "carbon_osx_vcpkg",
-      "toolchainFile": "${sourceDir}/cmake/orchestration_toolchain.cmake",
+      "toolchainFile": "${sourceDir}/vendor/github.com/microsoft/vcpkg/scripts/buildsystems/vcpkg.cmake",
       "binaryDir": "./.cmake-build-${generator}-${presetName}",
       "generator": "Ninja Multi-Config",
       "cacheVariables": {
