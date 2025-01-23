@@ -17,7 +17,6 @@ file(TO_CMAKE_PATH "$ENV{CCP_EVE_PERFORCE_BRANCH_PATH}" BRANCH_ROOT_DIR)
 list(INSERT CMAKE_MODULE_PATH 0 ${BRANCH_ROOT_DIR}/cmake)
 
 include(CcpCmakePackageRoots)
-include(CcpPackageConfigHelpers)
 
 include(cmake/CcpToolchainFlags.cmake)
 include(cmake/CcpVendorUtilities.cmake)
@@ -265,23 +264,23 @@ if(CMAKE_PROJECT_NAME STREQUAL io)
         install(DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/doc/build/ DESTINATION documentation)
     endif()
 
-    # Install rule to ensure that our runtime and linker files are in the expected, platform-specific folders
-    install(
-            TARGETS _socket _ssl _select
-            EXPORT ioTarget
-            CONFIGURATIONS Release
-            RUNTIME DESTINATION bin/${CCP_PLATFORM}/${CCP_ARCHITECTURE}/${CCP_TOOLSET}/
-            LIBRARY DESTINATION lib/${CCP_PLATFORM}/${CCP_ARCHITECTURE}/${CCP_TOOLSET}/
-    )
-
-    # Install rule for available public headers
-    install(DIRECTORY include DESTINATION . FILES_MATCHING PATTERN "*.h")
-
-    configure_ccp_vendor_config_file(
-            TARGET carbonio
-            DESTINATION "${CMAKE_CURRENT_BINARY_DIR}/CarbonIOConfig.cmake"
-            DEPENDENCIES "Python;OpenSSL;CcpCore;CcpLog;libuv"
-            CONFIGURATIONS Release
-    )
-    install(FILES ${CMAKE_CURRENT_BINARY_DIR}/CarbonIOConfig.cmake DESTINATION .)
+#    # Install rule to ensure that our runtime and linker files are in the expected, platform-specific folders
+#    install(
+#            TARGETS _socket _ssl _select
+#            EXPORT ioTarget
+#            CONFIGURATIONS Release
+#            RUNTIME DESTINATION bin/${CCP_PLATFORM}/${CCP_ARCHITECTURE}/${CCP_TOOLSET}/
+#            LIBRARY DESTINATION lib/${CCP_PLATFORM}/${CCP_ARCHITECTURE}/${CCP_TOOLSET}/
+#    )
+#
+#    # Install rule for available public headers
+#    install(DIRECTORY include DESTINATION . FILES_MATCHING PATTERN "*.h")
+#
+#    configure_ccp_vendor_config_file(
+#            TARGET carbonio
+#            DESTINATION "${CMAKE_CURRENT_BINARY_DIR}/CarbonIOConfig.cmake"
+#            DEPENDENCIES "Python;OpenSSL;CcpCore;CcpLog;libuv"
+#            CONFIGURATIONS Release
+#    )
+#    install(FILES ${CMAKE_CURRENT_BINARY_DIR}/CarbonIOConfig.cmake DESTINATION .)
 endif()
