@@ -18,10 +18,7 @@ list(INSERT CMAKE_MODULE_PATH 0 ${BRANCH_ROOT_DIR}/cmake)
 
 include(CcpCmakePackageRoots)
 
-include(cmake/CcpToolchainFlags.cmake)
 include(cmake/CcpVendorUtilities.cmake)
-include(cmake/CcpBuildConfigurations.cmake)
-
 include(cmake/CcpTargetConfigurations.cmake)
 
 find_package(libuv CONFIG REQUIRED)
@@ -264,7 +261,7 @@ if(CMAKE_PROJECT_NAME STREQUAL io)
         install(DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/doc/build/ DESTINATION documentation)
     endif()
 
-#    # Install rule to ensure that our runtime and linker files are in the expected, platform-specific folders
+    # Install rule to ensure that our runtime and linker files are in the expected, platform-specific folders
 #    install(
 #            TARGETS _socket _ssl _select
 #            EXPORT ioTarget
@@ -273,14 +270,13 @@ if(CMAKE_PROJECT_NAME STREQUAL io)
 #            LIBRARY DESTINATION lib/${CCP_PLATFORM}/${CCP_ARCHITECTURE}/${CCP_TOOLSET}/
 #    )
 #
-#    # Install rule for available public headers
-#    install(DIRECTORY include DESTINATION . FILES_MATCHING PATTERN "*.h")
-#
-#    configure_ccp_vendor_config_file(
-#            TARGET carbonio
-#            DESTINATION "${CMAKE_CURRENT_BINARY_DIR}/CarbonIOConfig.cmake"
-#            DEPENDENCIES "Python;OpenSSL;CcpCore;CcpLog;libuv"
-#            CONFIGURATIONS Release
+#    install(
+#            EXPORT ioTarget
+#            DESTINATION ${CMAKE_INSTALL_PREFIX}/share/carbon-io
+#            FILE carbon-io.cmake
 #    )
-#    install(FILES ${CMAKE_CURRENT_BINARY_DIR}/CarbonIOConfig.cmake DESTINATION .)
+#    install(
+#            FILES carbon-ioConfig.cmake
+#            DESTINATION ${CMAKE_INSTALL_PREFIX}/share/carbon-io
+#    )
 endif()

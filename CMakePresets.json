@@ -17,7 +17,7 @@
       "cacheVariables": {
         "VCPKG_OVERLAY_TRIPLETS": "${sourceDir}/cmake/vcpkg/triplets",
         "VCPKG_TARGET_TRIPLET": "x64-windows-carbon",
-        "VCPKG_HOST_TRIPLET": "x64-windows-carbon"
+        "CMAKE_PROJECT_INCLUDE": "${sourceDir}/cmake/vcpkg/CcpToolchainFlags.cmake"
       }
     },
     {
@@ -28,7 +28,7 @@
       "cacheVariables": {
         "VCPKG_OVERLAY_TRIPLETS": "${sourceDir}/cmake/vcpkg/triplets",
         "VCPKG_TARGET_TRIPLET": "x64-windows-carbon",
-        "VCPKG_HOST_TRIPLET": "x64-windows-carbon"
+        "CMAKE_PROJECT_INCLUDE": "${sourceDir}/cmake/vcpkg/CcpToolchainFlags.cmake"
       }
     },
     {
@@ -39,7 +39,7 @@
       "cacheVariables": {
         "VCPKG_OVERLAY_TRIPLETS": "${sourceDir}/cmake/vcpkg/triplets",
         "VCPKG_TARGET_TRIPLET": "arm64-osx-carbon",
-        "VCPKG_HOST_TRIPLET": "arm64-osx-carbon"
+        "CMAKE_PROJECT_INCLUDE": "${sourceDir}/cmake/vcpkg/CcpToolchainFlags.cmake"
       }
     }
   ]

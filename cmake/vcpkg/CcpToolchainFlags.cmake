@@ -1,5 +1,6 @@
 set(CCP_TOOLSET ${CMAKE_GENERATOR_TOOLSET})
 
+# TODO: It might be an error to do this now that we are using VCPKG
 ## Take manual control over these flags: https://gitlab.kitware.com/cmake/cmake/-/issues/19084
 set(CMAKE_CXX_FLAGS_DEBUG "")
 set(CMAKE_CXX_FLAGS_TRINITYDEV "")
@@ -42,3 +43,5 @@ set(CMAKE_OBJCXX_VISIBILITY_PRESET hidden)
 set(CMAKE_XCODE_GENERATE_SCHEME ON)
 set(CMAKE_INTERPROCEDURAL_OPTIMIZATION ON)
 set_property(GLOBAL PROPERTY USE_FOLDERS ON)
+
+include(${CMAKE_CURRENT_LIST_DIR}/CcpBuildConfigurations.cmake)
