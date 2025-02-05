@@ -66,7 +66,8 @@ get_target_property(SCHEDULER_INCLUDE_DIR Scheduler INTERFACE_INCLUDE_DIRECTORIE
 
 target_include_directories(_socket
         PUBLIC
-        ${CMAKE_CURRENT_SOURCE_DIR}/include
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+        $<INSTALL_INTERFACE:include>
         PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src
         ${SCHEDULER_INCLUDE_DIR}
@@ -131,7 +132,8 @@ set_target_properties(_ssl
 )
 target_include_directories(_ssl
         PUBLIC
-        ${CMAKE_CURRENT_SOURCE_DIR}/include
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+        $<INSTALL_INTERFACE:include>
         PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src
         ${SCHEDULER_INCLUDE_DIR}
@@ -261,22 +263,33 @@ if(CMAKE_PROJECT_NAME STREQUAL io)
         install(DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/doc/build/ DESTINATION documentation)
     endif()
 
-    # Install rule to ensure that our runtime and linker files are in the expected, platform-specific folders
-#    install(
-#            TARGETS _socket _ssl _select
-#            EXPORT ioTarget
-#            CONFIGURATIONS Release
-#            RUNTIME DESTINATION bin/${CCP_PLATFORM}/${CCP_ARCHITECTURE}/${CCP_TOOLSET}/
-#            LIBRARY DESTINATION lib/${CCP_PLATFORM}/${CCP_ARCHITECTURE}/${CCP_TOOLSET}/
-#    )
-#
-#    install(
-#            EXPORT ioTarget
-#            DESTINATION ${CMAKE_INSTALL_PREFIX}/share/carbon-io
-#            FILE carbon-io.cmake
-#    )
-#    install(
-#            FILES carbon-ioConfig.cmake
-#            DESTINATION ${CMAKE_INSTALL_PREFIX}/share/carbon-io
-#    )
+    set(INSTALL_BIN_ONLY OFF CACHE BOOL "Do not Install configuration files meant to be read by projects using this project as a dependency (Cmake Config/ header files etc . . .). Set this to ON when installing this component to the perforce vendor folder")
+    if(INSTALL_BIN_ONLY)
+        # Install rule to ensure that our runtime and linker files are in the expected, platform-specific folders
+        install(
+                TARGETS _socket _ssl _select
+                EXPORT ioTarget
+                CONFIGURATIONS Release
+                RUNTIME DESTINATION bin/${CCP_PLATFORM}/${CCP_ARCHITECTURE}/${CCP_TOOLSET}/
+        )
+    else()
+        # Install rule to ensure that our runtime and linker files are in the expected, platform-specific folders
+        install(
+                TARGETS _socket _ssl _select
+                EXPORT ioTarget
+                CONFIGURATIONS Release
+                RUNTIME DESTINATION bin/${CCP_PLATFORM}/${CCP_ARCHITECTURE}/${CCP_TOOLSET}/
+                LIBRARY DESTINATION lib/${CCP_PLATFORM}/${CCP_ARCHITECTURE}/${CCP_TOOLSET}/
+        )
+        # Install rule for available public headers
+        install(DIRECTORY include DESTINATION . FILES_MATCHING PATTERN "*.h")
+
+        install(
+                EXPORT ioTarget
+                DESTINATION ${CMAKE_INSTALL_PREFIX}/share/carbon-io
+                FILE carbon-io.cmake)
+        install(
+                FILES carbon-ioConfig.cmake
+                DESTINATION ${CMAKE_INSTALL_PREFIX}/share/carbon-io)
+    endif()
 endif()
