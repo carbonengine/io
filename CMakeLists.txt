@@ -22,7 +22,6 @@ include(CcpPackageConfigHelpers)
 find_package(libuv CONFIG REQUIRED)
 find_package(Python CONFIG REQUIRED)
 find_package(OpenSSL CONFIG REQUIRED)
-find_package(CcpLog CONFIG REQUIRED)
 find_package(CcpCore CONFIG REQUIRED)
 find_package(Scheduler CONFIG REQUIRED)
 
@@ -35,14 +34,12 @@ target_precompile_headers(_socket PRIVATE
         <memory>
         <string>
         <string_view>
-
-        <CcpLog.h>
+        <CCPLog.h>
         <CcpScopeGuard.h>
 )
 target_link_libraries(_socket
         PRIVATE
         libuv::uv
-        ccp::log
         CcpCore
         Python
 )
@@ -56,6 +53,7 @@ set_target_properties(_socket
         PROPERTIES
         DEBUG_POSTFIX ""
         INTERNAL_POSTFIX ""
+        TRINITYDEV_POSTFIX ""
         OUTPUT_NAME _carbonsocket
 )
 
@@ -125,6 +123,7 @@ set_target_properties(_ssl
         PROPERTIES
         DEBUG_POSTFIX ""
         INTERNAL_POSTFIX ""
+        TRINITYDEV_POSTFIX ""
         OUTPUT_NAME _carbonssl
 )
 target_include_directories(_ssl
@@ -143,6 +142,7 @@ set_target_properties(_select
         PROPERTIES
         DEBUG_POSTFIX ""
         INTERNAL_POSTFIX ""
+        TRINITYDEV_POSTFIX ""
         OUTPUT_NAME carbonselect
 )
 get_target_property(_SOURCES _select SOURCES)
@@ -274,7 +274,7 @@ if(CMAKE_PROJECT_NAME STREQUAL io)
     configure_ccp_vendor_config_file(
             TARGET carbonio
             DESTINATION "${CMAKE_CURRENT_BINARY_DIR}/CarbonIOConfig.cmake"
-            DEPENDENCIES "Python;OpenSSL;CcpCore;CcpLog;libuv"
+            DEPENDENCIES "Python;OpenSSL;CcpCore;libuv"
             CONFIGURATIONS Release
     )
     install(FILES ${CMAKE_CURRENT_BINARY_DIR}/CarbonIOConfig.cmake DESTINATION .)

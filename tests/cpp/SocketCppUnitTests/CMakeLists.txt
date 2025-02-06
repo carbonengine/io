@@ -7,7 +7,7 @@ target_precompile_headers(SocketCppUnitTests
         PRIVATE
         <Python.h>
         <gtest/gtest.h>
-        <CcpLog.h>
+        <CCPLog.h>
         <CcpScopeGuard.h>
 )
 target_include_directories(SocketCppUnitTests
@@ -21,7 +21,6 @@ target_link_libraries(SocketCppUnitTests
         GTest::GTest
         libuv::uv
         Python
-        ccp::log
         CcpCore
 )
 if(WIN32)
