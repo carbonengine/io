@@ -5,6 +5,16 @@ set(VCPKG_PLATFORM_TOOLSET v141)
 
 set(VCPKG_ENV_PASSTHROUGH CCP_EVE_PERFORCE_BRANCH_PATH)
 
+set(VCPKG_CXX_FLAGS "")
+set(VCPKG_C_FLAGS "")
+set(VCPKG_CXX_FLAGS_RELEASE "")
+set(VCPKG_C_FLAGS_RELEASE "")
+set(VCPKG_CXX_FLAGS_DEBUG "")
+set(VCPKG_C_FLAGS_DEBUG "")
+set(VCPKG_LINKER_FLAGS "")
+set(VCPKG_LINKER_FLAGS_RELEASE "")
+set(VCPKG_LINKER_FLAGS_DEBUG "")
+
 # https://docs.microsoft.com/en-us/cpp/build/reference/mp-build-with-multiple-processes?view=msvc-150
 # https://github.com/bluescarni/mppp/issues/177
 set(VCPKG_CXX_FLAGS "-D_SBCS -DWINVER=0x0A00 -D_WIN32_WINNT=0x0A00 -D_WIN32_WINDOWS=0x0A00 -DNTDDI_VERSION=0x0A000000 /MP /W3 /permissive-")

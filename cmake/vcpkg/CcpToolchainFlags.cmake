@@ -1,13 +1,5 @@
 set(CCP_TOOLSET ${CMAKE_GENERATOR_TOOLSET})
 
-# TODO: It might be an error to do this now that we are using VCPKG
-## Take manual control over these flags: https://gitlab.kitware.com/cmake/cmake/-/issues/19084
-set(CMAKE_CXX_FLAGS_DEBUG "")
-set(CMAKE_CXX_FLAGS_TRINITYDEV "")
-set(CMAKE_C_FLAGS_TRINITYDEV "")
-set(CMAKE_SHARED_LINKER_FLAGS_TRINITYDEV "")
-set(CMAKE_EXE_LINKER_FLAGS_TRINITYDEV "")
-
 set(MATH_OPTIMIZE_FLAG "/fp:fast")
 set(CMAKE_INTERPROCEDURAL_OPTIMIZATION_DEBUG OFF)
 set(WIN_SDK_VERSION "10.0.17763.0")

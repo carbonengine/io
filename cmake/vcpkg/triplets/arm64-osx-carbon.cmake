@@ -41,3 +41,5 @@ string(APPEND COMPILE_FLAGS_STRING " -g")
 set(VCPKG_CXX_FLAGS ${COMPILE_FLAGS_STRING})
 set(VCPKG_C_FLAGS "${VCPKG_CXX_FLAGS}")
 
+get_filename_component(toolchain_settings_file "${CMAKE_CURRENT_LIST_DIR}/../CcpToolchainFlags.cmake" ABSOLUTE)
+set(VCPKG_CMAKE_CONFIGURE_OPTIONS "-DCMAKE_PROJECT_INCLUDE=\"${toolchain_settings_file}\"")

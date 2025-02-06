@@ -2,7 +2,7 @@
   "dependencies": [
     {
       "name": "carbon-core",
-      "version>=": "2.0.0-alpha.6-0-g1793754"
+      "version>=": "2.0.1"
     }
   ]
 }
