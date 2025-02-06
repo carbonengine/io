@@ -35,4 +35,4 @@ set(VCPKG_LINKER_FLAGS_DEBUG "/DEBUG:FASTLINK")
 set(VCPKG_CMAKE_SYSTEM_VERSION "10.0.17763.0")
 
 get_filename_component(toolchain_settings_file "${CMAKE_CURRENT_LIST_DIR}/../CcpToolchainFlags.cmake" ABSOLUTE)
-set(VCPKG_CMAKE_CONFIGURE_OPTIONS "-DCMAKE_PROJECT_INCLUDE=\"${toolchain_settings_file}\"")
+set(VCPKG_CMAKE_CONFIGURE_OPTIONS "-DCMAKE_PROJECT_INCLUDE=${toolchain_settings_file}")
