@@ -7,7 +7,7 @@ target_precompile_headers(SocketCppUnitTests
         PRIVATE
         <Python.h>
         <gtest/gtest.h>
-        <CcpLog.h>
+        <CCPLog.h>
         <CcpScopeGuard.h>
 )
 target_include_directories(SocketCppUnitTests
