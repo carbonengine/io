@@ -9,7 +9,7 @@
       "kind": "git",
       "repository": "https://github.com/microsoft/vcpkg.git",
       "baseline": "bea476a80218a581bcb5318595849520217c825e",
-      "packages": ["vcpkg-cmake", "vcpkg-cmake-config"]
+      "packages": ["vcpkg-cmake", "vcpkg-cmake-config", "libuv"]
     }
   ]
 }

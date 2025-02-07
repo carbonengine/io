@@ -3,8 +3,6 @@ set(VCPKG_CRT_LINKAGE dynamic)
 set(VCPKG_LIBRARY_LINKAGE dynamic)
 set(VCPKG_PLATFORM_TOOLSET v141)
 
-set(VCPKG_ENV_PASSTHROUGH CCP_EVE_PERFORCE_BRANCH_PATH)
-
 set(VCPKG_CXX_FLAGS "")
 set(VCPKG_C_FLAGS "")
 set(VCPKG_CXX_FLAGS_RELEASE "")
@@ -15,24 +13,32 @@ set(VCPKG_LINKER_FLAGS "")
 set(VCPKG_LINKER_FLAGS_RELEASE "")
 set(VCPKG_LINKER_FLAGS_DEBUG "")
 
-# https://docs.microsoft.com/en-us/cpp/build/reference/mp-build-with-multiple-processes?view=msvc-150
-# https://github.com/bluescarni/mppp/issues/177
-set(VCPKG_CXX_FLAGS "-D_SBCS -DWINVER=0x0A00 -D_WIN32_WINNT=0x0A00 -D_WIN32_WINDOWS=0x0A00 -DNTDDI_VERSION=0x0A000000 /MP /W3 /permissive-")
-set(VCPKG_C_FLAGS "${VCPKG_CXX_FLAGS}")
+if (PORT MATCHES "carbon-*")
+    set(VCPKG_ENV_PASSTHROUGH CCP_EVE_PERFORCE_BRANCH_PATH)
+    # https://docs.microsoft.com/en-us/cpp/build/reference/mp-build-with-multiple-processes?view=msvc-150
+    # https://github.com/bluescarni/mppp/issues/177
+    set(VCPKG_CXX_FLAGS "-D_SBCS -DWINVER=0x0A00 -D_WIN32_WINNT=0x0A00 -D_WIN32_WINDOWS=0x0A00 -DNTDDI_VERSION=0x0A000000 /MP /W3 /permissive-")
+    set(VCPKG_C_FLAGS "${VCPKG_CXX_FLAGS}")
 
-set(VCPKG_CXX_FLAGS_RELEASE "${VCPKG_CXX_FLAGS} /Zi")
-set(VCPKG_C_FLAGS_RELEASE "${VCPKG_CXX_FLAGS_RELEASE}")
+    set(VCPKG_CXX_FLAGS_RELEASE "${VCPKG_CXX_FLAGS} /Zi")
+    set(VCPKG_C_FLAGS_RELEASE "${VCPKG_CXX_FLAGS_RELEASE}")
 
-set(VCPKG_CXX_FLAGS_DEBUG "/Od /ZI")
-set(VCPKG_C_FLAGS_DEBUG ${VCPKG_CXX_FLAGS_DEBUG})
+    set(VCPKG_CXX_FLAGS_DEBUG "/Od /ZI")
+    set(VCPKG_C_FLAGS_DEBUG ${VCPKG_CXX_FLAGS_DEBUG})
 
-set(VCPKG_LINKER_FLAGS "/IGNORE:4099 /NODEFAULTLIB:libcmt.lib")
+    set(VCPKG_LINKER_FLAGS "/IGNORE:4099 /NODEFAULTLIB:libcmt.lib")
 
-set(VCPKG_LINKER_FLAGS_RELEASE "/DEBUG:FULL")
+    set(VCPKG_LINKER_FLAGS_RELEASE "/DEBUG:FULL")
 
-set(VCPKG_LINKER_FLAGS_DEBUG "/DEBUG:FASTLINK")
+    set(VCPKG_LINKER_FLAGS_DEBUG "/DEBUG:FASTLINK")
 
-set(VCPKG_CMAKE_SYSTEM_VERSION "10.0.17763.0")
+    set(VCPKG_CMAKE_SYSTEM_VERSION "10.0.17763.0")
 
-get_filename_component(toolchain_settings_file "${CMAKE_CURRENT_LIST_DIR}/../CcpToolchainFlags.cmake" ABSOLUTE)
-set(VCPKG_CMAKE_CONFIGURE_OPTIONS "-DCMAKE_PROJECT_INCLUDE=${toolchain_settings_file}")
+    get_filename_component(toolchain_settings_file "${CMAKE_CURRENT_LIST_DIR}/../CcpToolchainFlags.cmake" ABSOLUTE)
+    set(VCPKG_CMAKE_CONFIGURE_OPTIONS "-DCMAKE_PROJECT_INCLUDE=${toolchain_settings_file}")
+endif()
+
+if (PORT MATCHES "libuv")
+    set(VCPKG_BUILD_TYPE release)
+    set(VCPKG_CMAKE_CONFIGURE_OPTIONS "-DLIBUV_BUILD_SHARED=OFF")
+endif()
