@@ -3418,9 +3418,13 @@ _ssl__SSLContext_impl(PyTypeObject *type, int proto_version)
     }
 #endif
 
-    /* Set SSL_MODE_RELEASE_BUFFERS. This potentially greatly reduces memory
-       usage for no cost at all. */
-    SSL_CTX_set_mode(self->ctx, SSL_MODE_RELEASE_BUFFERS);
+    /* DO NOT set SSL_MODE_RELEASE_BUFFERS. It's supposed to save about 34k per idle SSL
+     * by clearing the buffers used for reading / writing after each operation.
+     * Usually, this is totally fine, as the buffer gets initialized at the start of each operation,
+     * and in a standard Python environment, these calls are not re-entrant.
+     * However, since there is nothing preventing another tasklet from starting another blocking read / write
+     * operation while the first tasklet is blocked, the first tasklet is not able to assume that clearing the buffer is safe.
+     * Therefore, disable this optimization as it could lead to accessing freed memory. */
 
 #define SID_CTX "Python"
     SSL_CTX_set_session_id_context(self->ctx, (const unsigned char *) SID_CTX,
