@@ -18,6 +18,7 @@ list(INSERT CMAKE_MODULE_PATH 0 ${BRANCH_ROOT_DIR}/cmake)
 
 include(CcpCmakePackageRoots)
 
+include(cmake/CcpGlobalSettings.cmake)
 include(cmake/CcpVendorUtilities.cmake)
 include(cmake/CcpTargetConfigurations.cmake)
 
