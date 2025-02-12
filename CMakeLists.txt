@@ -45,7 +45,7 @@ target_precompile_headers(_socket PRIVATE
 )
 target_link_libraries(_socket
         PRIVATE
-        libuv::uv
+        $<IF:$<TARGET_EXISTS:libuv::uv_a>,libuv::uv_a,libuv::uv>
         ccp::log
         CcpCore
         Python

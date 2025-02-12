@@ -8,34 +8,34 @@
   "configurePresets": [
     {
       "name": "carbon_windows_vcpkg_vs",
-      "toolchainFile": "${sourceDir}/vendor/github.com/microsoft/vcpkg/scripts/buildsystems/vcpkg.cmake",
+      "toolchainFile": "${sourceDir}/carbon-vcpkg/toolchain.cmake",
       "binaryDir": "./.cmake-build-${generator}-${presetName}",
       "generator": "Visual Studio 17 2022",
       "toolset": {
         "value": "v141"
       },
       "cacheVariables": {
-        "VCPKG_OVERLAY_TRIPLETS": "${sourceDir}/cmake/vcpkg/triplets",
+        "VCPKG_OVERLAY_TRIPLETS": "${sourceDir}/carbon-vcpkg/triplets",
         "VCPKG_TARGET_TRIPLET": "x64-windows-carbon"
       }
     },
     {
       "name": "carbon_windows_vcpkg_nmc",
-      "toolchainFile": "${sourceDir}/vendor/github.com/microsoft/vcpkg/scripts/buildsystems/vcpkg.cmake",
+      "toolchainFile": "${sourceDir}/carbon-vcpkg/toolchain.cmake",
       "binaryDir": "./.cmake-build-${generator}-${presetName}",
       "generator": "Ninja Multi-Config",
       "cacheVariables": {
-        "VCPKG_OVERLAY_TRIPLETS": "${sourceDir}/cmake/vcpkg/triplets",
+        "VCPKG_OVERLAY_TRIPLETS": "${sourceDir}/carbon-vcpkg/triplets",
         "VCPKG_TARGET_TRIPLET": "x64-windows-carbon"
       }
     },
     {
       "name": "carbon_osx_vcpkg",
-      "toolchainFile": "${sourceDir}/vendor/github.com/microsoft/vcpkg/scripts/buildsystems/vcpkg.cmake",
+      "toolchainFile": "${sourceDir}/carbon-vcpkg/toolchain.cmake",
       "binaryDir": "./.cmake-build-${generator}-${presetName}",
       "generator": "Ninja Multi-Config",
       "cacheVariables": {
-        "VCPKG_OVERLAY_TRIPLETS": "${sourceDir}/cmake/vcpkg/triplets",
+        "VCPKG_OVERLAY_TRIPLETS": "${sourceDir}/carbon-vcpkg/triplets",
         "VCPKG_TARGET_TRIPLET": "arm64-osx-carbon"
       }
     }
