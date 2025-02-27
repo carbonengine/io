@@ -20,7 +20,7 @@ target_link_libraries(SocketCppUnitTests
         PRIVATE
         GTest::GTest
         $<IF:$<TARGET_EXISTS:libuv::uv_a>,libuv::uv_a,libuv::uv>
-        Python
+        Python3::Python
         ccp::log
         CcpCore
 )
@@ -41,7 +41,7 @@ elseif(APPLE)
     add_custom_command(
             TARGET SocketCppUnitTests POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            $<TARGET_FILE:Python> $<TARGET_FILE_DIR:SocketCppUnitTests>
+            $<TARGET_FILE:Python3::Python> $<TARGET_FILE_DIR:SocketCppUnitTests>
             COMMAND_EXPAND_LISTS
     )
 endif()
@@ -51,4 +51,5 @@ endif()
 # extensions are located. That way we can avoid copying them around.
 gtest_discover_tests(SocketCppUnitTests
         DISCOVERY_MODE PRE_TEST
+        WORKING_DIRECTORY $<TARGET_FILE_DIR:Python3::Python>
 )

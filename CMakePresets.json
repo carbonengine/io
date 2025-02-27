@@ -15,8 +15,10 @@
         "value": "v141"
       },
       "cacheVariables": {
+        "VCPKG_USE_HOST_TOOLS": "ON",
         "VCPKG_OVERLAY_TRIPLETS": "${sourceDir}/carbon-vcpkg/triplets",
-        "VCPKG_TARGET_TRIPLET": "x64-windows-carbon"
+        "VCPKG_TARGET_TRIPLET": "x64-windows-carbon",
+        "VCPKG_HOST_TRIPLET": "x64-windows-carbon"
       }
     },
     {
@@ -25,8 +27,10 @@
       "binaryDir": "./.cmake-build-${generator}-${presetName}",
       "generator": "Ninja Multi-Config",
       "cacheVariables": {
+        "VCPKG_USE_HOST_TOOLS": "ON",
         "VCPKG_OVERLAY_TRIPLETS": "${sourceDir}/carbon-vcpkg/triplets",
-        "VCPKG_TARGET_TRIPLET": "x64-windows-carbon"
+        "VCPKG_TARGET_TRIPLET": "x64-windows-carbon",
+        "VCPKG_HOST_TRIPLET": "x64-windows-carbon"
       }
     },
     {
@@ -35,8 +39,10 @@
       "binaryDir": "./.cmake-build-${generator}-${presetName}",
       "generator": "Ninja Multi-Config",
       "cacheVariables": {
+        "VCPKG_USE_HOST_TOOLS": "ON",
         "VCPKG_OVERLAY_TRIPLETS": "${sourceDir}/carbon-vcpkg/triplets",
-        "VCPKG_TARGET_TRIPLET": "arm64-osx-carbon"
+        "VCPKG_TARGET_TRIPLET": "arm64-osx-carbon",
+        "VCPKG_HOST_TRIPLET": "x64-windows-carbon"
       }
     }
   ]

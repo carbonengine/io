@@ -4,7 +4,7 @@ ccp_add_library(sockettesthelper SHARED
 
 target_link_libraries(sockettesthelper
         PRIVATE
-        Python
+        Python3::Python
 )
 
 set_target_properties(sockettesthelper

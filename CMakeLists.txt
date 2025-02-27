@@ -1,4 +1,7 @@
 cmake_minimum_required(VERSION 3.31)
+
+set(VCPKG_USE_HOST_TOOLS ON)
+
 project(io VERSION 1.0.0)
 
 if(NOT DEFINED ENV{CCP_EVE_PERFORCE_BRANCH_PATH})
@@ -23,8 +26,10 @@ include(cmake/CcpVendorUtilities.cmake)
 include(cmake/CcpTargetConfigurations.cmake)
 
 find_package(libuv CONFIG REQUIRED)
-find_package(Python CONFIG REQUIRED)
-find_package(OpenSSL CONFIG REQUIRED)
+find_package(Python3 COMPONENTS Development REQUIRED)
+
+set(OPENSSL_USE_STATIC_LIBS ON)
+find_package(OpenSSL REQUIRED)
 find_package(CcpLog CONFIG REQUIRED)
 find_package(carbon-core CONFIG REQUIRED)
 find_package(Scheduler CONFIG REQUIRED)
@@ -48,7 +53,7 @@ target_link_libraries(_socket
         $<IF:$<TARGET_EXISTS:libuv::uv_a>,libuv::uv_a,libuv::uv>
         ccp::log
         CcpCore
-        Python
+        Python3::Python
 )
 if(WIN32)
     target_link_libraries(_socket
@@ -120,10 +125,12 @@ source_group("_ssl" FILES
 )
 target_link_libraries(_ssl
         PRIVATE
-        Python
+        Python3::Python
         PUBLIC
         OpenSSL::Crypto
         OpenSSL::SSL
+#        crypt32
+#        ws2_32
 )
 set_target_properties(_ssl
         PROPERTIES
@@ -157,7 +164,7 @@ source_group("_select" FILES
 )
 target_link_libraries(_select
         PRIVATE
-        Python
+        Python3::Python
 )
 if(WIN32)
     target_link_libraries(_select PUBLIC ws2_32.lib)
@@ -172,14 +179,20 @@ if(CMAKE_PROJECT_NAME STREQUAL io)
         add_subdirectory(tests)
         # discover python tests ... this may be a little bit brittle since we're working around the missing `_blueexposuretest`
         # binary. As in, test discovery happens during the configure stage at which the binary does not exist yet.
+
+        find_program(BUILT_PYTHON_EXECUTABLE python REQUIRED NO_SYSTEM_ENVIRONMENT_PATH NO_CMAKE_SYSTEM_PATH)
+        get_filename_component(PYTHON_TOOL_ROOT_DIR ${BUILT_PYTHON_EXECUTABLE} DIRECTORY)
+
         if(WIN32)
-            set(ENV{PYTHONPATH} ${BRANCH_ROOT_DIR}/carbon/common/stdlib\;${Python_ROOT}/${CCP_VENDOR_BIN_PATH}\;${CMAKE_CURRENT_SOURCE_DIR}/python\;${Scheduler_ROOT}/${CCP_VENDOR_BIN_PATH}\;${Greenlet_ROOT}/${CCP_VENDOR_BIN_PATH}\;${Greenlet_ROOT}/python)
+            set(ENV{PYTHONPATH} ${BRANCH_ROOT_DIR}/carbon/common/stdlib\;${PYTHON_TOOL_ROOT_DIR}\;${CMAKE_CURRENT_SOURCE_DIR}/python\;${Scheduler_ROOT}/${CCP_VENDOR_BIN_PATH}\;${Greenlet_ROOT}/${CCP_VENDOR_BIN_PATH}\;${Greenlet_ROOT}/python)
         elseif(APPLE)
-            set(ENV{PYTHONPATH} ${BRANCH_ROOT_DIR}/carbon/common/stdlib:${Python_ROOT}/${CCP_VENDOR_BIN_PATH}:${CMAKE_CURRENT_SOURCE_DIR}/python:${Scheduler_ROOT}/${CCP_VENDOR_LIB_PATH}:${Greenlet_ROOT}/${CCP_VENDOR_BIN_PATH}\:${Greenlet_ROOT}/python)
+            set(ENV{PYTHONPATH} ${BRANCH_ROOT_DIR}/carbon/common/stdlib:${PYTHON_TOOL_ROOT_DIR}:${CMAKE_CURRENT_SOURCE_DIR}/python:${Scheduler_ROOT}/${CCP_VENDOR_LIB_PATH}:${Greenlet_ROOT}/${CCP_VENDOR_BIN_PATH}\:${Greenlet_ROOT}/python)
         endif()
+
+        message(STATUS "the python path is $ENV{PYTHONPATH}")
         # Discovery works with the standard python interpreter because it isn't running anything, it just needs to find all
         # the defined test cases. Therefore, just use that one, even though it cannot run the discovered test cases.
-        execute_process(COMMAND ${PYTHON_EXECUTABLE} discover.py
+        execute_process(COMMAND ${BUILT_PYTHON_EXECUTABLE} discover.py
                 OUTPUT_VARIABLE PYTHON_TESTS_STR
                 OUTPUT_STRIP_TRAILING_WHITESPACE
                 ERROR_STRIP_TRAILING_WHITESPACE
@@ -196,13 +209,13 @@ if(CMAKE_PROJECT_NAME STREQUAL io)
         foreach(PYTHON_TEST ${PYTHON_TESTS})
             message(STATUS "Found test ${PYTHON_TEST}")
             add_test(NAME ${PYTHON_TEST}
-                    COMMAND ${PYTHON_EXECUTABLE} -m carboniotests -v ${PYTHON_TEST}
+                    COMMAND ${BUILT_PYTHON_EXECUTABLE} -m carboniotests -v ${PYTHON_TEST}
                     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/tests/python
             )
             if(WIN32)
-                set_tests_properties(${PYTHON_TEST} PROPERTIES ENVIRONMENT "PYTHONPATH=$<TARGET_FILE_DIR:_socket>\;$<TARGET_FILE_DIR:sockettesthelper>\;${BRANCH_ROOT_DIR}/carbon/common/stdlib\;${Python_ROOT}/${CCP_VENDOR_BIN_PATH}\;${Scheduler_ROOT}/python\;${Scheduler_ROOT}/${CCP_VENDOR_BIN_PATH}\;${Greenlet_ROOT}/${CCP_VENDOR_BIN_PATH}\;${Greenlet_ROOT}/python\;${CMAKE_CURRENT_SOURCE_DIR}/python;BUILDFLAVOR=$<LOWER_CASE:$<CONFIG>>")
+                set_tests_properties(${PYTHON_TEST} PROPERTIES ENVIRONMENT "PYTHONPATH=$<TARGET_FILE_DIR:_socket>\;$<TARGET_FILE_DIR:sockettesthelper>\;${BRANCH_ROOT_DIR}/carbon/common/stdlib\;${PYTHON_TOOL_ROOT_DIR}\;${Scheduler_ROOT}/python\;${Scheduler_ROOT}/${CCP_VENDOR_BIN_PATH}\;${Greenlet_ROOT}/${CCP_VENDOR_BIN_PATH}\;${Greenlet_ROOT}/python\;${CMAKE_CURRENT_SOURCE_DIR}/python;BUILDFLAVOR=$<LOWER_CASE:$<CONFIG>>")
             elseif (APPLE)
-                set_tests_properties(${PYTHON_TEST} PROPERTIES ENVIRONMENT "PYTHONPATH=$<TARGET_FILE_DIR:_socket>:$<TARGET_FILE_DIR:sockettesthelper>:${BRANCH_ROOT_DIR}/carbon/common/stdlib:${Python_ROOT}/${CCP_VENDOR_BIN_PATH}:${Scheduler_ROOT}/${CCP_VENDOR_LIB_PATH}:${Scheduler_ROOT}/python:${Greenlet_ROOT}/${CCP_VENDOR_BIN_PATH}:${Greenlet_ROOT}/python:${CMAKE_CURRENT_SOURCE_DIR}/python;BUILDFLAVOR=$<LOWER_CASE:$<CONFIG>>")
+                set_tests_properties(${PYTHON_TEST} PROPERTIES ENVIRONMENT "PYTHONPATH=$<TARGET_FILE_DIR:_socket>:$<TARGET_FILE_DIR:sockettesthelper>:${BRANCH_ROOT_DIR}/carbon/common/stdlib:${PYTHON_TOOL_ROOT_DIR}:${Scheduler_ROOT}/${CCP_VENDOR_LIB_PATH}:${Scheduler_ROOT}/python:${Greenlet_ROOT}/${CCP_VENDOR_BIN_PATH}:${Greenlet_ROOT}/python:${CMAKE_CURRENT_SOURCE_DIR}/python;BUILDFLAVOR=$<LOWER_CASE:$<CONFIG>>")
             else()
                 message(FATAL_ERROR "Unsupported platform")
             endif ()
