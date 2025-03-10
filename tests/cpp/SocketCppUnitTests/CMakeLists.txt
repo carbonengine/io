@@ -21,7 +21,6 @@ target_link_libraries(SocketCppUnitTests
         GTest::GTest
         $<IF:$<TARGET_EXISTS:libuv::uv_a>,libuv::uv_a,libuv::uv>
         Python3::Python
-        ccp::log
         CcpCore
 )
 if(WIN32)
