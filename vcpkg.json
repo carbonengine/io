@@ -2,7 +2,7 @@
   "dependencies": [
     {
       "name": "carbon-core",
-      "version>=": "2.0.5"
+      "version>=": "2.1.1#3"
     },
     {
       "name": "libuv",
@@ -10,7 +10,7 @@
     },
     {
       "name": "python3",
-      "version>=": "3.12.9"
+      "version>=": "3.12.3#1"
     },
     {
       "name": "openssl",
@@ -20,6 +20,14 @@
       "name": "vcpkg-get-python",
       "host": true,
       "version>=": "2025-02-09#0"
+    },
+    {
+      "name": "carbon-scheduler",
+      "version>=": "1.0.0#1"
+    },
+    {
+      "name": "gtest",
+      "version>=": "1.16.0"
     }
   ],
   "overrides": [

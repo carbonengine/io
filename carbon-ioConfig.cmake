@@ -1,7 +1,30 @@
 include(CMakeFindDependencyMacro)
 
-# ${CMAKE_CURRENT_LIST_DIR}/carbon-io.cmake is generated automatically by cmake as part of the install step
-include(${CMAKE_CURRENT_LIST_DIR}/carbon-io.cmake)
+set(CarbonIO_INCLUDE_DIR "${_VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/include")
+set(CarbonIO_Libraries _socket _ssl _select)
+
+if(APPLE)
+    set(_SHARED_LIBRARY_SUFFIX ".so")
+else()
+    set(_SHARED_LIBRARY_SUFFIX ${CMAKE_SHARED_LIBRARY_SUFFIX})
+endif()
+
+if(APPLE)
+    set_target_properties(CarbonIO PROPERTIES
+            IMPORTED_LOCATION "${_VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/lib/_carbonsocket.so"
+    )
+elseif(WIN32)
+    set_target_properties(CarbonIO PROPERTIES
+            IMPORTED_LOCATION "${_VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/bin/_carbonsocket.pyd"
+    )
+else()
+    message(FATAL_ERROR "carbon-io not supported on platform.")
+endif()
+
+set_target_properties(CarbonIO PROPERTIES
+        INTERFACE_INCLUDE_DIRECTORIES "${CarbonIO_INCLUDE_DIR}"
+        INTERFACE_LINK_LIBRARIES ${CarbonIO_Libraries}
+)
 
 # Please specify all of this projects transitive dependencies here with calls
 # In order for a consuming cmake project system to locate any transitive dependencies of this project, they must be
