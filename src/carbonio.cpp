@@ -1957,7 +1957,7 @@ PyObject* StreamPacketReceiveRequest::execute()
 	if( !acquireReceive( "StreamPacketReceiveRequest" ) )
 	{
 		// Socket has most likely been closed, signal connection closed.
-		return PyTuple_Pack( 3, Py_None, Py_None, PyLong_FromLong( 0 ) );
+		return Py_BuildValue( "(NNn)", Py_None, Py_None, 0 );
 	}
 	ON_BLOCK_EXIT([&]{releaseReceive("StreamPacketReceiveRequest");});
 
@@ -2010,10 +2010,10 @@ PyObject* StreamPacketReceiveRequest::execute()
 	if( packetSize == 0 && m_eof )
 	{
 		// closing packet received, signal connection closed
-		packet = PyTuple_Pack( 3, Py_None, Py_None, PyLong_FromLong( 0 ) );
+		packet = Py_BuildValue( "(NNn)", Py_None, Py_None, 0 );
 	} else {
 		auto sequenceNumber = m_requestData->packetNumber++;
-		packet = PyTuple_Pack( 3, PyBytes_FromStringAndSize( m_payload, packetSize ), PyBytes_FromStringAndSize( m_oobData, m_oobDataLen ), PyLong_FromSize_t( sequenceNumber ) );
+		packet = Py_BuildValue( "(NNn)", PyBytes_FromStringAndSize( m_payload, packetSize ), PyBytes_FromStringAndSize( m_oobData, m_oobDataLen ), sequenceNumber );
 	}
 
 	return packet;
