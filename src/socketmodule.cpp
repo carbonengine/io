@@ -5710,6 +5710,8 @@ static PyObject *sock_sendpacket(PySocketSockObject *s, PyObject *args)
 		return nullptr;
 	}
 
+	ON_BLOCK_EXIT( [&pbuf] { PyBuffer_Release(&pbuf); } );
+
 	if( s->sock_fd == INVALID_SOCKET || !is_valid_uv_handle( s->uv_handle ) )
 	{
 		errno = EBADF;
