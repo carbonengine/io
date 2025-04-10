@@ -247,22 +247,18 @@ if(CMAKE_PROJECT_NAME STREQUAL io)
         add_dependencies(Sphinx Scheduler)
     endif()
 
-    set(INSTALL_BIN_ONLY OFF CACHE BOOL "Do not Install configuration files meant to be read by projects using this project as a dependency (Cmake Config/ header files etc . . .). Set this to ON when installing this component to the perforce vendor folder")
+    install(TARGETS _socket _ssl _select
+            EXPORT ioTarget
+            CONFIGURATIONS Release
+            RUNTIME DESTINATION bin/
+            LIBRARY DESTINATION lib/
+    )
 
-    # Install rule to ensure that our runtime and linker files are in the expected, platform-specific folders
-    if(WIN32)
-        install(FILES $<TARGET_FILE_DIR:_socket>/_carbonsocket.pyd DESTINATION bin/)
-        install(FILES $<TARGET_FILE_DIR:_ssl>/_carbonssl.pyd DESTINATION bin/)
-        install(FILES $<TARGET_FILE_DIR:_select>/_carbonselect.pyd DESTINATION bin/)
-    elseif(APPLE)
-        install(FILES $<TARGET_FILE_NAME:_socket>  DESTINATION lib/)
-        install(FILES $<TARGET_FILE_NAME:_ssl>  DESTINATION lib/)
-        install(FILES $<TARGET_FILE_NAME:_select>  DESTINATION lib/)
-    endif()
-    install(FILES python/io/__init__.py DESTINATION bin/python/io/)
+    install(EXPORT ioTarget
+        DESTINATION share/carbon-io
+        FILE carbon-ioConfig.cmake
+    )
 
-    if(NOT INSTALL_BIN_ONLY)
-        install(DIRECTORY include DESTINATION . FILES_MATCHING PATTERN "*.h")
-        install(FILES carbon-ioConfig.cmake DESTINATION share/carbon-io/)
-    endif()
+    install(DIRECTORY include DESTINATION . FILES_MATCHING PATTERN "*.h")
+
 endif()
