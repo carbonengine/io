@@ -1,33 +1,18 @@
 cmake_minimum_required(VERSION 3.31)
+
 project(io VERSION 1.0.0)
-
-if(NOT DEFINED ENV{CCP_EVE_PERFORCE_BRANCH_PATH})
-    message(FATAL_ERROR "Missing required environment variable CCP_EVE_PERFORCE_BRANCH_PATH")
-elseif(NOT IS_ABSOLUTE $ENV{CCP_EVE_PERFORCE_BRANCH_PATH})
-    message(FATAL_ERROR "CCP_EVE_PERFORCE_BRANCH_PATH needs to be an absolute path")
-elseif(NOT EXISTS $ENV{CCP_EVE_PERFORCE_BRANCH_PATH})
-    message(FATAL_ERROR "CCP_EVE_PERFORCE_BRANCH_PATH is pointing at a non-existing location $ENV{CCP_EVE_PERFORCE_BRANCH_PATH}")
-elseif(NOT IS_DIRECTORY $ENV{CCP_EVE_PERFORCE_BRANCH_PATH})
-    message(FATAL_ERROR "CCP_EVE_PERFORCE_BRANCH_PATH needs to be a directory")
-else()
-    message(STATUS "Using CCP_EVE_PERFORCE_BRANCH_PATH located at $ENV{CCP_EVE_PERFORCE_BRANCH_PATH}")
-endif()
-
-file(TO_CMAKE_PATH "$ENV{CCP_EVE_PERFORCE_BRANCH_PATH}" BRANCH_ROOT_DIR)
-list(INSERT CMAKE_MODULE_PATH 0 ${BRANCH_ROOT_DIR}/cmake)
-
-include(CcpCmakePackageRoots)
 
 include(cmake/CcpGlobalSettings.cmake)
 include(cmake/CcpVendorUtilities.cmake)
 include(cmake/CcpTargetConfigurations.cmake)
 
 find_package(libuv CONFIG REQUIRED)
-find_package(Python CONFIG REQUIRED)
-find_package(OpenSSL CONFIG REQUIRED)
-find_package(CcpLog CONFIG REQUIRED)
+find_package(Python3 COMPONENTS Development REQUIRED)
+
+set(OPENSSL_USE_STATIC_LIBS ON)
+find_package(OpenSSL REQUIRED)
 find_package(carbon-core CONFIG REQUIRED)
-find_package(Scheduler CONFIG REQUIRED)
+find_package(carbon-scheduler CONFIG REQUIRED)
 
 
 # --- _socket ---
@@ -46,9 +31,8 @@ target_precompile_headers(_socket PRIVATE
 target_link_libraries(_socket
         PRIVATE
         $<IF:$<TARGET_EXISTS:libuv::uv_a>,libuv::uv_a,libuv::uv>
-        ccp::log
         CcpCore
-        Python
+        Python3::Python
 )
 if(WIN32)
     target_link_libraries(_socket
@@ -120,7 +104,7 @@ source_group("_ssl" FILES
 )
 target_link_libraries(_ssl
         PRIVATE
-        Python
+        Python3::Python
         PUBLIC
         OpenSSL::Crypto
         OpenSSL::SSL
@@ -157,7 +141,7 @@ source_group("_select" FILES
 )
 target_link_libraries(_select
         PRIVATE
-        Python
+        Python3::Python
 )
 if(WIN32)
     target_link_libraries(_select PUBLIC ws2_32.lib)
@@ -167,19 +151,36 @@ endif()
 if(CMAKE_PROJECT_NAME STREQUAL io)
     option(BUILD_TESTING "Build tests. Enabled by default." ON)
     include(CTest)
+
+    get_target_property(SCHEDULER_IMPORTED_LOCATION Scheduler IMPORTED_LOCATION)
+    get_filename_component(SCHEDULER_IMPORTED_LOCATION_DIR ${SCHEDULER_IMPORTED_LOCATION} DIRECTORY)
+
+    if (WIN32)
+        find_program(BUILT_PYTHON_EXECUTABLE python REQUIRED NO_SYSTEM_ENVIRONMENT_PATH NO_CMAKE_SYSTEM_PATH)
+    elseif(APPLE)
+        find_program(BUILT_PYTHON_EXECUTABLE python3 REQUIRED NO_SYSTEM_ENVIRONMENT_PATH NO_CMAKE_SYSTEM_PATH)
+    endif()
+
+    get_filename_component(PYTHON_TOOL_ROOT_DIR ${BUILT_PYTHON_EXECUTABLE} DIRECTORY)
+
     if(BUILD_TESTING)
+
         # include the C++ test suite
         add_subdirectory(tests)
         # discover python tests ... this may be a little bit brittle since we're working around the missing `_blueexposuretest`
         # binary. As in, test discovery happens during the configure stage at which the binary does not exist yet.
+
+
         if(WIN32)
-            set(ENV{PYTHONPATH} ${BRANCH_ROOT_DIR}/carbon/common/stdlib\;${Python_ROOT}/${CCP_VENDOR_BIN_PATH}\;${CMAKE_CURRENT_SOURCE_DIR}/python\;${Scheduler_ROOT}/${CCP_VENDOR_BIN_PATH}\;${Greenlet_ROOT}/${CCP_VENDOR_BIN_PATH}\;${Greenlet_ROOT}/python)
+            set(ENV{PYTHONPATH} ${PYTHON_TOOL_ROOT_DIR}/Lib\;${PYTHON_TOOL_ROOT_DIR}\;${CMAKE_CURRENT_SOURCE_DIR}/python\;${SCHEDULER_IMPORTED_LOCATION_DIR}\;${SCHEDULER_IMPORTED_LOCATION_DIR}/python)
         elseif(APPLE)
-            set(ENV{PYTHONPATH} ${BRANCH_ROOT_DIR}/carbon/common/stdlib:${Python_ROOT}/${CCP_VENDOR_BIN_PATH}:${CMAKE_CURRENT_SOURCE_DIR}/python:${Scheduler_ROOT}/${CCP_VENDOR_LIB_PATH}:${Greenlet_ROOT}/${CCP_VENDOR_BIN_PATH}\:${Greenlet_ROOT}/python)
+            set(ENV{PYTHONPATH} ${PYTHON_TOOL_ROOT_DIR}/Lib:${PYTHON_TOOL_ROOT_DIR}:${CMAKE_CURRENT_SOURCE_DIR}/python:${SCHEDULER_IMPORTED_LOCATION_DIR}:${SCHEDULER_IMPORTED_LOCATION_DIR}/python)
         endif()
+
+        message(STATUS "the python path is $ENV{PYTHONPATH}")
         # Discovery works with the standard python interpreter because it isn't running anything, it just needs to find all
         # the defined test cases. Therefore, just use that one, even though it cannot run the discovered test cases.
-        execute_process(COMMAND ${PYTHON_EXECUTABLE} discover.py
+        execute_process(COMMAND ${BUILT_PYTHON_EXECUTABLE} discover.py
                 OUTPUT_VARIABLE PYTHON_TESTS_STR
                 OUTPUT_STRIP_TRAILING_WHITESPACE
                 ERROR_STRIP_TRAILING_WHITESPACE
@@ -196,13 +197,13 @@ if(CMAKE_PROJECT_NAME STREQUAL io)
         foreach(PYTHON_TEST ${PYTHON_TESTS})
             message(STATUS "Found test ${PYTHON_TEST}")
             add_test(NAME ${PYTHON_TEST}
-                    COMMAND ${PYTHON_EXECUTABLE} -m carboniotests -v ${PYTHON_TEST}
+                    COMMAND ${BUILT_PYTHON_EXECUTABLE} -m carboniotests -v ${PYTHON_TEST}
                     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/tests/python
             )
             if(WIN32)
-                set_tests_properties(${PYTHON_TEST} PROPERTIES ENVIRONMENT "PYTHONPATH=$<TARGET_FILE_DIR:_socket>\;$<TARGET_FILE_DIR:sockettesthelper>\;${BRANCH_ROOT_DIR}/carbon/common/stdlib\;${Python_ROOT}/${CCP_VENDOR_BIN_PATH}\;${Scheduler_ROOT}/python\;${Scheduler_ROOT}/${CCP_VENDOR_BIN_PATH}\;${Greenlet_ROOT}/${CCP_VENDOR_BIN_PATH}\;${Greenlet_ROOT}/python\;${CMAKE_CURRENT_SOURCE_DIR}/python;BUILDFLAVOR=$<LOWER_CASE:$<CONFIG>>")
+                set_tests_properties(${PYTHON_TEST} PROPERTIES ENVIRONMENT "PYTHONPATH=$<TARGET_FILE_DIR:_socket>\;$<TARGET_FILE_DIR:sockettesthelper>\;${PYTHON_TOOL_ROOT_DIR}/Lib\;${PYTHON_TOOL_ROOT_DIR}\;${CMAKE_CURRENT_SOURCE_DIR}/python\;${SCHEDULER_IMPORTED_LOCATION_DIR}\;${SCHEDULER_IMPORTED_LOCATION_DIR}/python;BUILDFLAVOR=$<LOWER_CASE:$<CONFIG>>")
             elseif (APPLE)
-                set_tests_properties(${PYTHON_TEST} PROPERTIES ENVIRONMENT "PYTHONPATH=$<TARGET_FILE_DIR:_socket>:$<TARGET_FILE_DIR:sockettesthelper>:${BRANCH_ROOT_DIR}/carbon/common/stdlib:${Python_ROOT}/${CCP_VENDOR_BIN_PATH}:${Scheduler_ROOT}/${CCP_VENDOR_LIB_PATH}:${Scheduler_ROOT}/python:${Greenlet_ROOT}/${CCP_VENDOR_BIN_PATH}:${Greenlet_ROOT}/python:${CMAKE_CURRENT_SOURCE_DIR}/python;BUILDFLAVOR=$<LOWER_CASE:$<CONFIG>>")
+                set_tests_properties(${PYTHON_TEST} PROPERTIES ENVIRONMENT "PYTHONPATH=$<TARGET_FILE_DIR:_socket>:$<TARGET_FILE_DIR:sockettesthelper>:${PYTHON_TOOL_ROOT_DIR}/Lib:${PYTHON_TOOL_ROOT_DIR}:${CMAKE_CURRENT_SOURCE_DIR}/python:${SCHEDULER_IMPORTED_LOCATION_DIR}:${SCHEDULER_IMPORTED_LOCATION_DIR}/python;BUILDFLAVOR=$<LOWER_CASE:$<CONFIG>>")
             else()
                 message(FATAL_ERROR "Unsupported platform")
             endif ()
@@ -211,7 +212,6 @@ if(CMAKE_PROJECT_NAME STREQUAL io)
 
     set(BUILD_DOCUMENTATION_DEFAULT_FLAG ON)
     if(BUILD_DOCUMENTATION)
-        find_package(Doxygen)
 
         # Evaluate config file for Doxygen to input project values
         set(DOXYFILE_IN ${CMAKE_CURRENT_SOURCE_DIR}/doc/Doxyfile.in)
@@ -219,78 +219,46 @@ if(CMAKE_PROJECT_NAME STREQUAL io)
         set(DOXYGEN_INDEX_FILE ${CMAKE_CURRENT_BINARY_DIR}/xml/index.xml)
         configure_file(${DOXYFILE_IN} ${DOXYFILE_OUT} @ONLY)
 
-        # Regenerate with source changes
-        add_custom_command(OUTPUT ${DOXYGEN_INDEX_FILE}
-                DEPENDS ${SRC_FILES}
-                COMMAND ${DOXYGEN_EXECUTABLE} ${DOXYFILE_OUT}
-                MAIN_DEPENDENCY ${DOXYFILE_OUT} ${DOXYFILE_IN}
-                COMMENT "Running Doxygen"
-                VERBATIM)
+        include(cmake/CcpDocsGenerator.cmake)
 
-        add_custom_target(Doxygen ALL DEPENDS ${DOXYGEN_INDEX_FILE})
+        #        # Run sphinx
+        if(WIN32)
+            set(PYTHONPATH_ENV_SPHINX "${CMAKE_SOURCE_DIR}/python/\;$<TARGET_FILE_DIR:_socket>\;${PYTHON_TOOL_ROOT_DIR}/Lib\;${PYTHON_TOOL_ROOT_DIR}\;${SCHEDULER_IMPORTED_LOCATION_DIR}\;${SCHEDULER_IMPORTED_LOCATION_DIR}/python")
+        elseif(APPLE)
+            set(PYTHONPATH_ENV_SPHINX "${CMAKE_SOURCE_DIR}/python/:$<TARGET_FILE_DIR:_socket>:${PYTHON_TOOL_ROOT_DIR}:${SCHEDULER_IMPORTED_LOCATION_DIR}:${SCHEDULER_IMPORTED_LOCATION_DIR}/python")
+        endif()
 
-        # Set up sphinx build
         set(SPHINX_SOURCE ${CMAKE_CURRENT_SOURCE_DIR}/doc/source)
         set(SPHINX_BUILD ${CMAKE_CURRENT_BINARY_DIR}/doc/build)
 
-        # Add sphinx
-
-        # Evaluate config file to resole cmake variables
-        set(SPHINX_CONF_IN ${CMAKE_CURRENT_SOURCE_DIR}/doc/source/conf.py.in)
-        set(SPHINX_CONF_OUT ${CMAKE_CURRENT_BINARY_DIR}/conf.py.partial)
-        configure_file(${SPHINX_CONF_IN} ${SPHINX_CONF_OUT} @ONLY)
-
-        # Generate files per build flavour to resolve generator expressions
-        file (GENERATE
-                OUTPUT "$<TARGET_FILE_DIR:_socket>/conf.py"
-                INPUT  ${CMAKE_CURRENT_BINARY_DIR}/conf.py.partial
+        create_carbon_docs_sphinx_target(
+                PYTHON_EXE ${BUILT_PYTHON_EXECUTABLE}
+                VENV_NAME docs_generation_venv
+                PYTHONPATH_ENV ${PYTHONPATH_ENV_SPHINX}
+                SPHINX_SOURCE ${SPHINX_SOURCE}
+                SPHINX_BUILD ${SPHINX_BUILD}
+                DOXYGEN_SRC_FILES ${SRC_FILES}
+                SPHINX_TARGET_NAME Sphinx
+                DOXYGEN_TARGET_NAME Doxygen
+                INSTALL_DESTINATION documentation/carbon-io
         )
 
-        # Run Sphinx against build flavour specific conf file using our pythonInterpreter
-        # Pass in Doxygen output
-        if(WIN32)
-            set(CCP_PYTHON_INTERPRETER "${BRANCH_ROOT_DIR}/eve/client/pythonInterpreter.bat")
-        elseif(APPLE)
-            set(CCP_PYTHON_INTERPRETER "${BRANCH_ROOT_DIR}/eve/client/pythonInterpreter.sh")
-        endif()
-
-        add_custom_target(Sphinx ALL
-                COMMAND  ${CMAKE_COMMAND} -E env PYTHONPATH=$<TARGET_FILE_DIR:_socket> ${CCP_PYTHON_INTERPRETER} -m sphinx build -E -b html -Dbreathe_projects.doxygen=${CMAKE_CURRENT_BINARY_DIR}/docs/xml -c $<TARGET_FILE_DIR:_socket> ${SPHINX_SOURCE} ${SPHINX_BUILD}
-                WORKING_DIRECTORY ${BRANCH_ROOT_DIR}
-                DEPENDS ${DOXYGEN_INDEX_FILE}
-                COMMENT "Generating documentation with Sphinx")
-
-        # Install rule for documentation
-        install(DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/doc/build/ DESTINATION documentation)
+        # Ensure that Scheduler is built before Spinx target
+        add_dependencies(Sphinx Scheduler)
     endif()
 
-    set(INSTALL_BIN_ONLY OFF CACHE BOOL "Do not Install configuration files meant to be read by projects using this project as a dependency (Cmake Config/ header files etc . . .). Set this to ON when installing this component to the perforce vendor folder")
-    if(INSTALL_BIN_ONLY)
-        # Install rule to ensure that our runtime and linker files are in the expected, platform-specific folders
-        install(
-                TARGETS _socket _ssl _select
-                EXPORT ioTarget
-                CONFIGURATIONS Release
-                RUNTIME DESTINATION bin/${CCP_PLATFORM}/${CCP_ARCHITECTURE}/${CCP_TOOLSET}/
-        )
-    else()
-        # Install rule to ensure that our runtime and linker files are in the expected, platform-specific folders
-        install(
-                TARGETS _socket _ssl _select
-                EXPORT ioTarget
-                CONFIGURATIONS Release
-                RUNTIME DESTINATION bin/${CCP_PLATFORM}/${CCP_ARCHITECTURE}/${CCP_TOOLSET}/
-                LIBRARY DESTINATION lib/${CCP_PLATFORM}/${CCP_ARCHITECTURE}/${CCP_TOOLSET}/
-        )
-        # Install rule for available public headers
-        install(DIRECTORY include DESTINATION . FILES_MATCHING PATTERN "*.h")
+    install(TARGETS _socket _ssl _select
+            EXPORT ioTarget
+            CONFIGURATIONS Release
+            RUNTIME DESTINATION bin/
+            LIBRARY DESTINATION lib/
+    )
 
-        install(
-                EXPORT ioTarget
-                DESTINATION ${CMAKE_INSTALL_PREFIX}/share/carbon-io
-                FILE carbon-io.cmake)
-        install(
-                FILES carbon-ioConfig.cmake
-                DESTINATION ${CMAKE_INSTALL_PREFIX}/share/carbon-io)
-    endif()
+    install(EXPORT ioTarget
+        DESTINATION share/carbon-io
+        FILE carbon-ioConfig.cmake
+    )
+
+    install(DIRECTORY include DESTINATION . FILES_MATCHING PATTERN "*.h")
+
 endif()

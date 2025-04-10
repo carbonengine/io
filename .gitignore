@@ -26,4 +26,3 @@ __pycache__/
 *.pyd
 
 CMakeUserPresets.json
-vcpkg-configuration.json

@@ -5,7 +5,7 @@ if(APPLE)
     message(STATUS "Building for minimum macOS version: ${CMAKE_OSX_DEPLOYMENT_TARGET}")
 
     # Explicit architecture required to support x64 builds on arm64 (Apple silicon)
-    set(CMAKE_OSX_ARCHITECTURES "arm64;x86_64" CACHE STRING "Target architecture for macOS" FORCE)
+#    set(CMAKE_OSX_ARCHITECTURES "arm64;x86_64" CACHE STRING "Target architecture for macOS" FORCE)
     message(STATUS "Building for ${CMAKE_OSX_ARCHITECTURES} architecture")
 endif()
 
