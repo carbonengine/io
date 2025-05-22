@@ -7,7 +7,7 @@ include(cmake/CcpVendorUtilities.cmake)
 include(cmake/CcpTargetConfigurations.cmake)
 
 find_package(libuv CONFIG REQUIRED)
-find_package(Python3 COMPONENTS Development REQUIRED)
+find_package(Python3 COMPONENTS Development Interpreter REQUIRED)
 
 set(OPENSSL_USE_STATIC_LIBS ON)
 find_package(OpenSSL REQUIRED)
@@ -155,14 +155,6 @@ if(CMAKE_PROJECT_NAME STREQUAL io)
     get_target_property(SCHEDULER_IMPORTED_LOCATION Scheduler IMPORTED_LOCATION)
     get_filename_component(SCHEDULER_IMPORTED_LOCATION_DIR ${SCHEDULER_IMPORTED_LOCATION} DIRECTORY)
 
-    if (WIN32)
-        find_program(BUILT_PYTHON_EXECUTABLE python REQUIRED NO_SYSTEM_ENVIRONMENT_PATH NO_CMAKE_SYSTEM_PATH)
-    elseif(APPLE)
-        find_program(BUILT_PYTHON_EXECUTABLE python3 REQUIRED NO_SYSTEM_ENVIRONMENT_PATH NO_CMAKE_SYSTEM_PATH)
-    endif()
-
-    get_filename_component(PYTHON_TOOL_ROOT_DIR ${BUILT_PYTHON_EXECUTABLE} DIRECTORY)
-
     if(BUILD_TESTING)
 
         # include the C++ test suite
@@ -172,15 +164,15 @@ if(CMAKE_PROJECT_NAME STREQUAL io)
 
 
         if(WIN32)
-            set(ENV{PYTHONPATH} ${PYTHON_TOOL_ROOT_DIR}/Lib\;${PYTHON_TOOL_ROOT_DIR}\;${CMAKE_CURRENT_SOURCE_DIR}/python\;${SCHEDULER_IMPORTED_LOCATION_DIR}\;${SCHEDULER_IMPORTED_LOCATION_DIR}/python)
+            set(ENV{PYTHONPATH} ${CMAKE_CURRENT_SOURCE_DIR}/python\;${SCHEDULER_IMPORTED_LOCATION_DIR}\;${SCHEDULER_IMPORTED_LOCATION_DIR}/python)
         elseif(APPLE)
-            set(ENV{PYTHONPATH} ${PYTHON_TOOL_ROOT_DIR}/Lib:${PYTHON_TOOL_ROOT_DIR}:${CMAKE_CURRENT_SOURCE_DIR}/python:${SCHEDULER_IMPORTED_LOCATION_DIR}:${SCHEDULER_IMPORTED_LOCATION_DIR}/python)
+            set(ENV{PYTHONPATH} ${CMAKE_CURRENT_SOURCE_DIR}/python:${SCHEDULER_IMPORTED_LOCATION_DIR}:${SCHEDULER_IMPORTED_LOCATION_DIR}/python)
         endif()
 
         message(STATUS "the python path is $ENV{PYTHONPATH}")
         # Discovery works with the standard python interpreter because it isn't running anything, it just needs to find all
         # the defined test cases. Therefore, just use that one, even though it cannot run the discovered test cases.
-        execute_process(COMMAND ${BUILT_PYTHON_EXECUTABLE} discover.py
+        execute_process(COMMAND ${Python3_EXECUTABLE} discover.py
                 OUTPUT_VARIABLE PYTHON_TESTS_STR
                 OUTPUT_STRIP_TRAILING_WHITESPACE
                 ERROR_STRIP_TRAILING_WHITESPACE
@@ -197,13 +189,13 @@ if(CMAKE_PROJECT_NAME STREQUAL io)
         foreach(PYTHON_TEST ${PYTHON_TESTS})
             message(STATUS "Found test ${PYTHON_TEST}")
             add_test(NAME ${PYTHON_TEST}
-                    COMMAND ${BUILT_PYTHON_EXECUTABLE} -m carboniotests -v ${PYTHON_TEST}
+                    COMMAND ${Python3_EXECUTABLE} -m carboniotests -v ${PYTHON_TEST}
                     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/tests/python
             )
             if(WIN32)
-                set_tests_properties(${PYTHON_TEST} PROPERTIES ENVIRONMENT "PYTHONPATH=$<TARGET_FILE_DIR:_socket>\;$<TARGET_FILE_DIR:sockettesthelper>\;${PYTHON_TOOL_ROOT_DIR}/Lib\;${PYTHON_TOOL_ROOT_DIR}\;${CMAKE_CURRENT_SOURCE_DIR}/python\;${SCHEDULER_IMPORTED_LOCATION_DIR}\;${SCHEDULER_IMPORTED_LOCATION_DIR}/python;BUILDFLAVOR=$<LOWER_CASE:$<CONFIG>>")
+                set_tests_properties(${PYTHON_TEST} PROPERTIES ENVIRONMENT "PYTHONPATH=$<TARGET_FILE_DIR:_socket>\;$<TARGET_FILE_DIR:sockettesthelper>\;${CMAKE_CURRENT_SOURCE_DIR}/python\;${SCHEDULER_IMPORTED_LOCATION_DIR}/python;BUILDFLAVOR=$<LOWER_CASE:$<CONFIG>>")
             elseif (APPLE)
-                set_tests_properties(${PYTHON_TEST} PROPERTIES ENVIRONMENT "PYTHONPATH=$<TARGET_FILE_DIR:_socket>:$<TARGET_FILE_DIR:sockettesthelper>:${PYTHON_TOOL_ROOT_DIR}/Lib:${PYTHON_TOOL_ROOT_DIR}:${CMAKE_CURRENT_SOURCE_DIR}/python:${SCHEDULER_IMPORTED_LOCATION_DIR}:${SCHEDULER_IMPORTED_LOCATION_DIR}/python;BUILDFLAVOR=$<LOWER_CASE:$<CONFIG>>")
+                set_tests_properties(${PYTHON_TEST} PROPERTIES ENVIRONMENT "PYTHONPATH=$<TARGET_FILE_DIR:_socket>:$<TARGET_FILE_DIR:sockettesthelper>:${CMAKE_CURRENT_SOURCE_DIR}/python:${SCHEDULER_IMPORTED_LOCATION_DIR}/python;BUILDFLAVOR=$<LOWER_CASE:$<CONFIG>>")
             else()
                 message(FATAL_ERROR "Unsupported platform")
             endif ()
