@@ -23,7 +23,7 @@
     },
     {
       "name": "carbon-scheduler",
-      "version>=": "1.0.0#1"
+      "version>=": "1.0.0#7"
     },
     {
       "name": "gtest",
