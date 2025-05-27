@@ -233,8 +233,8 @@ if(CMAKE_PROJECT_NAME STREQUAL io)
                 INSTALL_DESTINATION documentation/carbon-io
         )
 
-        # Ensure that Scheduler is built before Spinx target
-        add_dependencies(Sphinx Scheduler)
+        # Ensure that _socket is built before Spinx target
+        add_dependencies(Sphinx _socket)
     endif()
 
     install(TARGETS _socket _ssl _select
