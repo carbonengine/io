@@ -222,7 +222,7 @@ if(CMAKE_PROJECT_NAME STREQUAL io)
         set(SPHINX_BUILD ${CMAKE_CURRENT_BINARY_DIR}/doc/build)
 
         create_carbon_docs_sphinx_target(
-                PYTHON_EXE ${BUILT_PYTHON_EXECUTABLE}
+                PYTHON_EXE ${Python3_EXECUTABLE}
                 VENV_NAME docs_generation_venv
                 PYTHONPATH_ENV ${PYTHONPATH_ENV_SPHINX}
                 SPHINX_SOURCE ${SPHINX_SOURCE}
