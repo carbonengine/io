@@ -34,27 +34,15 @@
       }
     },
     {
-      "name": "carbon_osx_vcpkg_arm64",
+      "name": "carbon_osx_vcpkg_universal",
       "toolchainFile": "${sourceDir}/vendor/github.com/microsoft/vcpkg/scripts/buildsystems/vcpkg.cmake",
       "binaryDir": "./.cmake-build-${generator}-${presetName}",
       "generator": "Ninja Multi-Config",
       "cacheVariables": {
         "VCPKG_USE_HOST_TOOLS": "ON",
         "VCPKG_OVERLAY_TRIPLETS": "${sourceDir}/cmake/triplets",
-        "VCPKG_TARGET_TRIPLET": "arm64-osx-carbon",
-        "VCPKG_HOST_TRIPLET": "arm64-osx-carbon"
-      }
-    },
-    {
-      "name": "carbon_osx_vcpkg_x64",
-      "toolchainFile": "${sourceDir}/vendor/github.com/microsoft/vcpkg/scripts/buildsystems/vcpkg.cmake",
-      "binaryDir": "./.cmake-build-${generator}-${presetName}",
-      "generator": "Ninja Multi-Config",
-      "cacheVariables": {
-        "VCPKG_USE_HOST_TOOLS": "ON",
-        "VCPKG_OVERLAY_TRIPLETS": "${sourceDir}/cmake/triplets",
-        "VCPKG_TARGET_TRIPLET": "x64-osx-carbon",
-        "VCPKG_HOST_TRIPLET": "x64-osx-carbon"
+        "VCPKG_TARGET_TRIPLET": "universal-osx-carbon",
+        "VCPKG_HOST_TRIPLET": "universal-osx-carbon"
       }
     }
   ]
