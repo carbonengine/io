@@ -195,7 +195,12 @@ if(CMAKE_PROJECT_NAME STREQUAL io)
         endforeach()
     endif()
 
-    set(BUILD_DOCUMENTATION_DEFAULT_FLAG ON)
+    set(BUILD_DOCUMENTATION_DEFAULT_FLAG OFF)
+    if (DEFINED ENV{TEAMCITY_VERSION})
+        set(BUILD_DOCUMENTATION_DEFAULT_FLAG ON)
+    endif()
+    option(BUILD_DOCUMENTATION "Build documentation" ${BUILD_DOCUMENTATION_DEFAULT_FLAG})
+    message(STATUS "Document generation settings: default=${BUILD_DOCUMENTATION_DEFAULT_FLAG}, option BUILD_DOCUMENTATION=${BUILD_DOCUMENTATION}")
     if(BUILD_DOCUMENTATION)
 
         # Evaluate config file for Doxygen to input project values
