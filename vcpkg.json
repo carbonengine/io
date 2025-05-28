@@ -18,7 +18,7 @@
     },
     {
       "name": "carbon-scheduler",
-      "version>=": "1.0.0#7"
+      "version>=": "1.0.0#8"
     },
     {
       "name": "gtest",
