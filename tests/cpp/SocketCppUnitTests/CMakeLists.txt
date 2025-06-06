@@ -50,5 +50,4 @@ endif()
 # extensions are located. That way we can avoid copying them around.
 gtest_discover_tests(SocketCppUnitTests
         DISCOVERY_MODE PRE_TEST
-        WORKING_DIRECTORY $<TARGET_FILE_DIR:Python3::Python>
 )

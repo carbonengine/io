@@ -7,7 +7,7 @@ include(cmake/CcpVendorUtilities.cmake)
 include(cmake/CcpTargetConfigurations.cmake)
 
 find_package(libuv CONFIG REQUIRED)
-find_package(Python3 COMPONENTS Development REQUIRED)
+find_package(Python3 COMPONENTS Development Interpreter REQUIRED)
 
 set(OPENSSL_USE_STATIC_LIBS ON)
 find_package(OpenSSL REQUIRED)
@@ -152,35 +152,20 @@ if(CMAKE_PROJECT_NAME STREQUAL io)
     option(BUILD_TESTING "Build tests. Enabled by default." ON)
     include(CTest)
 
-    get_target_property(SCHEDULER_IMPORTED_LOCATION Scheduler IMPORTED_LOCATION)
-    get_filename_component(SCHEDULER_IMPORTED_LOCATION_DIR ${SCHEDULER_IMPORTED_LOCATION} DIRECTORY)
-
-    if (WIN32)
-        find_program(BUILT_PYTHON_EXECUTABLE python REQUIRED NO_SYSTEM_ENVIRONMENT_PATH NO_CMAKE_SYSTEM_PATH)
-    elseif(APPLE)
-        find_program(BUILT_PYTHON_EXECUTABLE python3 REQUIRED NO_SYSTEM_ENVIRONMENT_PATH NO_CMAKE_SYSTEM_PATH)
-    endif()
-
-    get_filename_component(PYTHON_TOOL_ROOT_DIR ${BUILT_PYTHON_EXECUTABLE} DIRECTORY)
-
     if(BUILD_TESTING)
-
         # include the C++ test suite
         add_subdirectory(tests)
-        # discover python tests ... this may be a little bit brittle since we're working around the missing `_blueexposuretest`
-        # binary. As in, test discovery happens during the configure stage at which the binary does not exist yet.
-
 
         if(WIN32)
-            set(ENV{PYTHONPATH} ${PYTHON_TOOL_ROOT_DIR}/Lib\;${PYTHON_TOOL_ROOT_DIR}\;${CMAKE_CURRENT_SOURCE_DIR}/python\;${SCHEDULER_IMPORTED_LOCATION_DIR}\;${SCHEDULER_IMPORTED_LOCATION_DIR}/python)
+            set(ENV{PYTHONPATH} ${CMAKE_CURRENT_SOURCE_DIR}/python)
         elseif(APPLE)
-            set(ENV{PYTHONPATH} ${PYTHON_TOOL_ROOT_DIR}/Lib:${PYTHON_TOOL_ROOT_DIR}:${CMAKE_CURRENT_SOURCE_DIR}/python:${SCHEDULER_IMPORTED_LOCATION_DIR}:${SCHEDULER_IMPORTED_LOCATION_DIR}/python)
+            set(ENV{PYTHONPATH} ${CMAKE_CURRENT_SOURCE_DIR}/python)
         endif()
 
         message(STATUS "the python path is $ENV{PYTHONPATH}")
         # Discovery works with the standard python interpreter because it isn't running anything, it just needs to find all
         # the defined test cases. Therefore, just use that one, even though it cannot run the discovered test cases.
-        execute_process(COMMAND ${BUILT_PYTHON_EXECUTABLE} discover.py
+        execute_process(COMMAND ${Python3_EXECUTABLE} discover.py
                 OUTPUT_VARIABLE PYTHON_TESTS_STR
                 OUTPUT_STRIP_TRAILING_WHITESPACE
                 ERROR_STRIP_TRAILING_WHITESPACE
@@ -197,20 +182,35 @@ if(CMAKE_PROJECT_NAME STREQUAL io)
         foreach(PYTHON_TEST ${PYTHON_TESTS})
             message(STATUS "Found test ${PYTHON_TEST}")
             add_test(NAME ${PYTHON_TEST}
-                    COMMAND ${BUILT_PYTHON_EXECUTABLE} -m carboniotests -v ${PYTHON_TEST}
+                    COMMAND ${Python3_EXECUTABLE} -m carboniotests -v ${PYTHON_TEST}
                     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/tests/python
             )
             if(WIN32)
-                set_tests_properties(${PYTHON_TEST} PROPERTIES ENVIRONMENT "PYTHONPATH=$<TARGET_FILE_DIR:_socket>\;$<TARGET_FILE_DIR:sockettesthelper>\;${PYTHON_TOOL_ROOT_DIR}/Lib\;${PYTHON_TOOL_ROOT_DIR}\;${CMAKE_CURRENT_SOURCE_DIR}/python\;${SCHEDULER_IMPORTED_LOCATION_DIR}\;${SCHEDULER_IMPORTED_LOCATION_DIR}/python;BUILDFLAVOR=$<LOWER_CASE:$<CONFIG>>")
+                set_tests_properties(
+                        ${PYTHON_TEST}
+                        PROPERTIES
+                        ENVIRONMENT
+                        "PYTHONPATH=$<TARGET_FILE_DIR:_socket>\;$<TARGET_FILE_DIR:sockettesthelper>\;${CMAKE_CURRENT_SOURCE_DIR}/python\;${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/bin\;${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/bin/python;BUILDFLAVOR=$<LOWER_CASE:$<CONFIG>>"
+                )
             elseif (APPLE)
-                set_tests_properties(${PYTHON_TEST} PROPERTIES ENVIRONMENT "PYTHONPATH=$<TARGET_FILE_DIR:_socket>:$<TARGET_FILE_DIR:sockettesthelper>:${PYTHON_TOOL_ROOT_DIR}/Lib:${PYTHON_TOOL_ROOT_DIR}:${CMAKE_CURRENT_SOURCE_DIR}/python:${SCHEDULER_IMPORTED_LOCATION_DIR}:${SCHEDULER_IMPORTED_LOCATION_DIR}/python;BUILDFLAVOR=$<LOWER_CASE:$<CONFIG>>")
+                set_tests_properties(
+                        ${PYTHON_TEST}
+                        PROPERTIES
+                        ENVIRONMENT
+                        "PYTHONPATH=$<TARGET_FILE_DIR:_socket>:$<TARGET_FILE_DIR:sockettesthelper>:${CMAKE_CURRENT_SOURCE_DIR}/python:${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/bin:${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/lib:${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/bin/python;BUILDFLAVOR=$<LOWER_CASE:$<CONFIG>>"
+                )
             else()
                 message(FATAL_ERROR "Unsupported platform")
             endif ()
         endforeach()
     endif()
 
-    set(BUILD_DOCUMENTATION_DEFAULT_FLAG ON)
+    set(BUILD_DOCUMENTATION_DEFAULT_FLAG OFF)
+    if (DEFINED ENV{TEAMCITY_VERSION})
+        set(BUILD_DOCUMENTATION_DEFAULT_FLAG ON)
+    endif()
+    option(BUILD_DOCUMENTATION "Build documentation" ${BUILD_DOCUMENTATION_DEFAULT_FLAG})
+    message(STATUS "Document generation settings: default=${BUILD_DOCUMENTATION_DEFAULT_FLAG}, option BUILD_DOCUMENTATION=${BUILD_DOCUMENTATION}")
     if(BUILD_DOCUMENTATION)
 
         # Evaluate config file for Doxygen to input project values
@@ -223,16 +223,16 @@ if(CMAKE_PROJECT_NAME STREQUAL io)
 
         #        # Run sphinx
         if(WIN32)
-            set(PYTHONPATH_ENV_SPHINX "${CMAKE_SOURCE_DIR}/python/\;$<TARGET_FILE_DIR:_socket>\;${PYTHON_TOOL_ROOT_DIR}/Lib\;${PYTHON_TOOL_ROOT_DIR}\;${SCHEDULER_IMPORTED_LOCATION_DIR}\;${SCHEDULER_IMPORTED_LOCATION_DIR}/python")
+            set(PYTHONPATH_ENV_SPHINX "${CMAKE_SOURCE_DIR}/python/\;$<TARGET_FILE_DIR:_socket>\;${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/bin\;${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/bin/python")
         elseif(APPLE)
-            set(PYTHONPATH_ENV_SPHINX "${CMAKE_SOURCE_DIR}/python/:$<TARGET_FILE_DIR:_socket>:${PYTHON_TOOL_ROOT_DIR}:${SCHEDULER_IMPORTED_LOCATION_DIR}:${SCHEDULER_IMPORTED_LOCATION_DIR}/python")
+            set(PYTHONPATH_ENV_SPHINX "${CMAKE_SOURCE_DIR}/python/:$<TARGET_FILE_DIR:_socket>:${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/bin:${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/bin/python")
         endif()
 
         set(SPHINX_SOURCE ${CMAKE_CURRENT_SOURCE_DIR}/doc/source)
         set(SPHINX_BUILD ${CMAKE_CURRENT_BINARY_DIR}/doc/build)
 
         create_carbon_docs_sphinx_target(
-                PYTHON_EXE ${BUILT_PYTHON_EXECUTABLE}
+                PYTHON_EXE ${Python3_EXECUTABLE}
                 VENV_NAME docs_generation_venv
                 PYTHONPATH_ENV ${PYTHONPATH_ENV_SPHINX}
                 SPHINX_SOURCE ${SPHINX_SOURCE}
@@ -243,8 +243,8 @@ if(CMAKE_PROJECT_NAME STREQUAL io)
                 INSTALL_DESTINATION documentation/carbon-io
         )
 
-        # Ensure that Scheduler is built before Spinx target
-        add_dependencies(Sphinx Scheduler)
+        # Ensure that _socket is built before Spinx target
+        add_dependencies(Sphinx _socket)
     endif()
 
     install(TARGETS _socket _ssl _select
