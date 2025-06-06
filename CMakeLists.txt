@@ -5,6 +5,7 @@ project(io VERSION 1.0.0)
 include(cmake/CcpGlobalSettings.cmake)
 include(cmake/CcpVendorUtilities.cmake)
 include(cmake/CcpTargetConfigurations.cmake)
+include(cmake/CcpPackageConfigHelpers.cmake)
 
 find_package(libuv CONFIG REQUIRED)
 find_package(Python3 COMPONENTS Development Interpreter REQUIRED)
@@ -247,18 +248,42 @@ if(CMAKE_PROJECT_NAME STREQUAL io)
         add_dependencies(Sphinx _socket)
     endif()
 
-    install(TARGETS _socket _ssl _select
-            EXPORT ioTarget
-            CONFIGURATIONS Release
-            RUNTIME DESTINATION bin/
-            LIBRARY DESTINATION lib/
-    )
+    set (INSTALL_MODE "PERFORCE" CACHE STRING "Install this package to a perforce branch vendor folder - provided for backwards compatability")
+    if(INSTALL_MODE STREQUAL "PERFORCE")
+        # Install rule to ensure that our runtime and linker files are in the expected, platform-specific folders
+        install(
+                TARGETS _socket _ssl _select
+                EXPORT ioTarget
+                CONFIGURATIONS Release
+                RUNTIME DESTINATION bin/${CCP_PLATFORM}/${CCP_ARCHITECTURE}/${CCP_TOOLSET}/
+                LIBRARY DESTINATION lib/${CCP_PLATFORM}/${CCP_ARCHITECTURE}/${CCP_TOOLSET}/
+        )
 
-    install(EXPORT ioTarget
-        DESTINATION share/carbon-io
-        FILE carbon-ioConfig.cmake
-    )
+        # Install rule for available public headers
+        install(DIRECTORY include DESTINATION . FILES_MATCHING PATTERN "*.h")
 
-    install(DIRECTORY include DESTINATION . FILES_MATCHING PATTERN "*.h")
+        configure_ccp_vendor_config_file(
+                TARGET carbonio
+                DESTINATION "${CMAKE_CURRENT_BINARY_DIR}/CarbonIOConfig.cmake"
+                DEPENDENCIES "Python;OpenSSL;CcpCore;libuv"
+                CONFIGURATIONS Release
+        )
+        install(FILES ${CMAKE_CURRENT_BINARY_DIR}/CarbonIOConfig.cmake DESTINATION .)
 
+    else()
+
+        install(TARGETS _socket _ssl _select
+                EXPORT ioTarget
+                CONFIGURATIONS Release
+                RUNTIME DESTINATION bin/
+                LIBRARY DESTINATION lib/
+        )
+
+        install(EXPORT ioTarget
+            DESTINATION share/carbon-io
+            FILE carbon-ioConfig.cmake
+        )
+
+        install(DIRECTORY include DESTINATION . FILES_MATCHING PATTERN "*.h")
+    endif()
 endif()
