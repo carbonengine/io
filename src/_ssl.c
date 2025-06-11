@@ -6601,7 +6601,7 @@ static struct PyModuleDef _sslmodule_def = {
 __attribute__((visibility("default")))
 #endif
 PyMODINIT_FUNC
-PyInit__carbonssl(void)
+CCP_CONCATENATE(PyInit__carbonssl, CCP_BUILD_FLAVOR)(void)
 {
 	if ( InitScheduler() == 0 )
 	{

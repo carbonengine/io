@@ -35,6 +35,7 @@ target_precompile_headers(_socket PRIVATE
         <string>
         <string_view>
         <CCPLog.h>
+        <CcpMacros.h>
         <CcpScopeGuard.h>
 )
 target_link_libraries(_socket
@@ -51,9 +52,6 @@ if(WIN32)
 endif()
 set_target_properties(_socket
         PROPERTIES
-        DEBUG_POSTFIX ""
-        INTERNAL_POSTFIX ""
-        TRINITYDEV_POSTFIX ""
         OUTPUT_NAME _carbonsocket
 )
 
@@ -114,16 +112,17 @@ source_group("_ssl" FILES
 target_link_libraries(_ssl
         PRIVATE
         libuv::uv
+        CcpCore
         Python
         PUBLIC
         OpenSSL::Crypto
         OpenSSL::SSL
 )
+target_precompile_headers(_ssl PRIVATE
+        <CcpMacros.h>
+)
 set_target_properties(_ssl
         PROPERTIES
-        DEBUG_POSTFIX ""
-        INTERNAL_POSTFIX ""
-        TRINITYDEV_POSTFIX ""
         OUTPUT_NAME _carbonssl
 )
 target_include_directories(_ssl
@@ -140,9 +139,6 @@ ccp_add_library(_select SHARED
 )
 set_target_properties(_select
         PROPERTIES
-        DEBUG_POSTFIX ""
-        INTERNAL_POSTFIX ""
-        TRINITYDEV_POSTFIX ""
         OUTPUT_NAME carbonselect
 )
 get_target_property(_SOURCES _select SOURCES)
@@ -152,7 +148,11 @@ source_group("_select" FILES
 )
 target_link_libraries(_select
         PRIVATE
+        CcpCore
         Python
+)
+target_precompile_headers(_select PRIVATE
+        <CcpMacros.h>
 )
 if(WIN32)
     target_link_libraries(_select PUBLIC ws2_32.lib)
@@ -263,7 +263,7 @@ if(CMAKE_PROJECT_NAME STREQUAL io)
     install(
             TARGETS _socket _ssl _select
             EXPORT ioTarget
-            CONFIGURATIONS Release
+            CONFIGURATIONS ${CMAKE_CONFIGURATION_TYPES}
             RUNTIME DESTINATION bin/${CCP_PLATFORM}/${CCP_ARCHITECTURE}/${CCP_TOOLSET}/
             LIBRARY DESTINATION lib/${CCP_PLATFORM}/${CCP_ARCHITECTURE}/${CCP_TOOLSET}/
     )

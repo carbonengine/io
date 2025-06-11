@@ -10166,7 +10166,7 @@ __attribute__((visibility("default")))
 #endif
 
 PyMODINIT_FUNC
-PyInit__carbonsocket(void)
+CCP_CONCATENATE(PyInit__carbonsocket, CCP_BUILD_FLAVOR)(void)
 {
     if ( InitUvLoop() != 0 ) {
         return nullptr;

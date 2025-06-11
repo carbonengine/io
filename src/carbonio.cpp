@@ -6,6 +6,10 @@
 #include <set>
 #include <vector>
 
+#include <CcpTelemetry.h>
+
+#define TELEMETRY_ZONE( zone ) TelemetryZone telemetry_zone##__COUNTER__( TMCM_CPP, zone, __FILE__, __LINE__ )
+
 #include "socketmodule.h"
 #include "protocol.h"
 
@@ -120,6 +124,7 @@ void TickUvLoop()
 	}
 	s_runningLoops.insert( loop );
 	ON_BLOCK_EXIT([loop]{s_runningLoops.erase( loop );});
+	TELEMETRY_ZONE( "uv_run" );
 	uv_run(GetUvLoop(), UV_RUN_NOWAIT);
 }
 
@@ -573,6 +578,7 @@ HandleData* IRequest::handleData()
 
 PyObject* StreamRecvRequest::execute()
 {
+	TELEMETRY_ZONE( "StreamRecvRequest::execute" );
 	if( !acquireReceive( "StreamRecvRequest" ) )
 	{
 		return PyBytes_FromString( "" );
@@ -802,6 +808,7 @@ void sendNoopCallback( uv_write_t* req, int )
 
 PyObject* StreamSendRequest::execute()
 {
+	TELEMETRY_ZONE( "StreamSendRequest::execute" );
 	if(!acquireSend("StreamSendRequest"))
 	{
 		errno = EBADF;
@@ -903,6 +910,7 @@ void SendError(PyChannelObject* channel, std::string_view msg)
 
 PyObject* UdpRecvRequest::execute()
 {
+	TELEMETRY_ZONE( "UdpRecvRequest::execute" );
 	if( !acquireReceive( "UdpRecvRequest" ) )
 	{
 		auto buf = PyBytes_FromString( "" );
@@ -1107,6 +1115,7 @@ void UdpRecvRequest::cancel()
 
 PyObject* UdpSendRequest::execute()
 {
+	TELEMETRY_ZONE( "UdpSendRequest::execute" );
 	if(!acquireSend("UdpSendRequest"))
 	{
 		errno = EBADF;
@@ -1478,6 +1487,7 @@ static PyObject *
 
 PyObject* StreamAcceptRequest::execute()
 {
+	TELEMETRY_ZONE( "StreamAcceptRequest::execute" );
 	if(!acquireSend("StreamAcceptRequest"))
 	{
 		errno = EBADF;
@@ -1640,6 +1650,7 @@ void StreamConnectRequest::onTimeout()
 
 PyObject* StreamConnectRequest::execute()
 {
+	TELEMETRY_ZONE( "StreamConnectRequest::execute" );
 	auto ret = startTimeout();
 	if( !ret )
 	{
@@ -1954,6 +1965,7 @@ bool StreamPacketReceiveRequest::needMore() {
 
 PyObject* StreamPacketReceiveRequest::execute()
 {
+	TELEMETRY_ZONE( "StreamPacketReceiveRequest::execute" );
 	if( !acquireReceive( "StreamPacketReceiveRequest" ) )
 	{
 		// Socket has most likely been closed, signal connection closed.
