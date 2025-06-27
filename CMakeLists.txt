@@ -275,7 +275,7 @@ if(CMAKE_PROJECT_NAME STREQUAL io)
 
         install(TARGETS _socket _ssl _select
                 EXPORT ioTarget
-                CONFIGURATIONS Release
+                CONFIGURATIONS ${CMAKE_CONFIGURATION_TYPES}
                 RUNTIME DESTINATION bin/
                 LIBRARY DESTINATION lib/
         )
