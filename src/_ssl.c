@@ -36,6 +36,8 @@
 
 #include "_ssl.h"
 
+#include <uv.h>
+
 /* Redefined below for Windows debug builds after important #includes */
 #define _PySSL_FIX_ERRNO
 
@@ -851,7 +853,7 @@ long bio_read_callback( BIO* b, int oper, const char* argp, size_t len, int argi
 			pyErrno = PyObject_GetAttrString( val, "errno" );
 		}
 		PyErr_Restore( exc, val, tb );
-		if( pyErrno )
+		if( pyErrno && PyLong_Check( pyErrno ) )
 		{
 			int err = PyLong_AsLong( pyErrno );
 			Py_DECREF(pyErrno);
@@ -934,7 +936,7 @@ long bio_write_callback( BIO* b, int oper, const char* argp, size_t len, int arg
 			pyErrno = PyObject_GetAttrString( val, "errno" );
 		}
 		PyErr_Restore( exc, val, tb );
-		if( pyErrno )
+		if( pyErrno && PyLong_Check( pyErrno ) )
 		{
 			int err = PyLong_AsLong( pyErrno );
 			Py_DECREF(pyErrno);
@@ -1183,7 +1185,7 @@ _ssl__SSLSocket_do_handshake_impl(PySSLSocket *self)
             PyErr_SetString(get_state_sock(self)->PySSLErrorObject,
                             ERRSTR("Underlying socket too large for select()."));
             goto error;
-        } else if (sockstate == SOCKET_IS_NONBLOCKING || sockstate == SOCKET_IS_BLOCKING) {
+        } else if (sockstate == SOCKET_IS_NONBLOCKING || sockstate == SOCKET_IS_BLOCKING || sockstate == SOCKET_HAS_BEEN_CLOSED) {
             break;
         }
     } while (err.ssl == SSL_ERROR_WANT_READ ||
@@ -2448,6 +2450,16 @@ PySSL_select(PySocketSockObject *s, int writing, _PyTime_t timeout)
     fd_set fds;
     struct timeval tv;
 #endif
+	if( s && s->uv_handle )
+	{
+		// For sockets managed by libuv either we have a handle, which is handled here
+		// or the file descriptor is invalid, which gets handled below.
+		if( uv_is_closing( s->uv_handle ) )
+		{
+			return SOCKET_HAS_BEEN_CLOSED;
+		}
+		return SOCKET_IS_NONBLOCKING;
+	}
 
     /* Nothing to do unless we're in timeout mode (not non-blocking) */
     if ((s == NULL) || (timeout == 0))
@@ -2620,7 +2632,7 @@ _ssl__SSLSocket_write_impl(PySSLSocket *self, Py_buffer *b)
             PyErr_SetString(get_state_sock(self)->PySSLErrorObject,
                             "Underlying socket has been closed.");
             goto write_error;
-        } else if (sockstate == SOCKET_IS_NONBLOCKING || sockstate == SOCKET_IS_BLOCKING) {
+        } else if (sockstate == SOCKET_IS_NONBLOCKING || sockstate == SOCKET_IS_BLOCKING || sockstate == SOCKET_HAS_BEEN_CLOSED) {
             break;
         }
     } while (err.ssl == SSL_ERROR_WANT_READ ||
@@ -2781,7 +2793,7 @@ _ssl__SSLSocket_read_impl(PySSLSocket *self, Py_ssize_t len,
             PyErr_SetString(PyExc_TimeoutError,
                             "The read operation timed out");
             goto error;
-        } else if (sockstate == SOCKET_IS_NONBLOCKING || sockstate == SOCKET_IS_BLOCKING) {
+        } else if (sockstate == SOCKET_IS_NONBLOCKING || sockstate == SOCKET_IS_BLOCKING || sockstate == SOCKET_HAS_BEEN_CLOSED) {
             break;
         }
     } while (err.ssl == SSL_ERROR_WANT_READ ||
@@ -2835,7 +2847,11 @@ _ssl__SSLSocket_shutdown_impl(PySSLSocket *self)
 
     if (sock != NULL) {
         /* Guard against closed socket */
-        if ((((PyObject*)sock) == Py_None) || (sock->sock_fd == INVALID_SOCKET)) {
+    	// A socket closed through `socket.close()` on the module level
+    	// will not have its sock_fd attribute set to INVALID_SOCKET.
+    	// This behavior is covered by the CPython tests, so instead of changing those,
+    	// add the extra check to see if the uv handle is closing.
+        if ((((PyObject*)sock) == Py_None) || (sock->sock_fd == INVALID_SOCKET || sock->uv_handle && uv_is_closing( sock->uv_handle ))) {
             _setSSLError(get_state_sock(self),
                          "Underlying socket connection gone",
                          PY_SSL_ERROR_NO_SOCKET, __FILE__, __LINE__);
@@ -3402,9 +3418,13 @@ _ssl__SSLContext_impl(PyTypeObject *type, int proto_version)
     }
 #endif
 
-    /* Set SSL_MODE_RELEASE_BUFFERS. This potentially greatly reduces memory
-       usage for no cost at all. */
-    SSL_CTX_set_mode(self->ctx, SSL_MODE_RELEASE_BUFFERS);
+    /* DO NOT set SSL_MODE_RELEASE_BUFFERS. It's supposed to save about 34k per idle SSL
+     * by clearing the buffers used for reading / writing after each operation.
+     * Usually, this is totally fine, as the buffer gets initialized at the start of each operation,
+     * and in a standard Python environment, these calls are not re-entrant.
+     * However, since there is nothing preventing another tasklet from starting another blocking read / write
+     * operation while the first tasklet is blocked, the first tasklet is not able to assume that clearing the buffer is safe.
+     * Therefore, disable this optimization as it could lead to accessing freed memory. */
 
 #define SID_CTX "Python"
     SSL_CTX_set_session_id_context(self->ctx, (const unsigned char *) SID_CTX,
@@ -6581,7 +6601,7 @@ static struct PyModuleDef _sslmodule_def = {
 __attribute__((visibility("default")))
 #endif
 PyMODINIT_FUNC
-PyInit__carbonssl(void)
+CCP_CONCATENATE(PyInit__carbonssl, CCP_BUILD_FLAVOR)(void)
 {
 	if ( InitScheduler() == 0 )
 	{

@@ -2801,7 +2801,7 @@ static struct PyModuleDef selectmodule = {
 };
 
 PyMODINIT_FUNC
-PyInit_carbonselect(void)
+CCP_CONCATENATE(PyInit_carbonselect, CCP_BUILD_FLAVOR)(void)
 {
     return PyModuleDef_Init(&selectmodule);
 }

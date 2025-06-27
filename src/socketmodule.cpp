@@ -4793,6 +4793,12 @@ sock_send_impl(PySocketSockObject *s, void *data)
 
 PyObject* uv_sendall_impl(PySocketSockObject* s, char* buf, Py_ssize_t len, int flags)
 {
+	if( s->sock_fd == INVALID_SOCKET || !is_valid_uv_handle( s->uv_handle ) )
+	{
+		errno = EBADF;
+		PyErr_SetFromErrno( PyExc_OSError );
+		return nullptr;
+	}
 	auto handleData = reinterpret_cast<HandleData*>(s->uv_handle->data);
 	auto request = std::make_shared<StreamSendRequest>(s, buf, len, flags, handleData->blockingSend);
 	auto status = request->execute();
@@ -4882,6 +4888,10 @@ sock_sendall(PySocketSockObject *s, PyObject *args)
 	if( is_managed_by_libuv( s ) )
 	{
 		auto py_status = uv_sendall_impl(s, buf, len, flags);
+		if( !py_status )
+		{
+			return nullptr;
+		}
 		auto status = PyLong_AsLong( py_status );
 		if( status == -1 && PyErr_Occurred() )
 		{
@@ -5700,6 +5710,8 @@ static PyObject *sock_sendpacket(PySocketSockObject *s, PyObject *args)
 		return nullptr;
 	}
 
+	ON_BLOCK_EXIT( [&pbuf] { PyBuffer_Release(&pbuf); } );
+
 	if( s->sock_fd == INVALID_SOCKET || !is_valid_uv_handle( s->uv_handle ) )
 	{
 		errno = EBADF;
@@ -5708,9 +5720,9 @@ static PyObject *sock_sendpacket(PySocketSockObject *s, PyObject *args)
 	}
 
 	auto* handleData = reinterpret_cast<HandleData*>( s->uv_handle->data );
-	if ( pbuf.len > handleData->maxPacketSize )
+	if ( pbuf.len > handleData->requestData->maxPacketSize )
 	{
-		PyErr_Format( PyExc_ValueError, "Cannot send packet of size %llu. Maximum packet size is %llu", pbuf.len, handleData->maxPacketSize );
+		PyErr_Format( PyExc_ValueError, "Cannot send packet of size %llu. Maximum packet size is %llu", pbuf.len, handleData->requestData->maxPacketSize );
 		return nullptr;
 	}
 
@@ -5859,7 +5871,7 @@ static PyObject* sock_setmaxpacketsize(PySocketSockObject *s, PyObject *args)
 	{
 		return nullptr;
 	}
-	size_t& maxPacketSize = reinterpret_cast<HandleData*>( s->uv_handle->data )->maxPacketSize;
+	size_t& maxPacketSize = reinterpret_cast<HandleData*>( s->uv_handle->data )->requestData->maxPacketSize;
 	size_t ret{maxPacketSize};
 	if( o )
 	{
@@ -6136,8 +6148,8 @@ uv_tcp_t* create_uv_tcp_handle( SOCKET_T* fd, int family )
 		return nullptr;
 	}
 
-	handle->data = CreateHandleData();
-	if( handle->data == nullptr )
+	
+	if( !CreateHandleData( reinterpret_cast<uv_handle_t*>( handle ) ) )
 	{
 		uv_close((uv_handle_t*)handle, cleanup_uv_handle);
 		// create_handle_data should have set an error.
@@ -6171,8 +6183,7 @@ uv_udp_t* create_uv_udp_handle(SOCKET_T* fd, int family)
 		uv_close((uv_handle_t*)handle, cleanup_uv_handle);
 		return nullptr;
 	}
-	handle->data = CreateHandleData();
-	if( handle->data == nullptr )
+	if( !CreateHandleData( reinterpret_cast<uv_handle_t*>( handle ) ) )
 	{
 		uv_close((uv_handle_t*)handle, cleanup_uv_handle);
 		// create_handle_data should have set an error.
@@ -7226,9 +7237,8 @@ uv_tcp_t* dup_uv_tcp_handle( SOCKET_T newfd )
 		PyErr_FromUvErr( status );
 		return nullptr;
 	}
-
-	handle->data = CreateHandleData();
-	if( handle->data == nullptr )
+	
+	if( !CreateHandleData( reinterpret_cast<uv_handle_t*>( handle ) ) )
 	{
 		uv_close( (uv_handle_t*)handle, cleanup_uv_handle );
 		// create_handle_data should have set an error.
@@ -7257,9 +7267,8 @@ uv_udp_t* dup_uv_udp_handle( SOCKET_T newfd )
 	
 	// at this point we need to delegate cleaning up the libuv handle to libuv
 	handle_guard.Dismiss();
-
-	handle->data = CreateHandleData();
-	if( handle->data == nullptr )
+	
+	if( !CreateHandleData( reinterpret_cast<uv_handle_t*>( handle ) ) )
 	{
 		uv_close( (uv_handle_t*)handle, cleanup_uv_handle );
 		// create_handle_data should have set an error.
@@ -10157,7 +10166,7 @@ __attribute__((visibility("default")))
 #endif
 
 PyMODINIT_FUNC
-PyInit__carbonsocket(void)
+CCP_CONCATENATE(PyInit__carbonsocket, CCP_BUILD_FLAVOR)(void)
 {
     if ( InitUvLoop() != 0 ) {
         return nullptr;
