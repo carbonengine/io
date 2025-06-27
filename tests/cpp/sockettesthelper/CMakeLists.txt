@@ -11,6 +11,7 @@ set_target_properties(sockettesthelper
         PROPERTIES
         DEBUG_POSTFIX ""
         INTERNAL_POSTFIX ""
+        TRINITYDEV_POSTFIX ""
 )
 
 target_include_directories(sockettesthelper

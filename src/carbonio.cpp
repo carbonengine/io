@@ -3,7 +3,12 @@
 #include <algorithm>
 #include <atomic>
 #include <mutex>
+#include <set>
 #include <vector>
+
+#include <CcpTelemetry.h>
+
+#define TELEMETRY_ZONE( zone ) TelemetryZone telemetry_zone##__COUNTER__( TMCM_CPP, zone, __FILE__, __LINE__ )
 
 #include "socketmodule.h"
 #include "protocol.h"
@@ -32,6 +37,7 @@ typedef unsigned int ULONG;
 #endif
 
 static uv_key_t s_tlsKey;
+static std::set<uv_loop_t*> s_runningLoops;
 
 static std::atomic_size_t s_bytesReceived{0};
 static std::atomic_size_t s_bytesSent{0};
@@ -108,6 +114,17 @@ int InitUvLoop() {
 
 void TickUvLoop()
 {
+	uv_loop_t* loop = GetUvLoop();
+	if(s_runningLoops.find( loop ) != s_runningLoops.end() )
+	{
+		// We could end up here if we block the tasklet during dispatch, but we really shouldn't do that
+		// because uv_run is not reentrant. See: https://docs.libuv.org/en/v1.x/loop.html#c.uv_run
+		CCP_LOGERR("Attempting to run a uv loop that is already running");
+		return;
+	}
+	s_runningLoops.insert( loop );
+	ON_BLOCK_EXIT([loop]{s_runningLoops.erase( loop );});
+	TELEMETRY_ZONE( "uv_run" );
 	uv_run(GetUvLoop(), UV_RUN_NOWAIT);
 }
 
@@ -117,20 +134,22 @@ void cleanup_uv_handle( uv_handle_t* uv_handle )
 	auto data = reinterpret_cast<HandleData*>( uv_handle->data );
 	if( data )
 	{
-		if ( data->request ) {
-			data->request->cancel();
+		data->requestData->handle = nullptr; // Invalidate the handle.
+		auto request = data->requestData->request;
+		if ( request ) {
+			request->cancel();
 		}
-		if ( data->receiveRequest )
+		auto receiveRequest = data->requestData->receiveRequest;
+		if ( receiveRequest )
 		{
-			data->receiveRequest->cancel();
+			receiveRequest->cancel();
 		}
 		// Unblock any outstanding receives so that they don't operate
 		// on an invalid handle once they finally wake up.
 		while( g_scheduler->PyChannel_GetBalance( data->receiveQueue.get() ) < 0 )
 		{
-			// The receive tasklets need to finish before the handle gets invalidated.
-			g_scheduler->PyChannel_SetPreference( data->receiveQueue.get(), PREFER_RECEIVER );
-			g_scheduler->PyChannel_Send( data->receiveQueue.get(), Py_None);
+			// Let the receive tasklets know the handle has been invalidated.
+			g_scheduler->PyChannel_Send( data->receiveQueue.get(), Py_False);
 		}
 		delete data;
 	}
@@ -155,9 +174,23 @@ bool is_valid_uv_handle( uv_handle_t* handle )
 	return handle && !uv_is_closing( handle );
 }
 
-HandleData::HandleData() : channel( g_scheduler->PyChannel_New( nullptr ) ), receiveQueue( g_scheduler->PyChannel_New( nullptr ), DeleteRequestQueueChannel ), sendQueue( g_scheduler->PyChannel_New( nullptr ), DeleteRequestQueueChannel )
+RequestData::RequestData()
 {
 	buf = uv_buf_init( nullptr, 0 );
+}
+
+RequestData::~RequestData()
+{
+	delete buf.base;
+	buf.base = nullptr;
+	buf.len = 0;
+	bufReadPos = -1;
+	bufWritePos = -1;
+}
+
+HandleData::HandleData() : channel( g_scheduler->PyChannel_New( nullptr ) ), receiveQueue( g_scheduler->PyChannel_New( nullptr ), DeleteRequestQueueChannel ), sendQueue( g_scheduler->PyChannel_New( nullptr ), DeleteRequestQueueChannel )
+{
+	requestData = std::make_shared<RequestData>();
 }
 
 HandleData::~HandleData()
@@ -165,38 +198,68 @@ HandleData::~HandleData()
 	Py_XDECREF( channel );
 	channel = nullptr;
 	receiveQueue = nullptr;
-	delete buf.base;
-	buf.base = nullptr;
-	buf.len = 0;
-	bufReadPos = -1;
-	bufWritePos = -1;
 	socket = nullptr;
 }
 
 
-void* CreateHandleData()
+bool CreateHandleData(uv_handle_t* handle)
 {
+	handle->data = nullptr;
 	auto* data = new HandleData;
 	if( data->channel == nullptr )
 	{
+		Py_XDECREF( data->receiveQueue.get() );
+		Py_XDECREF( data->sendQueue.get() );
 		delete data;
-		return nullptr;
+		return false;
 	}
 	if( data->receiveQueue == nullptr )
 	{
 		Py_DECREF( data->channel );
+		Py_XDECREF( data->sendQueue.get() );
 		delete data;
-		return nullptr;
+		return false;
 	}
 
+	if( data->sendQueue == nullptr )
+	{
+		Py_DECREF( data->channel );
+		Py_DECREF( data->receiveQueue.get() );
+	}
+	
+	if( !data->requestData )
+	{
+		Py_DECREF( data->channel );
+		Py_DECREF( data->receiveQueue.get() );
+		Py_DECREF( data->sendQueue.get() );
+		delete data;
+		CCP_LOGERR( "CreateHandleData called without request data" );
+		PyErr_BadInternalCall();
+		return false;
+	}
+		
+	data->requestData->handle = handle;
+
 	g_scheduler->PyChannel_SetPreference( data->receiveQueue.get(), PREFER_SENDER );
-	return data;
+	g_scheduler->PyChannel_SetPreference( data->sendQueue.get(), PREFER_SENDER );
+	handle->data = data;
+	return true;
 }
 
 void PyErr_FromUvErr( int uv_status )
 {
+	if( PyErr_Occurred() )
+	{
+		// Importing the errno module will fail if a Python exception has been raised.
+		// Instead of clearing the exception, let's bubble up the original error.
+		return;
+	}
 	auto errnoModule = PyImport_ImportModule("errno");
 	auto errnoObj = PyObject_GetAttrString( errnoModule, uv_err_name( uv_status ) );
+	if( !errnoObj )
+	{
+		return;
+	}
 	errno = PyLong_AsLong( errnoObj );
 	PyObject* exc_type = PyExc_OSError;
 	if ( errno == EWOULDBLOCK ) {
@@ -296,7 +359,7 @@ void SetTimeoutErrorType( PyObject* value )
 	s_timeout_error = value;
 }
 
-IRequest::IRequest( PySocketSockObject* socket ) : m_handle( socket->uv_handle ), m_timeout_nanoseconds(socket->sock_timeout), m_requestQueue( handleData()->receiveQueue ), m_sendQueue( handleData()->sendQueue )
+IRequest::IRequest( PySocketSockObject* socket ) : m_timeout_nanoseconds(socket->sock_timeout)
 {
 	m_channel = g_scheduler->PyChannel_New( nullptr );
 	if( !m_channel )
@@ -307,79 +370,112 @@ IRequest::IRequest( PySocketSockObject* socket ) : m_handle( socket->uv_handle )
 	{
 		g_scheduler->PyChannel_SetPreference( m_channel, PREFER_SENDER );
 	}
-	g_scheduler->PyChannel_SetPreference( m_requestQueue.get(), PREFER_SENDER );
+	auto data = reinterpret_cast<HandleData*>(socket->uv_handle->data);
+	m_requestData = data->requestData;
+	m_requestQueue = handleData()->receiveQueue;
+	m_sendQueue = handleData()->sendQueue;
 }
 
-void IRequest::acquireReceive(const char* context)
+bool IRequest::acquireReceive(const char* context)
 {
-	auto keepAlive = shared_from_this();
-
-	// there's already an outstanding request associated with the socket, let's wait until we can perform our operation
-	while ( handleData()->receiving ) {
-		// something is already reading, so let's try again at a later point in time
+	// There's already an outstanding request associated with the socket, let's wait until we can perform our operation.
+	while ( m_requestData->receiveRequest ) {
+		// Something is already reading, so let's try again at a later point in time.
 		auto sentinel = g_scheduler->PyChannel_Receive( m_requestQueue.get() );
 		if ( !sentinel ) {
-			LogError("Oh boy");
+			LogError("Unexpected error received over request queue.");
+			return false;
+		}
+		else if( Py_IsFalse( sentinel ) )
+		{
+			// The socket has been closed and the uv_handle is invalid.
+			return false;
+		}
+		else if( !Py_IsTrue( sentinel ) )
+		{
+			CCP_LOGERR("Unexpected sentinel value sent over request queue");
+			return false;
 		}
 
-		// There may be multiple tasklets waiting for waking up, but the underlying socket - and thus uv_handle - may
-		// be in the process of closing. In that case, simply early out.
-		if ( !is_valid_uv_handle( m_handle ) )
+		// In between the sender putting the sentinel on the channel and the time this gets run
+		// the underlying socket - and thus uv_handle - may have started the process of closing.
+		// In that case, simply early out.
+		if ( !handle() )
 		{
-			return;
+			return false;
 		}
 	}
-	handleData()->receiving = true;
-	handleData()->receiveRequest = this->shared_from_this();
+	m_requestData->receiveRequest = this->shared_from_this();
+	return true;
 }
 
-void IRequest::acquireSend( const char* context )
+bool IRequest::acquireSend( const char* context )
 {
-	auto keepAlive = shared_from_this();
-
 	// there's already an outstanding request associated with the socket, let's wait until we can perform our operation
-	while ( handleData()->sending ) {
+	while ( m_requestData->request ) {
 		// something is already reading, so let's try again at a later point in time
 		auto sentinel = g_scheduler->PyChannel_Receive( m_sendQueue.get() );
 		if ( !sentinel ) {
-			LogError("Oh boy");
+			LogError("Unexpected error received over send queue.");
+			return false;
+		}
+		else if( Py_IsFalse( sentinel ) )
+		{
+			// The socket has been closed and the uv_handle is invalid.
+			return false;
+		}
+		else if( !Py_IsTrue( sentinel ) )
+		{
+			CCP_LOGERR("Unexpected sentinel value sent over send queue");
+		}
+
+		// In between the sender putting the sentinel on the channel and the time this gets run
+		// the underlying socket - and thus uv_handle - may have started the process of closing.
+		// In that case, simply early out.
+		if ( !handle() )
+		{
+			return false;
 		}
 	}
-	handleData()->sending = true;
-	handleData()->request = this->shared_from_this();
+	m_requestData->request = this->shared_from_this();
+	return true;
 }
 
 
 void IRequest::associateWithHandleData()
 {
-	handleData()->request = this->shared_from_this();
+	m_requestData->request = this->shared_from_this();
 }
 
 void IRequest::releaseReceive(const char* context)
 {
+	auto balance = g_scheduler->PyChannel_GetBalance( m_requestQueue.get() );
 	// Only reset the lock and associated request when the uv_handle - and thus socket - isn't in the process of shutting down.
-	if ( is_valid_uv_handle( m_handle ) )
+	if ( !handle() )
 	{
-		handleData()->receiving = false;
-		handleData()->receiveRequest = nullptr;
+		while ( balance++ < 0 ) {
+			if ( g_scheduler->PyChannel_Send( m_requestQueue.get(), Py_False ) < 0 ) {
+				LogError( "IRequest::releaseReceive() failed to signal waiting handlers" );
+				PyErr_Format( PyExc_SystemError, "IRequest::releaseReceive() failed to signal waiting handlers" );
+			}
+		}
 	}
 
-	auto balance = g_scheduler->PyChannel_GetBalance( m_requestQueue.get() );
 	if ( balance < 0 ) {
-		if ( g_scheduler->PyChannel_Send( m_requestQueue.get(), Py_None ) < 0 ) {
+		if ( g_scheduler->PyChannel_Send( m_requestQueue.get(), Py_True ) < 0 ) {
 			LogError( "IRequest::releaseReceive() failed to signal waiting handlers" );
 			PyErr_Format( PyExc_SystemError, "IRequest::releaseReceive() failed to signal waiting handlers" );
 		}
 	}
+	m_requestData->receiveRequest = nullptr;
 }
 
 void IRequest::releaseSend(const char* context)
 {
-	handleData()->sending = false;
-	handleData()->request = nullptr;
+	m_requestData->request = nullptr;
 	auto balance = g_scheduler->PyChannel_GetBalance( m_sendQueue.get() );
 	if ( balance < 0 ) {
-		if ( g_scheduler->PyChannel_Send( m_sendQueue.get(), Py_None ) < 0 ) {
+		if ( g_scheduler->PyChannel_Send( m_sendQueue.get(), Py_True ) < 0 ) {
 			LogError( "IRequest::releaseSend() failed to signal waiting handlers" );
 			PyErr_Format( PyExc_SystemError, "IRequest::releaseSend() failed to signal waiting handlers" );
 		}
@@ -390,7 +486,6 @@ void IRequest::sendError(std::string_view msg)
 {
 	PyObject *exc, *val, *tb;
 	PyErr_Fetch( &exc, &val, &tb );
-	g_scheduler->PyChannel_SetPreference( m_channel, PREFER_SENDER );
 	auto ret = g_scheduler->PyChannel_SendThrow( m_channel, exc, val, tb);
 	if( ret < 0 )
 	{
@@ -460,14 +555,38 @@ void IRequest::clearTimeout()
 	}
 }
 
+uv_handle_t* IRequest::handle()
+{
+	auto handle = m_requestData->handle;
+	if( !handle || !is_valid_uv_handle( handle ) )
+	{
+		return nullptr;
+	}
+	return handle; 
+}
+
+HandleData* IRequest::handleData()
+{
+	auto handle = IRequest::handle();
+	if( !handle )
+	{
+		return nullptr;
+	}
+	return reinterpret_cast<HandleData*>(handle->data);
+}
+
 
 PyObject* StreamRecvRequest::execute()
 {
-	acquireReceive("StreamRecvRequest");
+	TELEMETRY_ZONE( "StreamRecvRequest::execute" );
+	if( !acquireReceive( "StreamRecvRequest" ) )
+	{
+		return PyBytes_FromString( "" );
+	}
 	ON_BLOCK_EXIT([&]{releaseReceive("StreamRecvRequest");});
 	auto* data = handleData();
 
-	auto bufferedAmount = data->bufWritePos - data->bufReadPos;
+	auto bufferedAmount = m_requestData->bufWritePos - m_requestData->bufReadPos;
 
 	if ( m_requested_len && !bufferedAmount )
 	{
@@ -487,8 +606,20 @@ PyObject* StreamRecvRequest::execute()
 		{
 			return nullptr;
 		}
+		else if( Py_IsFalse( sentinel ) )
+		{
+			errno = ECANCELED;
+			PyErr_SetFromErrno( PyExc_OSError );
+			return nullptr;
+		}
+		else if( !Py_IsTrue( sentinel ) )
+		{
+			CCP_LOGERR( "StreamRecvRequest received unexpected sentinel value" );
+			PyErr_BadInternalCall();
+			return nullptr;
+		}
 	}
-	data->bufWritePos += m_received_len;
+	m_requestData->bufWritePos += m_received_len;
 	s_bytesReceived += m_received_len;
 
 	return constructResult( data );
@@ -496,10 +627,10 @@ PyObject* StreamRecvRequest::execute()
 
 PyObject* StreamRecvRequest::constructResult( HandleData* data ) const
 {
-	ssize_t bufferedAmount = data->bufWritePos - data->bufReadPos;
+	ssize_t bufferedAmount = m_requestData->bufWritePos - m_requestData->bufReadPos;
 	auto chunkSize = bufferedAmount < m_requested_len ? bufferedAmount : m_requested_len;
-	auto* ret =  PyBytes_FromStringAndSize(data->buf.base + data->bufReadPos, chunkSize);
-	data->bufReadPos += chunkSize;
+	auto* ret =  PyBytes_FromStringAndSize(m_requestData->buf.base + m_requestData->bufReadPos, chunkSize);
+	m_requestData->bufReadPos += chunkSize;
 	return ret;
 }
 
@@ -516,14 +647,13 @@ void StreamRecvRequest::onCallback( ICallbackParams* callbackParams )
 	if( nread == 0 ) {
 		return;
 	}
-	g_scheduler->PyChannel_SetPreference( m_channel, PREFER_SENDER );
 	if ( nread < 0 ) {
 		if ( nread != UV_EOF ) {
 			PyErr_FromUvErr( int( nread ) );
 			sendError( "OnReceive failed to read data." );
 		}
 		else {
-			if ( g_scheduler->PyChannel_Send( m_channel, Py_None ) < 0 ) {
+			if ( g_scheduler->PyChannel_Send( m_channel, Py_True ) < 0 ) {
 				LogError( "StreamRecvRequest::onReceive failed to signal sentinel" );
 				PyErr_Clear();
 			}
@@ -531,8 +661,8 @@ void StreamRecvRequest::onCallback( ICallbackParams* callbackParams )
 	}
 	if ( nread > 0 ) {
 		m_received_len += nread;
-		uv_read_stop( handle() );
-		if ( g_scheduler->PyChannel_Send( m_channel, Py_None ) < 0 ) {
+		stopRead();
+		if ( g_scheduler->PyChannel_Send( m_channel, Py_True ) < 0 ) {
 			LogError( "StreamRecvRequest::onReceive failed to signal sentinel" );
 			PyErr_Clear();
 		}
@@ -541,7 +671,7 @@ void StreamRecvRequest::onCallback( ICallbackParams* callbackParams )
 
 void growingBufferAlloc(uv_handle_t* handle, size_t size, uv_buf_t* buf)
 {
-	auto* data = reinterpret_cast<HandleData*>(handle->data);
+	auto data = std::reinterpret_pointer_cast<RequestData>( reinterpret_cast<HandleData*>(handle->data)->requestData );
 	auto& handleBuf = data->buf;
 
 	constexpr size_t BUF_SIZE = 65536;
@@ -607,9 +737,18 @@ void growingBufferAlloc(uv_handle_t* handle, size_t size, uv_buf_t* buf)
 	buf->len = handleBuf.len;
 }
 
+void StreamRecvRequest::stopRead()
+{
+	auto streamHandle = handle();
+	if( streamHandle != nullptr )
+	{
+		uv_read_stop( streamHandle );
+	}
+}
+
 void StreamRecvRequest::onTimeout()
 {
-	uv_read_stop(handle());
+	stopRead();
 	IRequest::onTimeout();
 }
 
@@ -623,9 +762,9 @@ void alloc(uv_handle_t* handle, size_t size, uv_buf_t* buf)
 void StreamRecvRequest::readCallback( uv_stream_t* client, ssize_t nread, const uv_buf_t* buf )
 {
 	auto* data = reinterpret_cast<HandleData*>( client->data );
-	if( data && data->receiveRequest )
+	if( data && data->requestData->receiveRequest )
 	{
-		auto _this = std::reinterpret_pointer_cast<StreamRecvRequest>( data->receiveRequest );
+		auto _this = std::reinterpret_pointer_cast<StreamRecvRequest>( data->requestData->receiveRequest );
 		auto params = StreamRecvRequest::Params( nread, buf );
 		_this->onCallback( &params );
 	}
@@ -633,11 +772,11 @@ void StreamRecvRequest::readCallback( uv_stream_t* client, ssize_t nread, const 
 
 void StreamRecvRequest::cancel()
 {
-	uv_read_stop( handle() );
+	stopRead();
 	// Check the balance, as this could be called after the request has finished executing.
 	if( g_scheduler->PyChannel_GetBalance( m_channel ) < 0 )
 	{
-		if( g_scheduler->PyChannel_Send( m_channel, Py_None ) < 0 )
+		if( g_scheduler->PyChannel_Send( m_channel, Py_False ) < 0 )
 		{
 			LogError( "StreamRecvRequest::cancel failed to signal sentinel" );
 		}
@@ -669,11 +808,17 @@ void sendNoopCallback( uv_write_t* req, int )
 
 PyObject* StreamSendRequest::execute()
 {
+	TELEMETRY_ZONE( "StreamSendRequest::execute" );
+	if(!acquireSend("StreamSendRequest"))
+	{
+		errno = EBADF;
+		PyErr_SetFromErrno( PyExc_OSError );
+		return nullptr;
+	}
 	auto acquireGuard = MakeGuard( [&] { releaseSend( "StreamSendRequest" ); } );
 	auto write_req = new write_req_t;
 	write_req->buf = uv_buf_init( new char[m_sendBuffer.len], m_sendBuffer.len );
 	memcpy( write_req->buf.base, m_sendBuffer.base, m_sendBuffer.len );
-	acquireSend("StreamSendRequest");
 	if ( m_blockingSend && ! startTimeout() )
 	{
 		delete[] write_req->buf.base;
@@ -713,7 +858,7 @@ void StreamSendRequest::sendCallback( uv_write_t* request, int status )
 {
 	if( request->handle && request->handle->data )
 	{
-		auto _this = std::reinterpret_pointer_cast<StreamSendRequest>( reinterpret_cast<HandleData*>( request->handle->data )->request );
+		auto _this = std::reinterpret_pointer_cast<StreamSendRequest>( reinterpret_cast<HandleData*>( request->handle->data )->requestData->request );
 		if( _this )
 		{
 			auto params = std::make_unique<StreamSendRequest::Params>( status );
@@ -765,7 +910,17 @@ void SendError(PyChannelObject* channel, std::string_view msg)
 
 PyObject* UdpRecvRequest::execute()
 {
-	acquireReceive("UdpRecvRequest");
+	TELEMETRY_ZONE( "UdpRecvRequest::execute" );
+	if( !acquireReceive( "UdpRecvRequest" ) )
+	{
+		auto buf = PyBytes_FromString( "" );
+		ON_BLOCK_EXIT([buf]{Py_XDECREF( buf );});
+		if(!buf)
+		{
+			return nullptr;
+		}
+		return PyTuple_Pack( 2, buf, m_addr );
+	}
 	ON_BLOCK_EXIT([&]{releaseReceive("UdpRecvRequest");});
 	auto ret = startTimeout();
 	if( ret != Py_None )
@@ -785,6 +940,18 @@ PyObject* UdpRecvRequest::execute()
 	{
 		return nullptr;
 	}
+	else if( Py_IsFalse( sentinel ) )
+	{
+		errno = ECANCELED;
+		PyErr_SetFromErrno( PyExc_OSError );
+		return nullptr;
+	}
+	else if( !Py_IsTrue( sentinel ) )
+	{
+		CCP_LOGERR( "UdpRecvRequest received unexpected sentinel value" );
+		PyErr_BadInternalCall();
+		return nullptr;
+	}
 
 	return PyTuple_Pack( 2, m_buf, m_addr );
 }
@@ -792,9 +959,9 @@ PyObject* UdpRecvRequest::execute()
 void UdpRecvRequest::receiveCallback( uv_udp_t* handle, ssize_t nread, const uv_buf_t* buf, const struct sockaddr* addr, unsigned int flags )
 {
 	auto* data = reinterpret_cast<HandleData*>( handle->data );
-	if( data && data->receiveRequest )
+	if( data && data->requestData->receiveRequest )
 	{
-		auto _this = std::reinterpret_pointer_cast<UdpRecvRequest>( data->receiveRequest );
+		auto _this = std::reinterpret_pointer_cast<UdpRecvRequest>( data->requestData->receiveRequest );
 		auto params = std::make_unique<UdpRecvRequest::Params>( nread, buf, addr, flags );
 		_this->onCallback( params.get() );
 	}
@@ -903,7 +1070,7 @@ void UdpRecvRequest::onCallback( ICallbackParams* callbackParams )
 
 	// no more data, let's signal that we're done
 	if (nread == 0) {
-		if ( g_scheduler->PyChannel_Send( m_channel, Py_None ) < 0 )
+		if ( g_scheduler->PyChannel_Send( m_channel, Py_True ) < 0 )
 		{
 			LogError( "UdpRecvRequest::onRead failed sending sentinel value on channel" );
 			PyErr_Clear();
@@ -916,20 +1083,29 @@ void UdpRecvRequest::onCallback( ICallbackParams* callbackParams )
 	}
 }
 
+void UdpRecvRequest::stopRead()
+{
+	auto streamHandle = handle();
+	if( streamHandle != nullptr )
+	{
+		uv_udp_recv_stop( streamHandle );
+	}
+}
+
 void UdpRecvRequest::onTimeout()
 {
-	uv_udp_recv_stop(handle());
+	stopRead();
 	IRequest::onTimeout();
 }
 
 void UdpRecvRequest::cancel()
 {
-	uv_udp_recv_stop( handle() );
+	stopRead();
 	// Check the balance, as this could be called
 	// after the request has finished executing.
 	if( g_scheduler->PyChannel_GetBalance( m_channel ) < 0 )
 	{
-		if( g_scheduler->PyChannel_Send( m_channel, Py_None ) < 0 )
+		if( g_scheduler->PyChannel_Send( m_channel, Py_False ) < 0 )
 		{
 			LogError( "UdpRecvRequest::cancel failed sending sentinel value on channel" );
 		}
@@ -939,7 +1115,13 @@ void UdpRecvRequest::cancel()
 
 PyObject* UdpSendRequest::execute()
 {
-	acquireSend("UdpSendRequest");
+	TELEMETRY_ZONE( "UdpSendRequest::execute" );
+	if(!acquireSend("UdpSendRequest"))
+	{
+		errno = EBADF;
+		PyErr_SetFromErrno( PyExc_OSError );
+		return nullptr;
+	}
 	ON_BLOCK_EXIT([&]{releaseSend("UdpSendRequest");});
 
 	auto req = new write_req_t;
@@ -957,9 +1139,9 @@ PyObject* UdpSendRequest::execute()
 void UdpSendRequest::sendCallback( uv_udp_send_t* request, int status )
 {
 	auto* data = reinterpret_cast<HandleData*>( request->handle->data );
-	if( data->request )
+	if( data->requestData->request )
 	{
-		auto _this = std::reinterpret_pointer_cast<UdpSendRequest>( data->request );
+		auto _this = std::reinterpret_pointer_cast<UdpSendRequest>( data->requestData->request );
 		auto params = std::make_unique<UdpSendRequest::Params>( status );
 		_this->onCallback( params.get() );
 	}
@@ -1305,8 +1487,14 @@ static PyObject *
 
 PyObject* StreamAcceptRequest::execute()
 {
-	associateWithHandleData();
-	ON_BLOCK_EXIT( [this] { clearTimeout(); } );
+	TELEMETRY_ZONE( "StreamAcceptRequest::execute" );
+	if(!acquireSend("StreamAcceptRequest"))
+	{
+		errno = EBADF;
+		PyErr_SetFromErrno( PyExc_OSError );
+		return nullptr;
+	}
+	ON_BLOCK_EXIT( [this] { clearTimeout(); releaseSend("StreamAcceptRequest"); } );
 
 	auto result = startTimeout();
 	if( result != Py_None )
@@ -1359,8 +1547,8 @@ PyObject* StreamAcceptRequest::execute()
 		PyErr_FromUvErr( status );
 		return nullptr;
 	}
-	client->data = CreateHandleData();
-	if( !client->data )
+	
+	if( !CreateHandleData( reinterpret_cast<uv_handle_t*>( client ) ) )
 	{
 		return nullptr;
 	}
@@ -1415,12 +1603,13 @@ int StreamRecvIntoRequest::startRead()
 void StreamRecvIntoRequest::alloc( uv_handle_t* handle, size_t size, uv_buf_t* buf )
 {
 	auto* data = reinterpret_cast<HandleData*>(handle->data);
-	auto request = std::reinterpret_pointer_cast<StreamRecvIntoRequest>(data->receiveRequest);
+	auto request = std::reinterpret_pointer_cast<StreamRecvIntoRequest>(data->requestData->receiveRequest);
+	auto requestData = std::reinterpret_pointer_cast<RequestData>( data->requestData );
 
 	buf->base = request->m_buf;
 	buf->len = ULONG( request->m_requested_len );
 
-	ssize_t unreadBytes = data->bufWritePos - data->bufReadPos;
+	ssize_t unreadBytes = requestData->bufWritePos - requestData->bufReadPos;
 
 	// StreamRecvRequest's receive function should ensure that uv_read_start
 	// doesn't get called when we already have all the data on hand.
@@ -1429,18 +1618,18 @@ void StreamRecvIntoRequest::alloc( uv_handle_t* handle, size_t size, uv_buf_t* b
 	if( unreadBytes > 0 )
 	{
 		auto copyAmount = unreadBytes < request->m_requested_len ? unreadBytes : request->m_requested_len;
-		memcpy_s(buf->base, copyAmount, data->buf.base + data->bufReadPos, copyAmount);
+		memcpy_s(buf->base, copyAmount, requestData->buf.base + requestData->bufReadPos, copyAmount);
 		buf->base += copyAmount;
 		buf->len -= ULONG( copyAmount );
-		data->bufReadPos += copyAmount;
+		requestData->bufReadPos += copyAmount;
 	}
 }
 
 PyObject* StreamRecvIntoRequest::constructResult( HandleData* data ) const
 {
-	ssize_t bufferedAmount = data->bufWritePos - data->bufReadPos;
+	ssize_t bufferedAmount = m_requestData->bufWritePos - m_requestData->bufReadPos;
 	auto chunkSize = bufferedAmount < m_requested_len ? bufferedAmount : m_requested_len;
-	data->bufReadPos += chunkSize;
+	m_requestData->bufReadPos += chunkSize;
 	return PyLong_FromSsize_t(chunkSize);
 }
 
@@ -1451,7 +1640,6 @@ StreamConnectRequest::StreamConnectRequest( PySocketSockObject* socket, struct s
 }
 StreamConnectRequest::~StreamConnectRequest()
 {
-	delete m_connect;
 }
 
 void StreamConnectRequest::onTimeout()
@@ -1462,13 +1650,20 @@ void StreamConnectRequest::onTimeout()
 
 PyObject* StreamConnectRequest::execute()
 {
+	TELEMETRY_ZONE( "StreamConnectRequest::execute" );
 	auto ret = startTimeout();
 	if( !ret )
 	{
 		return nullptr;
 	}
 	Py_DecRef(ret);
-	handleData()->request = shared_from_this();
+	if( !acquireSend("StreamConnectRequest") )
+	{
+		errno = EBADF;
+		PyErr_SetFromErrno( PyExc_OSError );
+		return nullptr;
+	}
+	ON_BLOCK_EXIT([this]{ releaseSend("StreamConnectRequest"); });
 	m_connect->data = this;
 	int status = uv_tcp_connect(m_connect, reinterpret_cast<uv_tcp_t*>( handle() ), m_address, &StreamConnectRequest::connectCallback);
 	if ( status < 0 )
@@ -1504,6 +1699,7 @@ void StreamConnectRequest::connectCallback( uv_connect_t* connection, int status
 		auto params = std::make_unique<StreamConnectRequest::Params>( status );
 		_this->onCallback( params.get() );
 	}
+	delete connection;
 }
 
 void StreamConnectRequest::onCallback( ICallbackParams* callbackParams )
@@ -1674,8 +1870,8 @@ bool StreamPacketReceiveRequest::readHeader( char* src )
 	}
 
 	m_packetHeader = ntohl( *reinterpret_cast<uint32_t*>( src ) );
-	handleData()->bufReadPos += sizeof( m_packetHeader );
-	if ( payloadLen() > handleData()->maxPacketSize )
+	m_requestData->bufReadPos += sizeof( m_packetHeader );
+	if ( payloadLen() > m_requestData->maxPacketSize )
 	{
 		m_packetHeader = 0;
 		return false;
@@ -1687,15 +1883,14 @@ bool StreamPacketReceiveRequest::readHeader( char* src )
 }
 
 bool StreamPacketReceiveRequest::needMore() {
-	auto data = handleData();
-	auto bytesRemaining = data->bufWritePos - data->bufReadPos;
+	auto bytesRemaining = m_requestData->bufWritePos - m_requestData->bufReadPos;
 	if ( !m_packetHeader && bytesRemaining >= sizeof( uint32_t ) )
 	{
-		if( !readHeader( data->buf.base + data->bufReadPos ) )
+		if( !readHeader( m_requestData->buf.base + m_requestData->bufReadPos ) )
 		{
 			// This is not a valid header, so we have received garbage.
 			// Flush the entire buffer and hope for the best.
-			data->bufReadPos = data->bufWritePos;
+			m_requestData->bufReadPos = m_requestData->bufWritePos;
 			return true;
 		}
 		bytesRemaining -= sizeof( m_packetHeader );
@@ -1714,9 +1909,9 @@ bool StreamPacketReceiveRequest::needMore() {
 		auto spaceLeftInBuffer = m_data.size() - m_bytesRead;
 		auto copyAmount = bytesRemaining >= spaceLeftInBuffer ? spaceLeftInBuffer : bytesRemaining;
 		if ( copyAmount > 0 ) {
-			auto bufferStart = copyAmount == data->buf.len ? data->buf.base : data->buf.base + data->bufReadPos;
+			auto bufferStart = copyAmount == m_requestData->buf.len ? m_requestData->buf.base : m_requestData->buf.base + m_requestData->bufReadPos;
 			memcpy_s( m_data.data() + m_bytesRead, m_data.size() - m_bytesRead, bufferStart, copyAmount );
-			data->bufReadPos += copyAmount;
+			m_requestData->bufReadPos += copyAmount;
 			m_bytesRead += copyAmount;
 		}
 	}
@@ -1730,9 +1925,9 @@ bool StreamPacketReceiveRequest::needMore() {
 		{
 			m_oobDataLen = ntohl( *reinterpret_cast<decltype( m_oobDataLen )*>( m_payload ) );
 
-			if ( m_oobDataLen > data->maxPacketSize )
+			if ( m_oobDataLen > m_requestData->maxPacketSize )
 			{
-				PyErr_Format(PyExc_OSError, "corrupted out-of-band data in packet detected at %d bytes, max is %llu", m_oobDataLen, data->maxPacketSize);
+				PyErr_Format(PyExc_OSError, "corrupted out-of-band data in packet detected at %d bytes, max is %llu", m_oobDataLen, m_requestData->maxPacketSize);
 				return false;
 			}
 
@@ -1770,7 +1965,12 @@ bool StreamPacketReceiveRequest::needMore() {
 
 PyObject* StreamPacketReceiveRequest::execute()
 {
-	acquireReceive("StreamPacketReceiveRequest");
+	TELEMETRY_ZONE( "StreamPacketReceiveRequest::execute" );
+	if( !acquireReceive( "StreamPacketReceiveRequest" ) )
+	{
+		// Socket has most likely been closed, signal connection closed.
+		return Py_BuildValue( "(NNn)", Py_None, Py_None, 0 );
+	}
 	ON_BLOCK_EXIT([&]{releaseReceive("StreamPacketReceiveRequest");});
 
 	auto ret = startTimeout();
@@ -1780,7 +1980,7 @@ PyObject* StreamPacketReceiveRequest::execute()
 	}
 	ON_BLOCK_EXIT( [&] { clearTimeout(); } );
 
-	while ( !m_timedOut && is_valid_uv_handle( m_handle ) && needMore() )
+	while ( !m_timedOut && handle() && needMore() )
 	{
 		auto status = startRead();
 		if ( status == 0 )
@@ -1788,6 +1988,18 @@ PyObject* StreamPacketReceiveRequest::execute()
 			auto sentinel = g_scheduler->PyChannel_Receive( m_channel );
 			if( !sentinel )
 			{
+				return nullptr;
+			}
+			else if( Py_IsFalse( sentinel ) )
+			{
+				errno = ECANCELED;
+				PyErr_SetFromErrno( PyExc_OSError );
+				return nullptr;
+			}
+			else if( !Py_IsTrue(sentinel) )
+			{
+				CCP_LOGERR( "StreamPacketReceiveRequest received unexpected sentinel value" );
+				PyErr_BadInternalCall();
 				return nullptr;
 			}
 			if (m_eof)
@@ -1807,14 +2019,13 @@ PyObject* StreamPacketReceiveRequest::execute()
 	s_packetsReceived += 1;
 	PyObject* packet{};
 	auto packetSize = m_payloadEnd - m_payload;
-	if( packetSize == 0 && m_eof || !is_valid_uv_handle( m_handle ) )
+	if( packetSize == 0 && m_eof )
 	{
 		// closing packet received, signal connection closed
-		packet = PyTuple_Pack( 3, Py_None, Py_None, PyLong_FromLong( 0 ) );
+		packet = Py_BuildValue( "(NNn)", Py_None, Py_None, 0 );
 	} else {
-		auto* data = handleData();
-		auto sequenceNumber = data->packetNumber++;
-		packet = PyTuple_Pack( 3, PyBytes_FromStringAndSize( m_payload, packetSize ), PyBytes_FromStringAndSize( m_oobData, m_oobDataLen ), PyLong_FromSize_t( sequenceNumber ) );
+		auto sequenceNumber = m_requestData->packetNumber++;
+		packet = Py_BuildValue( "(NNn)", PyBytes_FromStringAndSize( m_payload, packetSize ), PyBytes_FromStringAndSize( m_oobData, m_oobDataLen ), sequenceNumber );
 	}
 
 	return packet;
@@ -1828,9 +2039,9 @@ int StreamPacketReceiveRequest::startRead()
 void StreamPacketReceiveRequest::readCallback( uv_stream_t* client, ssize_t nread, const uv_buf_t* buf )
 {
 	auto* data = reinterpret_cast<HandleData*>( client->data );
-	if( data->receiveRequest )
+	if( data->requestData->receiveRequest )
 	{
-		auto _this = std::reinterpret_pointer_cast<StreamPacketReceiveRequest>( data->receiveRequest );
+		auto _this = std::reinterpret_pointer_cast<StreamPacketReceiveRequest>( data->requestData->receiveRequest );
 		auto params = Params( nread, buf );
 		_this->onCallback( &params );
 	}
@@ -1843,7 +2054,11 @@ size_t StreamPacketReceiveRequest::payloadLen() const
 
 void StreamPacketReceiveRequest::stopRead()
 {
-	uv_read_stop( handle() );
+	auto streamHandle = handle();
+	if( streamHandle != nullptr )
+	{
+		uv_read_stop( streamHandle );
+	}
 }
 
 void StreamPacketReceiveRequest::onCallback( ICallbackParams* callbackParams )
@@ -1851,7 +2066,6 @@ void StreamPacketReceiveRequest::onCallback( ICallbackParams* callbackParams )
 	auto params = dynamic_cast<Params*>(callbackParams);
 	ssize_t nread = params->nread;
 	Ccp::PyGilEnsure gil;
-	g_scheduler->PyChannel_SetPreference(m_channel, PREFER_SENDER );
 	if ( nread < 0 ) {
 		if (nread != UV_EOF) {
 			stopRead();
@@ -1862,7 +2076,7 @@ void StreamPacketReceiveRequest::onCallback( ICallbackParams* callbackParams )
 			stopRead();
 			// Nothing left to read
 			m_eof = true;
-			if ( g_scheduler->PyChannel_Send( m_channel, Py_None ) < 0 ) {
+			if ( g_scheduler->PyChannel_Send( m_channel, Py_True ) < 0 ) {
 				LogError( "StreamRecvRequest::onReceive failed to signal sentinel" );
 				PyErr_Clear();
 			}
@@ -1870,9 +2084,9 @@ void StreamPacketReceiveRequest::onCallback( ICallbackParams* callbackParams )
 	}
 	if ( nread >= 0 ) {
 		s_bytesReceived += nread;
-		handleData()->bufWritePos += nread;
+		m_requestData->bufWritePos += nread;
 		stopRead();
-		if ( g_scheduler->PyChannel_Send( m_channel, Py_None ) < 0 ) {
+		if ( g_scheduler->PyChannel_Send( m_channel, Py_True ) < 0 ) {
 			LogError( "StreamRecvRequest::onReceive failed to signal sentinel" );
 			PyErr_Clear();
 		}
@@ -1882,7 +2096,7 @@ void StreamPacketReceiveRequest::onCallback( ICallbackParams* callbackParams )
 void StreamPacketReceiveRequest::cancel()
 {
 	stopRead();
-	if ( g_scheduler->PyChannel_Send( m_channel, Py_None ) < 0 ) {
+	if ( g_scheduler->PyChannel_Send( m_channel, Py_False ) < 0 ) {
 		LogError( "StreamRecvRequest::onReceive failed to signal sentinel" );
 		PyErr_Clear();
 	}
