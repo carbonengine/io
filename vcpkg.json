@@ -2,7 +2,7 @@
   "dependencies": [
     {
       "name": "carbon-core",
-      "version>=": "2.1.1#6"
+      "version>=": "2.3.0#1"
     },
     {
       "name": "libuv",
@@ -18,7 +18,7 @@
     },
     {
       "name": "carbon-scheduler",
-      "version>=": "1.0.0#10"
+      "version>=": "1.0.0#13"
     },
     {
       "name": "gtest",
