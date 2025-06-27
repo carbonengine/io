@@ -248,8 +248,8 @@ if(CMAKE_PROJECT_NAME STREQUAL io)
         add_dependencies(Sphinx _socket)
     endif()
 
-    set (INSTALL_MODE "PERFORCE" CACHE STRING "Install this package to a perforce branch vendor folder - provided for backwards compatability")
-    if(INSTALL_MODE STREQUAL "PERFORCE")
+    option (INSTALL_TO_MONOLITH "Install this package to a perforce branch vendor folder - provided for backwards compatability" ON)
+    if(INSTALL_TO_MONOLITH)
         # Install rule to ensure that our runtime and linker files are in the expected, platform-specific folders
         install(
                 TARGETS _socket _ssl _select
@@ -270,7 +270,7 @@ if(CMAKE_PROJECT_NAME STREQUAL io)
         )
         install(FILES ${CMAKE_CURRENT_BINARY_DIR}/CarbonIOConfig.cmake DESTINATION .)
 
-    else()
+    else() # VCPKG install mode
 
         install(TARGETS _socket _ssl _select
                 EXPORT ioTarget
