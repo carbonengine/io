@@ -24,11 +24,5 @@
       "name": "gtest",
       "version>=": "1.16.0"
     }
-  ],
-  "overrides": [
-    {
-      "name": "openssl",
-      "version": "1.1.1k#8"
-    }
   ]
 }
