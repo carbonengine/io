@@ -11,7 +11,7 @@ find_package(libuv CONFIG REQUIRED)
 find_package(Python3 COMPONENTS Development Interpreter REQUIRED)
 
 set(OPENSSL_USE_STATIC_LIBS ON)
-find_package(OpenSSL REQUIRED)
+find_package(OpenSSL COMPONENTS Crypto SSL REQUIRED)
 find_package(carbon-core CONFIG REQUIRED)
 find_package(carbon-scheduler CONFIG REQUIRED)
 

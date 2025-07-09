@@ -127,7 +127,8 @@
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Internal",
         "VCPKG_TARGET_TRIPLET": "universal-osx-internal",
-        "VCPKG_HOST_TRIPLET": "universal-osx-internal"
+        "VCPKG_HOST_TRIPLET": "universal-osx-internal",
+        "CMAKE_OSX_ARCHITECTURES": "arm64;x86_64"
       }
     },
     {
