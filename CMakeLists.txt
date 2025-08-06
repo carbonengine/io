@@ -207,46 +207,48 @@ if(CMAKE_PROJECT_NAME STREQUAL io)
         endforeach()
     endif()
 
-    set(BUILD_DOCUMENTATION_DEFAULT_FLAG OFF)
-    if (DEFINED ENV{TEAMCITY_VERSION})
-        set(BUILD_DOCUMENTATION_DEFAULT_FLAG ON)
-    endif()
-    option(BUILD_DOCUMENTATION "Build documentation" ${BUILD_DOCUMENTATION_DEFAULT_FLAG})
-    message(STATUS "Document generation settings: default=${BUILD_DOCUMENTATION_DEFAULT_FLAG}, option BUILD_DOCUMENTATION=${BUILD_DOCUMENTATION}")
-    if(BUILD_DOCUMENTATION)
-
-        # Evaluate config file for Doxygen to input project values
-        set(DOXYFILE_IN ${CMAKE_CURRENT_SOURCE_DIR}/doc/Doxyfile.in)
-        set(DOXYFILE_OUT ${CMAKE_CURRENT_BINARY_DIR}/Doxyfile)
-        set(DOXYGEN_INDEX_FILE ${CMAKE_CURRENT_BINARY_DIR}/xml/index.xml)
-        configure_file(${DOXYFILE_IN} ${DOXYFILE_OUT} @ONLY)
-
-        include(cmake/CcpDocsGenerator.cmake)
-
-        #        # Run sphinx
-        if(WIN32)
-            set(PYTHONPATH_ENV_SPHINX "${CMAKE_SOURCE_DIR}/python/\;$<TARGET_FILE_DIR:_socket>\;${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/bin\;${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/bin/python")
-        elseif(APPLE)
-            set(PYTHONPATH_ENV_SPHINX "${CMAKE_SOURCE_DIR}/python/:$<TARGET_FILE_DIR:_socket>:${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/bin:${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/bin/python")
+    # Documentation generation is constrained to release builds
+    if(${CMAKE_BUILD_TYPE} MATCHES Release)
+        set(BUILD_DOCUMENTATION_DEFAULT_FLAG OFF)
+        if (DEFINED ENV{TEAMCITY_VERSION})
+            set(BUILD_DOCUMENTATION_DEFAULT_FLAG ON)
         endif()
+        option(BUILD_DOCUMENTATION "Build documentation" ${BUILD_DOCUMENTATION_DEFAULT_FLAG})
+        message(STATUS "Document generation settings: default=${BUILD_DOCUMENTATION_DEFAULT_FLAG}, option BUILD_DOCUMENTATION=${BUILD_DOCUMENTATION}")
+        if(BUILD_DOCUMENTATION)
+            # Evaluate config file for Doxygen to input project values
+            set(DOXYFILE_IN ${CMAKE_CURRENT_SOURCE_DIR}/doc/Doxyfile.in)
+            set(DOXYFILE_OUT ${CMAKE_CURRENT_BINARY_DIR}/Doxyfile)
+            set(DOXYGEN_INDEX_FILE ${CMAKE_CURRENT_BINARY_DIR}/xml/index.xml)
+            configure_file(${DOXYFILE_IN} ${DOXYFILE_OUT} @ONLY)
 
-        set(SPHINX_SOURCE ${CMAKE_CURRENT_SOURCE_DIR}/doc/source)
-        set(SPHINX_BUILD ${CMAKE_CURRENT_BINARY_DIR}/doc/build)
+            include(cmake/CcpDocsGenerator.cmake)
 
-        create_carbon_docs_sphinx_target(
-                PYTHON_EXE ${Python3_EXECUTABLE}
-                VENV_NAME docs_generation_venv
-                PYTHONPATH_ENV ${PYTHONPATH_ENV_SPHINX}
-                SPHINX_SOURCE ${SPHINX_SOURCE}
-                SPHINX_BUILD ${SPHINX_BUILD}
-                DOXYGEN_SRC_FILES ${SRC_FILES}
-                SPHINX_TARGET_NAME Sphinx
-                DOXYGEN_TARGET_NAME Doxygen
-                INSTALL_DESTINATION documentation/carbon-io
-        )
+            # Run sphinx
+            if(WIN32)
+                set(PYTHONPATH_ENV_SPHINX "${CMAKE_SOURCE_DIR}/python/\;$<TARGET_FILE_DIR:_socket>\;${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/bin\;${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/bin/python")
+            elseif(APPLE)
+                set(PYTHONPATH_ENV_SPHINX "${CMAKE_SOURCE_DIR}/python/:$<TARGET_FILE_DIR:_socket>:${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/bin:${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/bin/python")
+            endif()
 
-        # Ensure that _socket is built before Spinx target
-        add_dependencies(Sphinx _socket)
+            set(SPHINX_SOURCE ${CMAKE_CURRENT_SOURCE_DIR}/doc/source)
+            set(SPHINX_BUILD ${CMAKE_CURRENT_BINARY_DIR}/doc/build)
+
+            create_carbon_docs_sphinx_target(
+                    PYTHON_EXE ${Python3_EXECUTABLE}
+                    VENV_NAME docs_generation_venv
+                    PYTHONPATH_ENV ${PYTHONPATH_ENV_SPHINX}
+                    SPHINX_SOURCE ${SPHINX_SOURCE}
+                    SPHINX_BUILD ${SPHINX_BUILD}
+                    DOXYGEN_SRC_FILES ${SRC_FILES}
+                    SPHINX_TARGET_NAME Sphinx
+                    DOXYGEN_TARGET_NAME Doxygen
+                    INSTALL_DESTINATION documentation/carbon-io
+            )
+
+            # Ensure that _socket is built before Spinx target
+            add_dependencies(Sphinx _socket)
+        endif()
     endif()
 
     option (INSTALL_TO_MONOLITH "Install this package to a perforce branch vendor folder - provided for backwards compatability" ON)
