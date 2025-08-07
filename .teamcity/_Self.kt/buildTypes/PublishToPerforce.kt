@@ -28,7 +28,7 @@ class Publish(perforce_publish_path: String) : BuildType({
         text("reverse.dep.*.eve_branch_shortname", "", label = "Branch Name", description = """The name of the branch, for example MAINLINE""", display = ParameterDisplay.PROMPT, allowEmpty = false)
         param("project", "%reverse.dep.*.project%")
         param("env.TC_BUILDID", "%teamcity.build.id%")
-        param("env.TC_BUILD_NUMBER", "Carbon Core #%build.number%")
+        param("env.TC_BUILD_NUMBER", "Carbon IO #%build.number%")
         param("env.P4PORT", "perforce.ccp.ad.local:1666")
         param("eve_branch_shortname", "%reverse.dep.*.eve_branch_shortname%")
         param("env.TC_EVE_BRANCH_SHORTNAME", "%eve_branch_shortname%")
