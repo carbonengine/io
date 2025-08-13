@@ -1,0 +1,28 @@
+{
+  "dependencies": [
+    {
+      "name": "carbon-core",
+      "version>=": "2.3.0#2"
+    },
+    {
+      "name": "libuv",
+      "version>=": "1.48.0#1"
+    },
+    {
+      "name": "python3-prebuilt",
+      "version>=": "3.12.3#3"
+    },
+    {
+      "name": "openssl",
+      "version>=": "1.1.1k#9"
+    },
+    {
+      "name": "carbon-scheduler",
+      "version>=": "1.0.0#14"
+    },
+    {
+      "name": "gtest",
+      "version>=": "1.16.0"
+    }
+  ]
+}

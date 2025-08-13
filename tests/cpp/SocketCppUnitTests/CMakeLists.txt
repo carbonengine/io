@@ -19,8 +19,8 @@ target_include_directories(SocketCppUnitTests
 target_link_libraries(SocketCppUnitTests
         PRIVATE
         GTest::GTest
-        libuv::uv
-        Python
+        $<IF:$<TARGET_EXISTS:libuv::uv_a>,libuv::uv_a,libuv::uv>
+        Python3::Python
         CcpCore
 )
 if(WIN32)
@@ -40,7 +40,7 @@ elseif(APPLE)
     add_custom_command(
             TARGET SocketCppUnitTests POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            $<TARGET_FILE:Python> $<TARGET_FILE_DIR:SocketCppUnitTests>
+            $<TARGET_FILE:Python3::Python> $<TARGET_FILE_DIR:SocketCppUnitTests>
             COMMAND_EXPAND_LISTS
     )
 endif()
