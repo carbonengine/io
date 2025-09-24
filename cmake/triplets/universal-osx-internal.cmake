@@ -9,8 +9,8 @@ set(VCPKG_OSX_ARCHITECTURES "arm64;x86_64")
 set(CARBON_BUILD_TYPE "Internal")
 
 if (PORT MATCHES "openssl")
-    set(CARBON_x86_64_TRIPLET "arm64-osx-debug")
-    set(CARBON_arm64_TRIPLET "x64-osx-debug")
+    set(CARBON_x86_64_TRIPLET "x64-osx")
+    set(CARBON_arm64_TRIPLET "arm64-osx")
     set(VCPKG_LIBRARY_LINKAGE static)
 endif()
 
