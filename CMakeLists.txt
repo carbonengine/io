@@ -2,10 +2,10 @@ cmake_minimum_required(VERSION 3.31)
 
 project(io VERSION 1.0.0)
 
-include(cmake/CcpGlobalSettings.cmake)
-include(cmake/CcpVendorUtilities.cmake)
 include(cmake/CcpTargetConfigurations.cmake)
+include(cmake/CcpDocsGenerator.cmake)
 include(cmake/CcpPackageConfigHelpers.cmake)
+include(cmake/CcpBuildConfigurations.cmake)
 
 find_package(libuv CONFIG REQUIRED)
 find_package(Python3 COMPONENTS Development Interpreter REQUIRED)

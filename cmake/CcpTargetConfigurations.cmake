@@ -1,5 +1,3 @@
-include(cmake/CcpVendorUtilities.cmake)
-
 macro(ensure_correct_target_type target)
     get_target_property(target_type ${target} TYPE)
     if(${target_type} STREQUAL "INTERFACE_LIBRARY")
@@ -78,7 +76,7 @@ function(ccp_add_executable)
     # Adds and configures an executable target for CCPs
     # vendored packages. 
     set(target ${ARGV0})
-    _add_executable(${ARGN})
+    add_executable(${ARGN})
     set_prefix_and_suffix(${target})
     set_build_flavor(${target})
     externalize_apple_debuginfo(${target})
@@ -88,7 +86,7 @@ function(ccp_add_library)
     # Adds and configures a library target for CCPs
     # vendored packages.
     set(target ${ARGV0})
-    _add_library(${ARGN})
+    add_library(${ARGN})
     set_prefix_and_suffix(${target})
     set_build_flavor(${target})
     externalize_apple_debuginfo(${target})
