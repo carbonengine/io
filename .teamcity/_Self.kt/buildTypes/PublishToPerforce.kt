@@ -204,7 +204,7 @@ class Publish(perforce_publish_path: String) : BuildType({
     }
 
     dependencies {
-        dependency(MacOS.CreateUniversalBuilds) {
+        dependency(CreateUniversalBuilds) {
             snapshot {
                 onDependencyFailure = FailureAction.FAIL_TO_START
             }
@@ -261,4 +261,4 @@ class Publish(perforce_publish_path: String) : BuildType({
     }
 })
 
-val PublishToPerforce = Publish("vendor/github.com/ccpgames/carbon-template")
+val PublishToPerforce = Publish("vendor/github.com/ccpgames/carbon-io")

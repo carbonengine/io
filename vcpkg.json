@@ -1,10 +1,35 @@
 {
   "dependencies": [
-    "gtest",
-    "carbon-scheduler",
-    "openssl",
-    "python3",
-    "libuv",
-    "carbon-core"
+    {
+      "name": "gtest",
+      "version>=": "1.16.0",
+      "host": true
+    },
+    {
+      "name": "carbon-scheduler",
+      "version>=": "1.4.0"
+    },
+    {
+      "name": "libuv",
+      "version>=": "1.48.0#1"
+    },
+    {
+      "name": "python3",
+      "version>=": "3.12.9#1"
+    },
+    {
+      "name": "carbon-core",
+      "version>=": "2.4.0"
+    },
+    {
+      "name": "openssl",
+      "version>=": "1.1.1k#8"
+    }
+  ],
+  "overrides": [
+    {
+      "name": "openssl",
+      "version": "1.1.1k#8"
+    }
   ]
 }
