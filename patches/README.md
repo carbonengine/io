@@ -32,4 +32,4 @@ Mapping of files sourced from Python:
 | Lib/test/test_ssl.py            | tests/test_ssl.py           |
 
 Base cpython branch: 3.12
-Base cpython release: v3.12.3 (f6650f9ad73359051f3e558c2431a109bc016664)
+Base cpython release: v3.12.9 (fdb81425a9ad683f8c24bf5cbedc9b96baf00cd2)

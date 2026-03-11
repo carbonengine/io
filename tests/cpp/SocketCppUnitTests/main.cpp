@@ -1,3 +1,5 @@
+// Copyright © 2026 CCP ehf.
+
 #include "carbonio.h"
 
 void cb_alloc( uv_handle_t* handle, size_t size, uv_buf_t* buf )

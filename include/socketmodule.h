@@ -1,3 +1,5 @@
+// Modified by CCP ehf.
+
 #pragma once
 /* Socket module header file */
 

@@ -1,3 +1,5 @@
+# Modified by CCP ehf.
+
 import errno
 import select
 import subprocess

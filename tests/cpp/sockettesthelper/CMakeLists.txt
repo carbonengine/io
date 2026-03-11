@@ -1,3 +1,5 @@
+# Copyright © 2026 CCP ehf.
+
 ccp_add_library(sockettesthelper SHARED
         sockettesthelper.cpp
 )

@@ -1,5 +1,7 @@
 /* Debug helpers */
 
+// Modified by CCP ehf.
+
 #ifndef SSL3_MT_CHANGE_CIPHER_SPEC
 /* Dummy message type for handling CCS like a normal handshake message
  * not defined in OpenSSL 1.0.2

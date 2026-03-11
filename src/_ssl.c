@@ -12,6 +12,8 @@
 
    XXX integrate several "shutdown modes" as suggested in
        http://bugs.python.org/issue8108#msg102867 ?
+
+   Modified by CCP ehf.
 */
 
 /* Don't warn about deprecated functions, */

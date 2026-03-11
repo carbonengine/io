@@ -1,3 +1,4 @@
+// Copyright © 2026 CCP ehf.
 /* This file defines some handy utility classes and functions
  * for the use of the Python API from C++
  */
