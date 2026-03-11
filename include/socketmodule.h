@@ -1,6 +1,8 @@
 #pragma once
 /* Socket module header file */
 
+// Modified by CCP ehf.
+
 /* Includes needed for the sockaddr_* symbols below */
 #ifndef MS_WINDOWS
 #ifdef __VMS

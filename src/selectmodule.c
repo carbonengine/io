@@ -2,6 +2,8 @@
    Under Unix, the file descriptors are small integers.
    Under Win32, select only exists for sockets, and sockets may
    have any value except INVALID_SOCKET.
+
+   Modified by CCP ehf.
 */
 
 #ifndef Py_BUILD_CORE_BUILTIN

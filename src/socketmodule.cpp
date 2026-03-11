@@ -83,6 +83,7 @@ Local naming conventions:
 - names starting with socket_ are module-level functions
 - names starting with PySocket are exported through socketmodule.h
 
+  Modified by CCP ehf.
 */
 
 #ifndef Py_BUILD_CORE_BUILTIN
