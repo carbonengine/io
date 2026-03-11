@@ -1,3 +1,4 @@
+// Copyright © 2026 CCP ehf.
 #ifndef CARBONIO_H
 #define CARBONIO_H
 

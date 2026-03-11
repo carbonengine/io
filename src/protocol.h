@@ -1,3 +1,5 @@
+// Copyright © 2026 CCP ehf.
+
 /**
  * CCP Network protocol related definitions shared between CarbonIO and StacklessIO
  */
