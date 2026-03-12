@@ -38,10 +38,10 @@ breach of its terms and conditions.
 
 7. Nothing in this License Agreement shall be deemed to create any
 relationship of agency, partnership, or joint venture between CCP and
-Licensee.  This License Agreement does not grant permission to use CCP
+Licensee.  This License Agreement does not grant permission to use CCP's
 trademarks or trade name in a trademark sense to endorse or promote
 products or services of Licensee, or any third party.
 
-8. By copying, installing or otherwise using CCP, Licensee
+8. By copying, installing or otherwise using CARBON.IO, Licensee
 agrees to be bound by the terms and conditions of this License
 Agreement.
