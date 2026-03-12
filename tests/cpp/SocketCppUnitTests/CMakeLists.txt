@@ -1,3 +1,5 @@
+# Copyright © 2026 CCP ehf.
+
 find_package(GTest REQUIRED)
 add_executable(SocketCppUnitTests
         main.cpp

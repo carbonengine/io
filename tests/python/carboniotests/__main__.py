@@ -1,3 +1,5 @@
+# Copyright © 2026 CCP ehf.
+
 import _imp
 import importlib.machinery
 import os

@@ -1,3 +1,4 @@
+// Copyright © 2026 CCP ehf.
 /* A C api for stacklessio */
 #ifndef _STACKLESSIO_API_H_
 #define _STACKLESSIO_API_H_

@@ -1,3 +1,5 @@
+# Modified by CCP ehf.
+
 import unittest
 from test import support
 from test.support import os_helper

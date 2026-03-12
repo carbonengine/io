@@ -1,3 +1,4 @@
+// Copyright © 2026 CCP ehf.
 #include "c_channel.h"
 
 SchedulerCAPI* s_scheduler;

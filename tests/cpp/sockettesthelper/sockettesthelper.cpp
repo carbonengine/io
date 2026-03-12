@@ -1,3 +1,5 @@
+// Copyright © 2026 CCP ehf.
+
 #define PY_SSIZE_T_CLEAN // Recommended by C/C++ extension tutorial in Python docs
 #include <Python.h>
 #include <socketmodule.h>

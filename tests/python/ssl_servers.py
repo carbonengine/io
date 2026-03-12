@@ -1,3 +1,5 @@
+# Modified by CCP ehf.
+
 import os
 import sys
 import ssl

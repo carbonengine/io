@@ -1,3 +1,4 @@
+// Copyright © 2026 CCP ehf.
 // A C exposure for PyChannelObject from carbon-scheduler
 // Created by hrafng on 2024-05-31.
 
