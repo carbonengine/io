@@ -1,0 +1,6 @@
+version: 2
+updates:
+  - package-ecosystem: "vcpkg"
+    directory: "/" # The location of vcpkg.json
+    schedule:
+      interval: "weekly"
