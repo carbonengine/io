@@ -3,4 +3,4 @@ updates:
   - package-ecosystem: "vcpkg"
     directory: "/" # The location of vcpkg.json
     schedule:
-      interval: "monthly"
+      interval: "weekly"
