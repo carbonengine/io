@@ -11,7 +11,7 @@
     },
     {
       "name": "libuv",
-      "version>=": "1.48.0#1"
+      "version>=": "1.52.1"
     },
     {
       "name": "python3",
