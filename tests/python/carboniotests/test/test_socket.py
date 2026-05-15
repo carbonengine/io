@@ -7095,6 +7095,19 @@ class CarbonIoTest(SocketPairTest):
         self.assertEqual(MSG, msg)
         self.assertDictEqual(expected_stats, delta_stats)
 
+    def test_recvpacket_with_oob_data_exceeding_payload(self):
+        # A hostile peer can claim an OOB length larger than the payload it
+        # actually sent; the block plus its length prefix must fit in the payload.
+        body = b'short'
+        realPayloadLen = len(body) + 4
+        oobDataLen = realPayloadLen + 64
+        header = realPayloadLen | 1<<28
+        payload = struct.pack("!ll", header, oobDataLen)
+        payload += body
+        self.serv.send(payload)
+        with self.assertRaises(OSError):
+            self.cli.recvpacketoob()
+
     def test_recvpacket_with_consumed_oob_data(self):
         import sockettesthelper
         # Install a callback that eats oobData packets of length 5,

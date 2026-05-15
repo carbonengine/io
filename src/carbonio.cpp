@@ -1932,6 +1932,12 @@ bool StreamPacketReceiveRequest::needMore() {
 				return false;
 			}
 
+			if ( static_cast<size_t>( m_oobDataLen ) + sizeof( m_oobDataLen ) > payloadLen() )
+			{
+				PyErr_Format(PyExc_OSError, "corrupted out-of-band data in packet: oob length %u exceeds payload size %zu", m_oobDataLen, payloadLen());
+				return false;
+			}
+
 			m_payload += sizeof(m_oobDataLen);
 			m_oobData = m_payload;
 			m_payload += m_oobDataLen;
