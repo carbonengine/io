@@ -50,4 +50,4 @@ This software provides low-level networking functionality.
 
 Trademark Notice: CCP Games is a trademark of CCP ehf.
 
-This project is licensed under the [PSF-2.0 LICENSE](LICENSE.txt). Nothing in the [PSF-2.0 License](LICENSE.txt) grants any rights to CCP Games' trademarks or game content.
+This project is licensed under the [PSF-2.0 LICENSE](LICENSE.txt); see [NOTICE.md](NOTICE.md) for the attribution and how CCP Games distributes CARBON.IO under those terms. Nothing in the [PSF-2.0 License](LICENSE.txt) grants any rights to CCP Games' trademarks or game content.
