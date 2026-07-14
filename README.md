@@ -1,4 +1,7 @@
 # carbon-io
+
+[English](./README.md) | [简体中文](./README.zh-CN.md)
+
 [![license](https://img.shields.io/badge/License-PSF%202.0-blue)](LICENSE.txt)
 
 ## Overview
