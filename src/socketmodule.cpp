@@ -3346,7 +3346,9 @@ sock_getsockopt(PySocketSockObject *s, PyObject *args)
     }
     buf = PyBytes_FromStringAndSize((char *)NULL, buflen);
     if (buf == NULL)
-        return NULL;
+    {
+	    return NULL;
+    }
 	res = getsockopt( s->sock_fd, level, optname, (char*)PyBytes_AS_STRING( buf ), &buflen );
 	if( res < 0 )
 	{
@@ -3868,7 +3870,9 @@ sock_listen(PySocketSockObject *s, PyObject *args)
     /* To avoid problems on systems that don't allow a negative backlog
      * (which doesn't make sense anyway) we force a minimum value of 0. */
     if (backlog < 0)
-        backlog = 0;
+    {
+	    backlog = 0;
+    }
 	
 	if( is_managed_by_libuv( s ) ) {
 		if( !is_valid_uv_handle( s->uv_handle ) ) {
@@ -4250,7 +4254,9 @@ sock_recvfrom(PySocketSockObject *s, PyObject *args)
 
     buf = PyBytes_FromStringAndSize((char *) 0, recvlen);
     if (buf == NULL)
-        return NULL;
+    {
+	    return NULL;
+    }
 
 	if( is_managed_by_libuv( s ) )
 	{
@@ -4816,7 +4822,9 @@ sock_send(PySocketSockObject *s, PyObject *args)
     struct sock_send ctx;
 
     if (!PyArg_ParseTuple(args, "y*|i:send", &pbuf, &flags))
-        return NULL;
+    {
+	    return NULL;
+    }
 
 	if( is_managed_by_libuv( s ) )
 	{
@@ -4882,7 +4890,9 @@ sock_sendall(PySocketSockObject *s, PyObject *args)
     PyObject *res = NULL;
 
     if (!PyArg_ParseTuple(args, "y*|i:sendall", &pbuf, &flags))
-        return NULL;
+    {
+	    return NULL;
+    }
 	buf = reinterpret_cast<char*>( pbuf.buf );
     len = pbuf.len;
 
