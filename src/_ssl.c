@@ -2853,7 +2853,7 @@ _ssl__SSLSocket_shutdown_impl(PySSLSocket *self)
     	// will not have its sock_fd attribute set to INVALID_SOCKET.
     	// This behavior is covered by the CPython tests, so instead of changing those,
     	// add the extra check to see if the uv handle is closing.
-        if ((((PyObject*)sock) == Py_None) || (sock->sock_fd == INVALID_SOCKET || sock->uv_handle && uv_is_closing( sock->uv_handle ))) {
+        if ((((PyObject*)sock) == Py_None) || (sock->sock_fd == INVALID_SOCKET || ( sock->uv_handle && uv_is_closing( sock->uv_handle ) ))) {
             _setSSLError(get_state_sock(self),
                          "Underlying socket connection gone",
                          PY_SSL_ERROR_NO_SOCKET, __FILE__, __LINE__);
