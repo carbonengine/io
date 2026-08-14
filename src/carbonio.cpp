@@ -7,12 +7,13 @@
 #include <set>
 #include <vector>
 
+#include <CcpMacros.h>
 #include <CcpTelemetry.h>
-
-#define TELEMETRY_ZONE( zone ) TelemetryZone telemetry_zone##__COUNTER__( TMCM_CPP, zone, __FILE__, __LINE__ )
 
 #include "socketmodule.h"
 #include "protocol.h"
+
+#define TELEMETRY_ZONE( zoneName ) TelemetryZone CCP_ANONYMOUS_VARIABLE( telemetryZone_ )( TelemetryCategory(), zoneName, __FILE__, __LINE__ )
 
 #ifndef INVALID_SOCKET /* MS defines this */
 #define INVALID_SOCKET ( -1 )
@@ -49,6 +50,12 @@ static std::vector<OobDataCallback> s_oobDataCallbacks{};
 
 static std::unordered_map<SOCKET_T, uv_handle_t*> s_uvHandleLookup;
 static std::mutex s_uvHandleLookupLock;
+
+const CcpTelemetryCategory& TelemetryCategory()
+{
+	static const CcpTelemetryCategory& category = CcpTelemetryCategoryRegister( "io" ).first;
+	return category;
+}
 
 void AddToLookupTable( SOCKET_T fileDescriptor, uv_handle_t* uvHandle )
 {
@@ -105,6 +112,10 @@ bool InitScheduler()
 }
 
 int InitUvLoop() {
+	if ( auto [category, ok] = CcpTelemetryCategoryRegister( "io" ); !ok )
+	{
+		CCP_LOGWARN( "Could not register a telemetry category for `io`, no profiling zones will be emitted." );
+	}
 	// uv_loop instances aren't thread-safe, thus we keep a loop instance per thread for which we need to initialize TLS
 	auto status = uv_key_create(&s_tlsKey);
 	if ( status != 0 ) {
