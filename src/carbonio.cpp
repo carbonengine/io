@@ -338,13 +338,13 @@ void LogError( const char* msg )
 {
 	if( !PyErr_Occurred() )
 	{
-		CCP_LOGERR(msg);
+		CCP_LOGERR( "%s", msg );
 		return;
 	}
 	PyObject *exc, *val, *tb;
 	PyErr_Fetch( &exc, &val, &tb );
 	auto errorString = std::string(msg) + "\n\n" + FormatException(exc, val, tb);
-	CCP_LOGERR(errorString.c_str());
+	CCP_LOGERR( "%s", errorString.c_str() );
 	PyErr_Restore(exc, val, tb);
 }
 
