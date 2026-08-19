@@ -250,8 +250,8 @@ private:
 class StreamSendRequest : public IStreamRequest
 {
 public:
-	StreamSendRequest( PySocketSockObject* socket, char* buf, Py_ssize_t len, int flags, bool blockingSend ) :
-		IStreamRequest( socket ), m_flags( flags )
+	StreamSendRequest( PySocketSockObject* socket, char* buf, Py_ssize_t len, int /*unused*/, bool blockingSend ) :
+		IStreamRequest( socket )
 	{
 		m_sendBuffer = uv_buf_init( buf, len );
 		m_blockingSend = blockingSend;
@@ -266,8 +266,6 @@ public:
 
 private:
 		void onCallback( ICallbackParams *callbackParams ) override;
-		int m_flags;
-		uv_write_t m_writeRequest;
 		uv_buf_t m_sendBuffer;
 		bool m_blockingSend;
 };
@@ -282,8 +280,8 @@ public:
 class UdpRecvRequest : public IUdpRequest
 {
 public:
-	UdpRecvRequest( PySocketSockObject* socket, Py_ssize_t len, int flags ) :
-		IUdpRequest( socket ), m_len( len ), m_flags( flags )
+	UdpRecvRequest( PySocketSockObject* socket, Py_ssize_t /* unused */, int /* unused */ ) :
+		IUdpRequest( socket )
 	{
 	}
 
@@ -303,8 +301,6 @@ private:
 	void onTimeout() override;
 	void stopRead();
 
-	Py_ssize_t m_len;
-	int m_flags;
 	PyObject* m_buf{nullptr};
 	PyObject* m_addr{nullptr};
 };
@@ -312,8 +308,8 @@ private:
 class UdpSendRequest : public IUdpRequest
 {
 public:
-	UdpSendRequest( PySocketSockObject* socket, char* buf, Py_ssize_t len, const struct sockaddr* addr, int addrlen , int flags )
-	: IUdpRequest( socket ), m_addrLen( addrlen ) , m_flags( flags )
+	UdpSendRequest( PySocketSockObject* socket, char* buf, Py_ssize_t len, const struct sockaddr* addr, int addrlen , int /* unused */ )
+	: IUdpRequest( socket )
 	{
 		memcpy( &m_addr, addr, addrlen );
 		m_sendBuffer = uv_buf_init( buf, len );
@@ -331,8 +327,6 @@ private:
 	void onCallback( ICallbackParams *callbackParams ) override;
 
 	struct sockaddr m_addr;
-	int m_addrLen;
-	int m_flags;
 
 	uv_udp_send_t m_writeRequest;
 	uv_buf_t m_sendBuffer;
