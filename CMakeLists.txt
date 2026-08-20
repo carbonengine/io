@@ -27,7 +27,7 @@ target_precompile_headers(_socket PRIVATE
         <memory>
         <string>
         <string_view>
-        <CCPLog.h>
+        <CcpLog.h>
         <CcpMacros.h>
         <CcpScopeGuard.h>
 )
