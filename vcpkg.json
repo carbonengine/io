@@ -15,7 +15,7 @@
     },
     {
       "name": "python3",
-      "version>=": "3.12.9#1"
+      "version>=": "3.12.13"
     },
     {
       "name": "carbon-core",
