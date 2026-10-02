@@ -2,7 +2,7 @@
   "dependencies": [
     {
       "name": "gtest",
-      "version>=": "1.16.0",
+      "version>=": "1.18.0",
       "host": true
     },
     {
