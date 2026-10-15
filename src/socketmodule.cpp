@@ -5511,7 +5511,7 @@ sock_sendmsg_afalg(PySocketSockObject *self, PyObject *args, PyObject *kwds)
     header->cmsg_level = SOL_ALG;
     header->cmsg_type = ALG_SET_OP;
     header->cmsg_len = CMSG_LEN(4);
-    uiptr = (void*)CMSG_DATA(header);
+    uiptr = (unsigned int*)CMSG_DATA(header);
     *uiptr = (unsigned int)op;
 
     /* set initialization vector */
@@ -5525,7 +5525,7 @@ sock_sendmsg_afalg(PySocketSockObject *self, PyObject *args, PyObject *kwds)
         header->cmsg_level = SOL_ALG;
         header->cmsg_type = ALG_SET_IV;
         header->cmsg_len = CMSG_SPACE(sizeof(*alg_iv) + iv.len);
-        alg_iv = (void*)CMSG_DATA(header);
+        alg_iv = (af_alg_iv*)CMSG_DATA(header);
         alg_iv->ivlen = iv.len;
         memcpy(alg_iv->iv, iv.buf, iv.len);
     }
@@ -5541,7 +5541,7 @@ sock_sendmsg_afalg(PySocketSockObject *self, PyObject *args, PyObject *kwds)
         header->cmsg_level = SOL_ALG;
         header->cmsg_type = ALG_SET_AEAD_ASSOCLEN;
         header->cmsg_len = CMSG_LEN(4);
-        uiptr = (void*)CMSG_DATA(header);
+        uiptr = (unsigned int*)CMSG_DATA(header);
         *uiptr = (unsigned int)assoclen;
     }
 
