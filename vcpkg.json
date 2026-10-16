@@ -7,7 +7,7 @@
     },
     {
       "name": "carbon-scheduler",
-      "version>=": "1.6.0-rc.1#1"
+      "version>=": "1.6.0-rc.1#2"
     },
     {
       "name": "libuv",
@@ -19,7 +19,7 @@
     },
     {
       "name": "carbon-core",
-      "version>=": "3.3.0-rc.1"
+      "version>=": "3.3.0-rc.1#1"
     },
     {
       "name": "openssl",
