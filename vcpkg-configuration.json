@@ -8,7 +8,7 @@
     {
       "kind": "git",
       "repository": "https://github.com/ccptoebeans/vcpkg-registry.git",
-      "baseline": "2766795e7424b75419698b5d694ffdb501caf3f0",
+      "baseline": "7178136ee38f04364098db53afbbdcbda2e54f59",
       "packages": [
         "carbon-core",
         "carbon-scheduler",
