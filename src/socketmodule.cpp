@@ -7438,9 +7438,9 @@ socket_socketpair(PyObject *self, PyObject *args)
         return NULL;
 
     /* Create a pair of socket fds */
-    Py_BEGIN_ALLOW_THREADS
 #ifdef SOCK_CLOEXEC
     if (state->sock_cloexec_works != 0) {
+    	Py_BEGIN_ALLOW_THREADS
         ret = socketpair(family, type | SOCK_CLOEXEC, proto, sv);
         if (state->sock_cloexec_works == -1) {
             if (ret >= 0) {
@@ -7452,10 +7452,10 @@ socket_socketpair(PyObject *self, PyObject *args)
                 ret = socketpair(family, type, proto, sv);
             }
         }
+    	Py_END_ALLOW_THREADS
     }
     else
 #endif
-	Py_END_ALLOW_THREADS
 	if( !is_managed_by_libuv(type, family) )
 	{
 #ifdef HAVE_SOCKETPAIR
