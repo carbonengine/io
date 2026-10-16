@@ -8,10 +8,12 @@
     {
       "kind": "git",
       "repository": "https://github.com/ccptoebeans/vcpkg-registry.git",
-      "baseline": "a86bd6d01609e8f9cf65b3532970e9b89806e171",
+      "baseline": "5695e0593fa4afdb13bc439e4c1deb9e34320397",
       "packages": [
         "carbon-core",
-        "carbon-scheduler"
+        "carbon-scheduler",
+        "tracy",
+        "greenlet"
       ],
       "reference": "linux"
     },
@@ -21,9 +23,7 @@
       "baseline": "d431d05377ae8d620c644c49c3f4d1bd974cee18",
       "packages": [
         "python3",
-        "ccp-debug-info",
-        "greenlet",
-        "tracy"
+        "ccp-debug-info"
       ]
     }
   ]
