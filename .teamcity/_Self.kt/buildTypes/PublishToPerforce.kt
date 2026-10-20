@@ -296,7 +296,7 @@ class Publish(perforce_publish_path: String) : BuildType({
             }
 
             artifacts {
-                artifactRules = "artifact.zip!**=>%perforce_path_to_publish_into%/${Linux.x64_Debug.depParamRefs["env.GIT_TAG_HASH"]}"
+                artifactRules = "artifact.zip!**=>%perforce_path_to_publish_into%/${Linux.arm64_Debug.depParamRefs["env.GIT_TAG_HASH"]}"
             }
         }
         dependency(Linux.arm64_Internal) {
@@ -305,7 +305,7 @@ class Publish(perforce_publish_path: String) : BuildType({
             }
 
             artifacts {
-                artifactRules = "artifact.zip!**=>%perforce_path_to_publish_into%/${Linux.x64_Internal.depParamRefs["env.GIT_TAG_HASH"]}"
+                artifactRules = "artifact.zip!**=>%perforce_path_to_publish_into%/${Linux.arm64_Internal.depParamRefs["env.GIT_TAG_HASH"]}"
             }
         }
         dependency(Linux.arm64_Release) {
@@ -314,7 +314,7 @@ class Publish(perforce_publish_path: String) : BuildType({
             }
 
             artifacts {
-                artifactRules = "artifact.zip!**=>%perforce_path_to_publish_into%/${Linux.x64_Release.depParamRefs["env.GIT_TAG_HASH"]}"
+                artifactRules = "artifact.zip!**=>%perforce_path_to_publish_into%/${Linux.arm64_Release.depParamRefs["env.GIT_TAG_HASH"]}"
             }
         }
         dependency(Linux.arm64_TrinityDev) {
@@ -323,7 +323,7 @@ class Publish(perforce_publish_path: String) : BuildType({
             }
 
             artifacts {
-                artifactRules = "artifact.zip!**=>%perforce_path_to_publish_into%/${Linux.x64_TrinityDev.depParamRefs["env.GIT_TAG_HASH"]}"
+                artifactRules = "artifact.zip!**=>%perforce_path_to_publish_into%/${Linux.arm64_TrinityDev.depParamRefs["env.GIT_TAG_HASH"]}"
             }
         }
 
