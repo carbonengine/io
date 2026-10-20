@@ -4783,17 +4783,14 @@ class BasicSocketPairTest(SocketPairTest):
         self.assertEqual(sock.type, socket.SOCK_STREAM)
         self.assertEqual(sock.proto, 0)
 
-    # @unittest.skipIf(hasattr(socket, 'AF_UNIX'), "CCP: Re-enable this once we get AF_INET_SUPPORT in")
-    # def testDefaults(self):
-    #     self._check_defaults(self.cli)
-    #     self._check_defaults(self.serv)
+    @unittest.skipIf(hasattr(socket, 'AF_UNIX'), "CCP: Re-enable this once we get AF_INET_SUPPORT in")
+    def testDefaults(self):
+        self._check_defaults(self.cli)
+        self._check_defaults(self.serv)
 
     def testRecv(self):
-        print("self.cli.send(MSG)")
         self.cli.send(MSG)
-        print("msg = self.serv.recv(1024)")
         msg = self.serv.recv(1024)
-        print("self.assertEqual(msg, MSG)")
         self.assertEqual(msg, MSG)
 
     def testSend(self):
@@ -4801,10 +4798,6 @@ class BasicSocketPairTest(SocketPairTest):
         msg = self.cli.recv(1024)
         self.assertEqual(msg, MSG)
 
-    def testNothing(self):
-        print("SOmething")
-        print("SOmething1")
-        print("SOmething2")
 
 
 class NonBlockingTCPTests(ThreadedTCPSocketTest):
