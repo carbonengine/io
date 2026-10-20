@@ -733,10 +733,24 @@ set_gaierror(socket_state *state, int error)
 #include <BluePyCpp.h>
 #include <carbonio.h>
 
+int strip_nonblock_cloexec_flags_from_sock_type(int sock_type)
+{
+#ifdef SOCK_NONBLOCK
+	sock_type &= ~SOCK_NONBLOCK;
+#endif
+#ifdef SOCK_CLOEXEC
+	sock_type &= ~SOCK_CLOEXEC;
+#endif
+
+	return sock_type;
+}
+
 bool is_managed_by_libuv( int sock_type, int family )
 {
+	sock_type = strip_nonblock_cloexec_flags_from_sock_type(sock_type);
+
 	if ( sock_type == SOCK_DGRAM ) {
-		return true;
+		return family == AF_INET || family == AF_INET6;
 	}
 
 	if ( sock_type == SOCK_STREAM ) {
@@ -3403,7 +3417,7 @@ sock_bind(PySocketSockObject *s, PyObject *addro)
 				}
 			}
 			
-			if ( s->sock_type == SOCK_STREAM )
+			if ( strip_nonblock_cloexec_flags_from_sock_type(s->sock_type) == SOCK_STREAM )
 			{
 				auto handle = reinterpret_cast<uv_tcp_t *>(s->uv_handle);
 				if ( ipv6_v6only_flag )
@@ -3411,7 +3425,7 @@ sock_bind(PySocketSockObject *s, PyObject *addro)
 					bind_flags = UV_TCP_IPV6ONLY;
 				}
 				res = uv_tcp_bind(handle, SAS2SA(&addrbuf), bind_flags );
-			} else if ( s->sock_type == SOCK_DGRAM )
+			} else if ( strip_nonblock_cloexec_flags_from_sock_type(s->sock_type) == SOCK_DGRAM )
 			{
 				auto handle = reinterpret_cast<uv_udp_t *>(s->uv_handle);
 				if ( ipv6_v6only_flag )
@@ -3669,7 +3683,7 @@ sock_connect(PySocketSockObject *s, PyObject *addro)
 
 	if( is_managed_by_libuv( s ) )
 	{
-		if( s->sock_type != SOCK_STREAM )
+		if( strip_nonblock_cloexec_flags_from_sock_type(s->sock_type) != SOCK_STREAM )
 		{
 			PyErr_SetString(PyExc_NotImplementedError, "Unsupported libuv connection type");
 			return nullptr;
@@ -3722,7 +3736,7 @@ sock_connect_ex(PySocketSockObject *s, PyObject *addro)
 
 	if( is_managed_by_libuv( s ) )
 	{
-		if( s->sock_type != SOCK_STREAM )
+		if( strip_nonblock_cloexec_flags_from_sock_type(s->sock_type) != SOCK_STREAM )
 		{
 			PyErr_SetString(PyExc_NotImplementedError, "Unsupported libuv connection type");
 			return nullptr;
@@ -4021,11 +4035,11 @@ sock_recv(PySocketSockObject *s, PyObject *args)
 	
 	if ( is_managed_by_libuv( s ))
 	{
-		if( s->sock_type == SOCK_STREAM )
+		if( strip_nonblock_cloexec_flags_from_sock_type(s->sock_type) == SOCK_STREAM )
 		{
 			return uv_tcp_recv_impl( s, recvlen, flags );
 		}
-		else if( s->sock_type == SOCK_DGRAM )
+		else if( strip_nonblock_cloexec_flags_from_sock_type(s->sock_type) == SOCK_DGRAM )
 		{
 			auto tup = uv_udp_recv_impl( s, recvlen, flags );
 			if( !tup )
@@ -4113,7 +4127,7 @@ sock_recv_into(PySocketSockObject *s, PyObject *args, PyObject *kwds)
 	
 	if( is_managed_by_libuv( s ) )
 	{
-		if( s->sock_type == SOCK_STREAM )
+		if( strip_nonblock_cloexec_flags_from_sock_type(s->sock_type) == SOCK_STREAM )
 		{
 			auto request = std::make_shared<StreamRecvIntoRequest>(s, buf, recvlen, flags);
 			PyObject* bytesReceived = request->execute();
@@ -4126,7 +4140,7 @@ sock_recv_into(PySocketSockObject *s, PyObject *args, PyObject *kwds)
 		}
 		else
 		{
-			PyErr_Format(PyExc_NotImplementedError, "Unsupported socket type %d", s->sock_type);
+			PyErr_Format(PyExc_NotImplementedError, "Unsupported socket type %d", strip_nonblock_cloexec_flags_from_sock_type(s->sock_type));
 			PyBuffer_Release(&pbuf);
 			return nullptr;
 		}
@@ -4260,7 +4274,7 @@ sock_recvfrom(PySocketSockObject *s, PyObject *args)
 
 	if( is_managed_by_libuv( s ) )
 	{
-		if( s->sock_type == SOCK_STREAM )
+		if( strip_nonblock_cloexec_flags_from_sock_type(s->sock_type) == SOCK_STREAM )
 		{
 			sockaddr_storage name;
 			int namelen = sizeof( sockaddr_storage );
@@ -4283,7 +4297,7 @@ sock_recvfrom(PySocketSockObject *s, PyObject *args)
 			}
 			ret = PyTuple_Pack( 2, buf, addr );
 		}
-		else if ( s->sock_type == SOCK_DGRAM )
+		else if ( strip_nonblock_cloexec_flags_from_sock_type(s->sock_type) == SOCK_DGRAM )
 		{
 			ret = uv_udp_recv_impl( s, recvlen, flags );
 		}
@@ -4360,7 +4374,7 @@ sock_recvfrom_into(PySocketSockObject *s, PyObject *args, PyObject* kwds)
 
 	if( is_managed_by_libuv( s ) )
 	{
-		if( s->sock_type == SOCK_STREAM )
+		if( strip_nonblock_cloexec_flags_from_sock_type(s->sock_type) == SOCK_STREAM )
 		{
 			auto request = std::make_shared<StreamRecvIntoRequest>(s, buf, recvlen, flags);
 			PyObject* bytesReceived = request->execute();
@@ -5065,7 +5079,7 @@ sock_sendto(PySocketSockObject *s, PyObject *args)
     ctx.addrbuf = &addrbuf;
 	if ( is_managed_by_libuv( s ) )
 	{
-		if ( s->sock_type == SOCK_DGRAM )
+		if (strip_nonblock_cloexec_flags_from_sock_type(s->sock_type) == SOCK_DGRAM )
 		{
 			auto ret = uv_udp_sendto_impl( s, &ctx );
 			if( !ret )
@@ -5080,7 +5094,7 @@ sock_sendto(PySocketSockObject *s, PyObject *args)
 				return nullptr;
 			}
 		}
-		else if ( s->sock_type == SOCK_STREAM ) {
+		else if ( strip_nonblock_cloexec_flags_from_sock_type(s->sock_type) == SOCK_STREAM ) {
 			auto py_status = uv_sendall_impl(s, reinterpret_cast<char*>(pbuf.buf), pbuf.len, flags);
 			if ( !py_status )
 			{
@@ -6387,7 +6401,7 @@ sock_initobj_impl(PySocketSockObject *self, int family, int type, int proto,
 				if( s->uv_handle == nullptr )
 				{
 					// No handle found for re-use, must create one.
-					if( type == SOCK_STREAM )
+					if( strip_nonblock_cloexec_flags_from_sock_type(type) == SOCK_STREAM )
 					{
 						auto handle = create_uv_tcp_handle( &fd, family );
 						if( !handle )
@@ -6396,7 +6410,7 @@ sock_initobj_impl(PySocketSockObject *self, int family, int type, int proto,
 						}
 						s->uv_handle = reinterpret_cast<uv_handle_t*>( handle );
 					}
-					else if( type == SOCK_DGRAM )
+					else if( strip_nonblock_cloexec_flags_from_sock_type(type) == SOCK_DGRAM )
 					{
 						auto handle = create_uv_udp_handle( &fd, family );
 						if( !handle )
@@ -6422,7 +6436,7 @@ sock_initobj_impl(PySocketSockObject *self, int family, int type, int proto,
         }
 		if ( is_managed_by_libuv( type, family ))
 		{
-			if( type == SOCK_STREAM )
+			if( strip_nonblock_cloexec_flags_from_sock_type(type) == SOCK_STREAM )
 			{
 				auto handle = create_uv_tcp_handle( &fd, family );
 				if( !handle )
@@ -6431,7 +6445,7 @@ sock_initobj_impl(PySocketSockObject *self, int family, int type, int proto,
 				}
 				s->uv_handle = reinterpret_cast<uv_handle_t*>( handle );
 			}
-			else if( type == SOCK_DGRAM )
+			else if( strip_nonblock_cloexec_flags_from_sock_type(type) == SOCK_DGRAM )
 			{
 				auto handle = create_uv_udp_handle( &fd, family );
 				if( !handle )
@@ -6492,7 +6506,7 @@ sock_initobj_impl(PySocketSockObject *self, int family, int type, int proto,
 			s->uv_handle = LookupHandle( fd );
 			if ( ! s->uv_handle && is_managed_by_libuv( type, family ) )
 			{
-				if( type == SOCK_STREAM )
+				if( strip_nonblock_cloexec_flags_from_sock_type(type) == SOCK_STREAM )
 				{
 					auto handle = create_uv_tcp_handle(&fd, family);
 					if( !handle )
@@ -6501,7 +6515,7 @@ sock_initobj_impl(PySocketSockObject *self, int family, int type, int proto,
 					}
 					s->uv_handle = reinterpret_cast<uv_handle_t*>(handle);
 				}
-				else if( type == SOCK_DGRAM )
+				else if( strip_nonblock_cloexec_flags_from_sock_type(type) == SOCK_DGRAM )
 				{
 					auto handle = create_uv_udp_handle(&fd, family);
 					if( !handle )
@@ -7370,7 +7384,7 @@ socket_dup(PyObject *self, PyObject *fdobj)
 
 	if( is_managed_by_libuv( type, family ) )
 	{
-		if( type == SOCK_STREAM )
+		if( strip_nonblock_cloexec_flags_from_sock_type(type) == SOCK_STREAM )
 		{
 			if (!dup_uv_tcp_handle( newfd ) )
 			{
@@ -7378,7 +7392,7 @@ socket_dup(PyObject *self, PyObject *fdobj)
 				return nullptr;
 			}
 		}
-		else if( type == SOCK_DGRAM )
+		else if( strip_nonblock_cloexec_flags_from_sock_type(type) == SOCK_DGRAM )
 		{
 			if ( !dup_uv_udp_handle( newfd ) )
 			{

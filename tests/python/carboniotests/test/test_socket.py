@@ -6048,8 +6048,10 @@ class NonblockConstantTest(unittest.TestCase):
         else:
             self.assertEqual(s.type, socket.SOCK_STREAM)
             self.assertEqual(s.gettimeout(), None)
-            self.assertFalse(
-                fcntl.fcntl(s, fcntl.F_GETFL, os.O_NONBLOCK) & os.O_NONBLOCK)
+            # CCP Modification
+            # Sockets managed by libuv are always in non-blocking mode,
+            # self.assertFalse(
+            #     fcntl.fcntl(s, fcntl.F_GETFL, os.O_NONBLOCK) & os.O_NONBLOCK)
             self.assertTrue(s.getblocking())
 
     @support.requires_linux_version(2, 6, 28)
