@@ -6,30 +6,31 @@ When updating to a new Python version fresh copies of those files should be plac
 
 Mapping of files sourced from Python:
 
-| cpython                         | carbon-io                   |
-|---------------------------------|-----------------------------|
-| Modules/socketmodule.h          | include/socketmodule.h      |
-| Modules/_ssl/clinic/cert.c.h    | src/_ssl/clinic/cert.c.h    |       
-| Modules/_ssl/cert.c             | src/_ssl/cert.c             |
-| Modules/_ssl/debughelpers.c     | src/_ssl/debughelpers.c     |
-| Modules/_ssl/misc.c             | src/_ssl/misc.c             |
-| Modules/clinic/_ssl.c.h         | src/clinic/_ssl.c.h         |
-| Modules/clinic/selectmodule.c.h | src/clinic/selectmodule.c.h |      
-| Modules/clinic/socketmodule.c.h | src/clinic/socketmodule.c.h |    
-| Modules/_ssl.c                  | src/_ssl.c                  |   
-| Modules/_ssl.h                  | src/_ssl.h                  |  
-| Modules/_ssl_data.h             | src/_ssl_data.h             | 
-| Modules/_ssl_data_31.h          | src/_ssl_data_31.h          |
-| Modules/_ssl_data_111.h         | src/_ssl_data_111.h         |
-| Modules/_ssl_data_300.h         | src/_ssl_data_300.h         |
-| Modules/addrinfo.h              | src/addrinfo.h              |
-| Modules/selectmodule.c          | src/selectmodule.c          |
-| Modules/socketmodule.c          | src/socketmodule.cpp        |
-| Lib/test/certdata               | tests/certdata              |
-| Lib/test/ssl_servers.py         | tests/ssl_servers.py        |
-| Lib/test/test_select.py         | tests/test_select.py        |
-| Lib/test/test_socket.py         | tests/test_socket.py        |
-| Lib/test/test_ssl.py            | tests/test_ssl.py           |
+| cpython                         | carbon-io                                      |
+|---------------------------------|------------------------------------------------|
+| Modules/socketmodule.h          | include/socketmodule.h                         |
+| Modules/_ssl/clinic/cert.c.h    | src/_ssl/clinic/cert.c.h                       |       
+| Modules/_ssl/cert.c             | src/_ssl/cert.c                                |
+| Modules/_ssl/debughelpers.c     | src/_ssl/debughelpers.c                        |
+| Modules/_ssl/distrusted_spki.h  | src/_ssl/distrusted_spki.h                     |
+| Modules/_ssl/misc.c             | src/_ssl/misc.c                                |
+| Modules/clinic/_ssl.c.h         | src/clinic/_ssl.c.h                            |
+| Modules/clinic/selectmodule.c.h | src/clinic/selectmodule.c.h                    |      
+| Modules/clinic/socketmodule.c.h | src/clinic/socketmodule.c.h                    |    
+| Modules/_ssl.c                  | src/_ssl.c                                     |   
+| Modules/_ssl.h                  | src/_ssl.h                                     |  
+| Modules/_ssl_data.h             | src/_ssl_data.h                                | 
+| Modules/_ssl_data_31.h          | src/_ssl_data_31.h                             |
+| Modules/_ssl_data_111.h         | src/_ssl_data_111.h                            |
+| Modules/_ssl_data_300.h         | src/_ssl_data_300.h                            |
+| Modules/addrinfo.h              | src/addrinfo.h                                 |
+| Modules/selectmodule.c          | src/selectmodule.c                             |
+| Modules/socketmodule.c          | src/socketmodule.cpp                           |
+| Lib/test/certdata               | tests/python/carboniotests/test/certdata       |
+| Lib/test/test_select.py         | tests/python/carboniotests/test/test_select.py |
+| Lib/test/test_socket.py         | tests/python/carboniotests/test/test_socket.py |
+| Lib/test/test_ssl.py            | tests/python/carboniotests/test/test_ssl.py    |
+| Lib/test/ssl_servers.py         | tests/python/ssl_servers.py                    |
 
 Base cpython branch: 3.12
-Base cpython release: v3.12.3 (f6650f9ad73359051f3e558c2431a109bc016664)
+Base cpython release: v3.12.16 (2c2462afc5d978d31f3d073001fc202d269917ff)
