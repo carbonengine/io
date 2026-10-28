@@ -4833,7 +4833,7 @@ class BasicSocketPairTest(SocketPairTest):
         self.assertEqual(msg, MSG)
 
 
-@unittest.skip("TODO needs debugging")
+@unittest.skip("CCP: carbon-io always provides _socket.socketpair, so the pure Python fallback is never used")
 class PurePythonSocketPairTest(SocketPairTest):
     # Explicitly use socketpair AF_INET or AF_INET6 to ensure that is the
     # code path we're using regardless platform is the pure python one where
