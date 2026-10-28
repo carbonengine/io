@@ -1,14 +1,14 @@
 {
   "default-registry": {
     "kind": "git",
-    "baseline": "f3e10653cc27d62a37a3763cd84b38bca07c6075",
+    "baseline": "15b12b99a227d51e21c86dffd40385439eac87a0",
     "repository": "https://github.com/microsoft/vcpkg.git"
   },
   "registries": [
     {
       "kind": "git",
+      "baseline": "1b1084b071114ffdcd91fb03bc5978f56140c36f",
       "repository": "https://github.com/carbonengine/vcpkg-registry.git",
-      "baseline": "d431d05377ae8d620c644c49c3f4d1bd974cee18",
       "packages": [
         "python3",
         "carbon-core",
