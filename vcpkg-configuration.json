@@ -15,7 +15,8 @@
         "carbon-scheduler",
         "ccp-debug-info",
         "greenlet",
-        "tracy"
+        "tracy",
+        "zlib"
       ]
     }
   ]
