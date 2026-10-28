@@ -15,12 +15,15 @@ from test.support import socket_helper
 from test.support import threading_helper
 from test.support import warnings_helper
 from test.support import asyncore
+import contextlib
 import array
 import re
 import socket
 import select
 import struct
+import tempfile
 import time
+import zipfile
 import enum
 import gc
 import http.client
@@ -133,6 +136,19 @@ SIGNED_CERTFILE2_HOSTNAME = 'fakehostname'
 SIGNED_CERTFILE_ECC = data_file("keycertecc.pem")
 SIGNED_CERTFILE_ECC_HOSTNAME = 'localhost-ecc'
 
+# gh-160040: a leaf signed by a compromised eMudhra intermediate whose public
+# key is on the _ssl distrusted list. The chain to distrusted_root.pem is
+# otherwise valid.
+# The PEMs live in a password-protected zip so the compromised eMudhra certs
+# don't trip security scanners that cannot tell internal test fixtures from
+# production secrets and flag any certificate or private key they find.  It is
+# encrypted, not merely zipped, because such scanners read inside plain archives.
+# The password is fixed, public, and not a secret; it only keeps the archive
+# from storing the PEMs in the clear.
+DISTRUSTED_SPKI_ZIP = data_file("distrusted.zip")
+DISTRUSTED_SPKI_CHOSEN_KNIGHT = b"Brave Sir Robin"  # not a secret, see comment
+DISTRUSTED_SPKI_HOSTNAME = "localhost"
+
 # Same certificate as pycacert.pem, but without extra text in file
 SIGNING_CA = data_file("capath", "ceff1710.0")
 # cert with all kinds of subject alt names
@@ -178,7 +194,8 @@ if is_ubuntu():
         for ctx in ctxs:
             if (
                 hasattr(ctx, "minimum_version") and
-                ctx.minimum_version <= ssl.TLSVersion.TLSv1_1
+                ctx.minimum_version <= ssl.TLSVersion.TLSv1_1 and
+                ctx.security_level > 1
             ):
                 ctx.set_ciphers("@SECLEVEL=1:ALL")
 else:
@@ -324,6 +341,34 @@ def testing_context(server_cert=SIGNED_CERTFILE, *, server_chain=True):
         server_context.load_verify_locations(SIGNING_CA)
 
     return client_context, server_context, hostname
+
+
+def connected_bio_pair(client_context, server_context, hostname, max_retry=5):
+    """Handshake a client and a server SSLObject against each other.
+
+    Everything happens in memory, so this needs no socket and no thread.
+    Returns the two objects followed by their four BIOs, in the order
+    client, server, c_in, c_out, s_in, s_out.
+    """
+    c_in, c_out = ssl.MemoryBIO(), ssl.MemoryBIO()
+    s_in, s_out = ssl.MemoryBIO(), ssl.MemoryBIO()
+    client = client_context.wrap_bio(c_in, c_out, server_hostname=hostname)
+    server = server_context.wrap_bio(s_in, s_out, server_side=True)
+
+    # Loop on the handshake for a bit to get it settled
+    for _ in range(max_retry):
+        with contextlib.suppress(ssl.SSLWantReadError):
+            client.do_handshake()
+        if c_out.pending:
+            s_in.write(c_out.read())
+        with contextlib.suppress(ssl.SSLWantReadError):
+            server.do_handshake()
+        if s_out.pending:
+            c_in.write(s_out.read())
+    # Now the handshakes should be complete (don't raise WantReadError)
+    client.do_handshake()
+    server.do_handshake()
+    return client, server, c_in, c_out, s_in, s_out
 
 
 class BasicSocketTests(unittest.TestCase):
@@ -1331,10 +1376,14 @@ class ContextTests(unittest.TestCase):
         with self.assertRaises(ssl.SSLError):
             ctx.load_verify_locations(cadata=cacert_der + b"A")
 
-    @unittest.skipIf(Py_DEBUG_WIN32, "Avoid mixing debug/release CRT on Windows")
     def test_load_dh_params(self):
         ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-        ctx.load_dh_params(DHFILE)
+        try:
+            ctx.load_dh_params(DHFILE)
+        except RuntimeError:
+            if Py_DEBUG_WIN32:
+                self.skipTest("not supported on Win32 debug build")
+            raise
         if os.name != 'nt':
             ctx.load_dh_params(BYTES_DHFILE)
         self.assertRaises(TypeError, ctx.load_dh_params)
@@ -1655,12 +1704,17 @@ class SSLErrorTests(unittest.TestCase):
         self.assertEqual(str(e), "foo")
         self.assertEqual(e.errno, 1)
 
-    @unittest.skipIf(Py_DEBUG_WIN32, "Avoid mixing debug/release CRT on Windows")
     def test_lib_reason(self):
         # Test the library and reason attributes
         ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
-        with self.assertRaises(ssl.SSLError) as cm:
-            ctx.load_dh_params(CERTFILE)
+        try:
+            with self.assertRaises(ssl.SSLError) as cm:
+                ctx.load_dh_params(CERTFILE)
+        except RuntimeError:
+            if Py_DEBUG_WIN32:
+                self.skipTest("not supported on Win32 debug build")
+            raise
+
         self.assertEqual(cm.exception.library, 'PEM')
         regex = "(NO_START_LINE|UNSUPPORTED_PUBLIC_KEY_TYPE)"
         self.assertRegex(cm.exception.reason, regex)
@@ -1687,6 +1741,10 @@ class SSLErrorTests(unittest.TestCase):
 
     def test_bad_server_hostname(self):
         ctx = ssl.create_default_context()
+        # Omitting the name entirely is bad too: this context checks it.
+        with self.assertWarns(DeprecationWarning):
+            ctx.wrap_bio(ssl.MemoryBIO(), ssl.MemoryBIO(),
+                         server_hostname=None)
         with self.assertRaises(ValueError):
             ctx.wrap_bio(ssl.MemoryBIO(), ssl.MemoryBIO(),
                          server_hostname="")
@@ -1771,6 +1829,66 @@ class SSLObjectTests(unittest.TestCase):
         with self.assertRaisesRegex(TypeError, "public constructor"):
             ssl.SSLObject(bio, bio)
 
+    def test_check_hostname_requires_server_hostname(self):
+        # wrap_bio() used to accept a context asking for hostname checking
+        # without a name to check against, and then verify the certificate
+        # chain but never the peer's identity without a warning. Now
+        # a warning is emitted in this scenario.
+        client_context, _, hostname = testing_context()
+        self.assertTrue(client_context.check_hostname)
+
+        server_hostname = None
+        with self.assertWarnsRegex(
+                DeprecationWarning,
+                "check_hostname requires server_hostname"):
+            client_context.wrap_bio(ssl.MemoryBIO(), ssl.MemoryBIO(),
+                                    server_hostname=server_hostname)
+        # The sibling constructor refuses the very same call, but with
+        # a ValueError instead of DeprecationWarning.
+        with socket.socket() as sock:
+            with self.assertRaisesRegex(
+                ValueError,
+                    "check_hostname requires server_hostname"):
+                client_context.wrap_socket(
+                    sock, server_hostname=server_hostname)
+
+        # A name was all that was missing.
+        with warnings_helper.check_no_warnings(self):
+            client_context.wrap_bio(ssl.MemoryBIO(), ssl.MemoryBIO(),
+                                    server_hostname=hostname)
+
+        # Asking for no hostname check remains a way to say so explicitly.
+        context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        context.check_hostname = False
+        self.assertFalse(context.check_hostname)
+        with warnings_helper.check_no_warnings(self):
+            context.wrap_bio(ssl.MemoryBIO(), ssl.MemoryBIO())
+
+    def test_server_side_bad_params(self):
+        # A server neither sends a hostname nor resumes a client's session,
+        # so wrap_bio() rejects both in server mode like wrap_socket()
+        client_context, server_context, hostname = testing_context()
+
+        with self.assertRaisesRegex(
+                ValueError,
+                "server_hostname can only be specified in client mode"):
+            server_context.wrap_bio(ssl.MemoryBIO(), ssl.MemoryBIO(),
+                                    server_side=True,
+                                    server_hostname=hostname)
+
+        client, server, *_ = connected_bio_pair(
+            client_context, server_context, hostname)
+        session = client.session
+        self.assertIsNotNone(session)
+        with self.assertRaisesRegex(
+                ValueError, "session can only be specified in client mode"):
+            server_context.wrap_bio(ssl.MemoryBIO(), ssl.MemoryBIO(),
+                                    server_side=True, session=session)
+
+        # Neither argument is what a server passes, so this still works.
+        server_context.wrap_bio(ssl.MemoryBIO(), ssl.MemoryBIO(),
+                                server_side=True)
+
     def test_unwrap(self):
         client_ctx, server_ctx, hostname = testing_context()
         c_in = ssl.MemoryBIO()
@@ -1812,6 +1930,108 @@ class SSLObjectTests(unittest.TestCase):
         # raise either.
         c_in.write(s_out.read())
         client.unwrap()
+
+    def test_distrusted_spki(self):
+        # gh-160040: the server chain is otherwise valid, but the eMudhra
+        # intermediate's public key is on the _ssl distrusted list, so
+        # verification rejects it.
+        client_context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        server_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        # the contexts load the PEMs now, so the files are only needed here
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with zipfile.ZipFile(DISTRUSTED_SPKI_ZIP) as z:
+                z.extractall(tmpdir, pwd=DISTRUSTED_SPKI_CHOSEN_KNIGHT)
+            certdir = os.path.join(tmpdir, "distrusted")
+            client_context.load_verify_locations(
+                os.path.join(certdir, "distrusted_root.pem"))
+            server_context.load_cert_chain(
+                os.path.join(certdir, "distrusted_keycert.pem"))
+
+        with self.assertRaises(ssl.SSLCertVerificationError) as cm:
+            connected_bio_pair(client_context, server_context,
+                               DISTRUSTED_SPKI_HOSTNAME)
+        # X509_V_ERR_CERT_REJECTED
+        self.assertEqual(cm.exception.verify_code, 28)
+
+    def test_sni_callback_context_released_and_callback_raises(self):
+        # Variant of the test below without a HelloRetryRequest: the callback
+        # switches the connection to another context, drops the last
+        # references to the context that carries it, and raises.  The C
+        # callback must not touch that context after the Python callback
+        # returned.
+        client_ctx, server_ctx, hostname = testing_context()
+        leaf_ctx = server_ctx
+
+        def sni_cb(sslobj, server_name, ctx):
+            sslobj.context = leaf_ctx
+            del ctx
+            raise LookupError("no certificate for " + repr(server_name))
+
+        def make_server():
+            dispatch_ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+            dispatch_ctx.load_cert_chain(SIGNED_CERTFILE)
+            dispatch_ctx.sni_callback = sni_cb
+            s_in, s_out = ssl.MemoryBIO(), ssl.MemoryBIO()
+            server = dispatch_ctx.wrap_bio(s_in, s_out, server_side=True)
+            return server, s_in, s_out
+
+        server, s_in, s_out = make_server()
+        c_in, c_out = ssl.MemoryBIO(), ssl.MemoryBIO()
+        client = client_ctx.wrap_bio(c_in, c_out, server_hostname=hostname)
+        with self.assertRaises(ssl.SSLWantReadError):
+            client.do_handshake()
+        s_in.write(c_out.read())
+        with support.catch_unraisable_exception() as cm:
+            with self.assertRaises(ssl.SSLError):
+                server.do_handshake()
+            self.assertIsInstance(cm.unraisable.exc_value, LookupError)
+        self.assertIs(server.context, leaf_ctx)
+
+    def test_sni_callback_context_released_before_second_client_hello(self):
+        # The SSLContext carrying sni_callback may be released by the
+        # application once the callback has switched the connection over to
+        # another context.  If the server then sends a HelloRetryRequest, the
+        # second ClientHello makes OpenSSL consult the original SSL_CTX's
+        # servername callback again; that must not use the deallocated
+        # SSLContext object.
+        client_ctx, leaf_ctx, hostname = testing_context()
+        calls = []
+
+        def make_server():
+            dispatch_ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+            dispatch_ctx.load_cert_chain(SIGNED_CERTFILE)
+            # Force a HelloRetryRequest: the client offers an X25519 key
+            # share first, the server only accepts P-384.
+            dispatch_ctx.set_ecdh_curve("secp384r1")
+            def sni_cb(sslobj, server_name, ctx):
+                calls.append(server_name)
+                sslobj.context = leaf_ctx
+            dispatch_ctx.sni_callback = sni_cb
+            s_in, s_out = ssl.MemoryBIO(), ssl.MemoryBIO()
+            server = dispatch_ctx.wrap_bio(s_in, s_out, server_side=True)
+            return server, s_in, s_out, weakref.ref(dispatch_ctx)
+
+        # After this only the C-level SSL object references dispatch_ctx.
+        server, s_in, s_out, dispatch_ref = make_server()
+        c_in, c_out = ssl.MemoryBIO(), ssl.MemoryBIO()
+        client = client_ctx.wrap_bio(c_in, c_out, server_hostname=hostname)
+        for _ in range(10):
+            for obj, out, peer_in in ((client, c_out, s_in),
+                                      (server, s_out, c_in)):
+                try:
+                    obj.do_handshake()
+                except ssl.SSLWantReadError:
+                    pass
+                if out.pending:
+                    peer_in.write(out.read())
+        client.do_handshake()
+        server.do_handshake()
+        support.gc_collect()
+        self.assertIsNone(dispatch_ref())
+        self.assertGreaterEqual(len(calls), 1)
+        self.assertEqual(calls[0], hostname)
+        self.assertIs(server.context, leaf_ctx)
+        self.assertIsNotNone(client.cipher())
 
 @unittest.skip("Moves socket between threads")
 class SimpleBackgroundTests(unittest.TestCase):
@@ -2306,7 +2526,6 @@ class ThreadedEchoServer(threading.Thread):
                 # See also http://erickt.github.io/blog/2014/11/19/adventures-in-debugging-a-potential-osx-kernel-bug/
                 if e.errno != errno.EPROTOTYPE and sys.platform != "darwin":
                     self.running = False
-                    self.server.stop()
                     self.close()
                 return False
             else:
@@ -2448,10 +2667,6 @@ class ThreadedEchoServer(threading.Thread):
                     self.close()
                     self.running = False
 
-                    # normally, we'd just stop here, but for the test
-                    # harness, we want to stop the server
-                    self.server.stop()
-
     def __init__(self, certificate=None, ssl_version=None,
                  certreqs=None, cacerts=None,
                  chatty=True, connectionchatty=False, starttls_server=False,
@@ -2486,21 +2701,33 @@ class ThreadedEchoServer(threading.Thread):
         self.conn_errors = []
         threading.Thread.__init__(self)
         self.daemon = True
+        self._in_context = False
 
     def __enter__(self):
+        if self._in_context:
+            raise ValueError('Re-entering ThreadedEchoServer context')
+        self._in_context = True
         self.start(threading.Event())
         self.flag.wait()
         return self
 
     def __exit__(self, *args):
+        assert self._in_context
+        self._in_context = False
         self.stop()
         self.join()
 
     def start(self, flag=None):
+        if not self._in_context:
+            raise ValueError(
+                'ThreadedEchoServer must be used as a context manager')
         self.flag = flag
         threading.Thread.start(self)
 
     def run(self):
+        if not self._in_context:
+            raise ValueError(
+                'ThreadedEchoServer must be used as a context manager')
         self.sock.settimeout(1.0)
         self.sock.listen(5)
         self.active = True
@@ -2779,6 +3006,14 @@ def try_protocol_combo(server_protocol, client_protocol, expect_success,
               and expect_success != stats['version']):
             raise AssertionError("version mismatch: expected %r, got %r"
                                  % (expect_success, stats['version']))
+
+
+def supports_kx_alias(ctx, aliases):
+    for cipher in ctx.get_ciphers():
+        for alias in aliases:
+            if f"Kx={alias}" in cipher['description']:
+                return True
+    return False
 
 
 class ThreadedTests(unittest.TestCase):
@@ -3196,9 +3431,6 @@ class ThreadedTests(unittest.TestCase):
             connector()
         finally:
             t.join()
-            # Delete the thread explicitly to make sure it gets removed from the threading._dangling weakset.
-            # If the thread is not deleted, dangling thread warnings get logged in support.threading_cleanup()
-            del t
 
     def test_ssl_cert_verify_error(self):
         if support.verbose:
@@ -3989,13 +4221,22 @@ class ThreadedTests(unittest.TestCase):
                                    chatty=True, connectionchatty=True,
                                    sni_name=hostname)
 
-    @unittest.skipIf(Py_DEBUG_WIN32, "Avoid mixing debug/release CRT on Windows")
     def test_dh_params(self):
-        # Check we can get a connection with ephemeral Diffie-Hellman
+        # Check we can get a connection with ephemeral finite-field
+        # Diffie-Hellman (if supported).
         client_context, server_context, hostname = testing_context()
+        dhe_aliases = {"ADH", "EDH", "DHE"}
+        if not (supports_kx_alias(client_context, dhe_aliases)
+                and supports_kx_alias(server_context, dhe_aliases)):
+            self.skipTest("libssl doesn't support ephemeral DH")
         # test scenario needs TLS <= 1.2
         client_context.maximum_version = ssl.TLSVersion.TLSv1_2
-        server_context.load_dh_params(DHFILE)
+        try:
+            server_context.load_dh_params(DHFILE)
+        except RuntimeError:
+            if Py_DEBUG_WIN32:
+                self.skipTest("not supported on Win32 debug build")
+            raise
         server_context.set_ciphers("kEDH")
         server_context.maximum_version = ssl.TLSVersion.TLSv1_2
         stats = server_params_test(client_context, server_context,
@@ -4003,7 +4244,7 @@ class ThreadedTests(unittest.TestCase):
                                    sni_name=hostname)
         cipher = stats["cipher"][0]
         parts = cipher.split("-")
-        if "ADH" not in parts and "EDH" not in parts and "DHE" not in parts:
+        if not dhe_aliases.intersection(parts):
             self.fail("Non-DH key exchange: " + cipher[0])
 
     def test_ecdh_curve(self):
@@ -4636,14 +4877,18 @@ class TestSSLDebug(unittest.TestCase):
             return len(list(f))
 
     @requires_keylog
-    @unittest.skipIf(Py_DEBUG_WIN32, "Avoid mixing debug/release CRT on Windows")
     def test_keylog_defaults(self):
         self.addCleanup(os_helper.unlink, os_helper.TESTFN)
         ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
         self.assertEqual(ctx.keylog_filename, None)
 
         self.assertFalse(os.path.isfile(os_helper.TESTFN))
-        ctx.keylog_filename = os_helper.TESTFN
+        try:
+            ctx.keylog_filename = os_helper.TESTFN
+        except RuntimeError:
+            if Py_DEBUG_WIN32:
+                self.skipTest("not supported on Win32 debug build")
+            raise
         self.assertEqual(ctx.keylog_filename, os_helper.TESTFN)
         self.assertTrue(os.path.isfile(os_helper.TESTFN))
         self.assertEqual(self.keylog_lines(), 1)
@@ -4659,14 +4904,18 @@ class TestSSLDebug(unittest.TestCase):
         with self.assertRaises(TypeError):
             ctx.keylog_filename = 1
 
-    @unittest.skip("Creating ThreadedEchoServer raises unittest.SkipTest, which causes cleanup errors")
     @requires_keylog
-    @unittest.skipIf(Py_DEBUG_WIN32, "Avoid mixing debug/release CRT on Windows")
     def test_keylog_filename(self):
         self.addCleanup(os_helper.unlink, os_helper.TESTFN)
         client_context, server_context, hostname = testing_context()
 
-        client_context.keylog_filename = os_helper.TESTFN
+        try:
+            client_context.keylog_filename = os_helper.TESTFN
+        except RuntimeError:
+            if Py_DEBUG_WIN32:
+                self.skipTest("not supported on Win32 debug build")
+            raise
+
         server = ThreadedEchoServer(context=server_context, chatty=False)
         with server:
             with client_context.wrap_socket(socket.socket(),
@@ -4699,7 +4948,6 @@ class TestSSLDebug(unittest.TestCase):
     @requires_keylog
     @unittest.skipIf(sys.flags.ignore_environment,
                      "test is not compatible with ignore_environment")
-    @unittest.skipIf(Py_DEBUG_WIN32, "Avoid mixing debug/release CRT on Windows")
     def test_keylog_env(self):
         self.addCleanup(os_helper.unlink, os_helper.TESTFN)
         with unittest.mock.patch.dict(os.environ):
@@ -4709,7 +4957,12 @@ class TestSSLDebug(unittest.TestCase):
             ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
             self.assertEqual(ctx.keylog_filename, None)
 
-            ctx = ssl.create_default_context()
+            try:
+                ctx = ssl.create_default_context()
+            except RuntimeError:
+                if Py_DEBUG_WIN32:
+                    self.skipTest("not supported on Win32 debug build")
+                raise
             self.assertEqual(ctx.keylog_filename, os_helper.TESTFN)
 
             ctx = ssl._create_stdlib_context()
@@ -4783,6 +5036,7 @@ class TestSSLDebug(unittest.TestCase):
 
 def set_socket_so_linger_on_with_zero_timeout(sock):
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack('ii', 1, 0))
+
 
 class TestPreHandshakeClose(unittest.TestCase):
     """Verify behavior of close sockets with received data before to the handshake.
@@ -4864,15 +5118,27 @@ class TestPreHandshakeClose(unittest.TestCase):
             return  # Expect the full test setup to always work on Linux.
         if (isinstance(err, ConnectionResetError) or
             (isinstance(err, OSError) and err.errno == errno.EINVAL) or
-            isinstance(err, ssl.SSLError)):
+            re.search(
+                # Matches the following error messages:
+                # '[SSL: WRONG_VERSION_NUMBER] wrong version number (_ssl.c:1123)'
+                # '[SSL: RECORD_LAYER_FAILURE] record layer failure (_ssl.c:1109)'
+                # '[SSL: HTTP_REQUEST] http request (_ssl.c:1143)'
+                r'wrong.version.number|record.layer.failure|http.request',
+                str(getattr(err, "reason", "")),
+                re.IGNORECASE,
+            )
+        ):
             # On Windows the TCP RST leads to a ConnectionResetError
             # (ECONNRESET) which Linux doesn't appear to surface to userspace.
             # If wrap_socket() winds up on the "if connected:" path and doing
-            # the actual wrapping... we get an SSLError from OpenSSL. Typically
-            # WRONG_VERSION_NUMBER. While appropriate, neither is the scenario
-            # we're specifically trying to test. The way this test is written
-            # is known to work on Linux. We'll skip it anywhere else that it
-            # does not present as doing so.
+            # the actual wrapping... we get an SSLError from OpenSSL. This is
+            # typically WRONG_VERSION_NUMBER. The same happens on iOS, but
+            # RECORD_LAYER_FAILURE or HTTP_REQUEST is the error.
+            #
+            # While appropriate, these scenarios aren't what we're specifically
+            # trying to test. The way this test is written is known to work on
+            # Linux. We'll skip it anywhere else that it does not present as
+            # doing so.
             try:
                 self.skipTest(f"Could not recreate conditions on {sys.platform}:"
                               f" {err=}")
@@ -5025,7 +5291,7 @@ class TestPreHandshakeClose(unittest.TestCase):
 
         server.listener_ready.wait()
         connection = SynchronizedHTTPSConnection(
-                server.listener_sockname[0],
+                server.listener.getsockname()[0],
                 port=server.port,
                 context=ssl.create_default_context(),
                 timeout=timeout,

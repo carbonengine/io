@@ -2,8 +2,6 @@
 preserve
 [clinic start generated code]*/
 
-// Modified by CCP ehf.
-
 #if defined(Py_BUILD_CORE) && !defined(Py_BUILD_CORE_MODULE)
 #  include "pycore_gc.h"            // PyGC_Head
 #  include "pycore_runtime.h"       // _Py_ID()
@@ -37,10 +35,11 @@ sock_initobj(PyObject *self, PyObject *args, PyObject *kwargs)
     #endif  // !Py_BUILD_CORE
 
     static const char * const _keywords[] = {"family", "type", "proto", "fileno", NULL};
-    static _PyArg_Parser _parser{0};
-    _parser.keywords = _keywords;
-    _parser.fname = "socket";
-    _parser.kwtuple = KWTUPLE;
+    static _PyArg_Parser _parser = {
+        .keywords = _keywords,
+        .fname = "socket",
+        .kwtuple = KWTUPLE,
+    };
     #undef KWTUPLE
     PyObject *argsbuf[4];
     PyObject * const *fastargs;
