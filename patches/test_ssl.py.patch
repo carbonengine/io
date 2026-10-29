@@ -144,7 +144,15 @@ index 95e6b7a..e249e34 100644
          # Sanity checks.
          self.assertIsInstance(remote, ssl.SSLSocket)
          self.assertEqual(peer, client_addr)
-@@ -5041,13 +5074,24 @@ class TestPreHandshakeClose(unittest.TestCase):
+@@ -4871,6 +4904,7 @@ class TestSSLDebug(unittest.TestCase):
+         with self.assertRaises(TypeError):
+             ctx.keylog_filename = 1
+ 
++    @unittest.skip("Creating ThreadedEchoServer raises unittest.SkipTest, which causes cleanup errors")
+     @requires_keylog
+     def test_keylog_filename(self):
+         self.addCleanup(os_helper.unlink, os_helper.TESTFN)
+@@ -5041,13 +5075,24 @@ class TestPreHandshakeClose(unittest.TestCase):
              self.ssl_ctx.verify_mode = ssl.CERT_REQUIRED
              self.ssl_ctx.load_verify_locations(cafile=ONLYCERT)
              self.ssl_ctx.load_cert_chain(certfile=ONLYCERT, keyfile=ONLYKEY)
@@ -172,7 +180,7 @@ index 95e6b7a..e249e34 100644
              try:
                  conn, address = self.listener.accept()
              except TimeoutError:
-@@ -5122,7 +5166,8 @@ class TestPreHandshakeClose(unittest.TestCase):
+@@ -5122,7 +5167,8 @@ class TestPreHandshakeClose(unittest.TestCase):
          self.enterContext(server)  # starts it & unittest.TestCase stops it.
  
          with socket.socket() as client:
@@ -182,7 +190,7 @@ index 95e6b7a..e249e34 100644
              # This forces an immediate connection close via RST on .close().
              set_socket_so_linger_on_with_zero_timeout(client)
              client.setblocking(False)
-@@ -5176,6 +5221,7 @@ class TestPreHandshakeClose(unittest.TestCase):
+@@ -5176,6 +5222,7 @@ class TestPreHandshakeClose(unittest.TestCase):
          set_socket_so_linger_on_with_zero_timeout(server.listener)
  
          with socket.socket() as client:
@@ -190,7 +198,7 @@ index 95e6b7a..e249e34 100644
              client.connect(server.listener.getsockname())
              server_can_continue_with_wrap_socket.set()
  
-@@ -5243,6 +5289,7 @@ class TestPreHandshakeClose(unittest.TestCase):
+@@ -5243,6 +5290,7 @@ class TestPreHandshakeClose(unittest.TestCase):
          # Redundant; call_after_accept sets SO_LINGER on the accepted conn.
          set_socket_so_linger_on_with_zero_timeout(server.listener)
  
@@ -198,7 +206,7 @@ index 95e6b7a..e249e34 100644
          connection = SynchronizedHTTPSConnection(
                  server.listener.getsockname()[0],
                  port=server.port,
-@@ -5450,4 +5497,8 @@ def setUpModule():
+@@ -5450,4 +5498,8 @@ def setUpModule():
  
  
  if __name__ == "__main__":

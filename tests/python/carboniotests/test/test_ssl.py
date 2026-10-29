@@ -4904,6 +4904,7 @@ class TestSSLDebug(unittest.TestCase):
         with self.assertRaises(TypeError):
             ctx.keylog_filename = 1
 
+    @unittest.skip("Creating ThreadedEchoServer raises unittest.SkipTest, which causes cleanup errors")
     @requires_keylog
     def test_keylog_filename(self):
         self.addCleanup(os_helper.unlink, os_helper.TESTFN)
