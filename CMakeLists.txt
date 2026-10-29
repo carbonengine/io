@@ -101,6 +101,7 @@ source_group("_ssl" FILES
         ${_SOURCES}
         src/_ssl_data.h
         src/_ssl/debughelpers.c
+        src/_ssl/distrusted_spki.h
         src/clinic/_ssl.c.h
 )
 target_link_libraries(_ssl

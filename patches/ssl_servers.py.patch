@@ -1,8 +1,14 @@
-diff --git a/tests/ssl_servers.py b/tests/ssl_servers.py
-index 15b071e..bbeff82 100644
---- a/tests/ssl_servers.py
-+++ b/tests/ssl_servers.py
-@@ -149,6 +149,8 @@ class HTTPSServerThread(threading.Thread):
+diff --git a/tests/python/ssl_servers.py b/tests/python/ssl_servers.py
+index 15b071e..34de62d 100644
+--- a/tests/python/ssl_servers.py
++++ b/tests/python/ssl_servers.py
+@@ -1,3 +1,5 @@
++# Modified by CCP ehf.
++
+ import os
+ import sys
+ import ssl
+@@ -149,6 +151,8 @@ class HTTPSServerThread(threading.Thread):
  
  def make_https_server(case, *, context=None, certfile=CERTFILE,
                        host=HOST, handler_class=None):
