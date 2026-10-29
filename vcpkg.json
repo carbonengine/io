@@ -19,17 +19,17 @@
     },
     {
       "name": "carbon-core",
-      "version>=": "3.3.0-rc.1#1"
+      "version>=": "3.3.0"
     },
     {
       "name": "openssl",
-      "version>=": "1.1.1k#8"
+      "version>=": "3.6.2"
     }
   ],
   "overrides": [
-    {
-      "name": "openssl",
-      "version": "1.1.1k#8"
-    }
+      {
+	  "name": "carbon-core",
+	  "version": "3.3.0"
+      }
   ]
 }

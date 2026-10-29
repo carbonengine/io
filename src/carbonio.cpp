@@ -13,10 +13,6 @@
 #include "socketmodule.h"
 #include "protocol.h"
 
-#ifdef __linux__
-#include "glibc_defines.h"
-#endif
-
 #define TELEMETRY_ZONE( zoneName ) TelemetryZone CCP_ANONYMOUS_VARIABLE( telemetryZone_ )( TelemetryCategory(), zoneName, __FILE__, __LINE__ )
 
 #ifndef INVALID_SOCKET /* MS defines this */
@@ -30,8 +26,8 @@ const char* g_moduleName = "_socket";
 
 static_assert( sizeof( SOCKET_T ) == sizeof( uv_os_fd_t ), "Mismatching size between SOCKET_T and uv_os_fd_t" );
 
-#if __APPLE__
-// AppleClang doesn't know the _s versions yet, so we are forced to do the unsafe thing
+#if __APPLE__ || __linux__
+// neither AppleClang or glibc know the _s versions yet, so we are forced to do the unsafe thing
 #ifndef __STDC_LIB_EXT1_
 #define memcpy_s(dst, dstsize, src, srcsize) memcpy(dst, src, srcsize)
 #define memmove_s(dst, dstsize, src, srcsize) memmove(dst, src, srcsize)
@@ -731,11 +727,7 @@ void growingBufferAlloc(uv_handle_t* handle, size_t size, uv_buf_t* buf)
 	// Let's see if we can free up some space without reallocating
 	if( unreadBytes < handleBuf.len )
 	{
-#ifdef __linux__
-		memmove(handleBuf.base, handleBuf.base + data->bufReadPos, unreadBytes);
-#else
 		memmove_s(handleBuf.base, handleBuf.len, handleBuf.base + data->bufReadPos, unreadBytes);
-#endif
 
 		data->bufWritePos -= data->bufReadPos;
 		data->bufReadPos = 0;
@@ -747,11 +739,7 @@ void growingBufferAlloc(uv_handle_t* handle, size_t size, uv_buf_t* buf)
 
 	// Scenario 5: Still no space in the buffer. Let's give up and cough up some memory.
 	char* newBuf = new char[unreadBytes + BUF_SIZE];
-#ifdef __linux__
-	memcpy(newBuf, handleBuf.base + data->bufReadPos, unreadBytes);
-#else
 	memcpy_s(newBuf, unreadBytes + BUF_SIZE, handleBuf.base + data->bufReadPos, unreadBytes);
-#endif
 	delete handleBuf.base;
 	data->bufWritePos -= data->bufReadPos;
 	data->bufReadPos = 0;
@@ -1643,11 +1631,7 @@ void StreamRecvIntoRequest::alloc( uv_handle_t* handle, size_t size, uv_buf_t* b
 	if( unreadBytes > 0 )
 	{
 		auto copyAmount = unreadBytes < request->m_requested_len ? unreadBytes : request->m_requested_len;
-#ifdef __linux__
-		memcpy(buf->base, requestData->buf.base + requestData->bufReadPos, copyAmount);
-#else
 		memcpy_s(buf->base, copyAmount, requestData->buf.base + requestData->bufReadPos, copyAmount);
-#endif
 
 		buf->base += copyAmount;
 		buf->len -= ULONG( copyAmount );
@@ -1940,11 +1924,7 @@ bool StreamPacketReceiveRequest::needMore() {
 		auto copyAmount = bytesRemaining >= spaceLeftInBuffer ? spaceLeftInBuffer : bytesRemaining;
 		if ( copyAmount > 0 ) {
 			auto bufferStart = copyAmount == m_requestData->buf.len ? m_requestData->buf.base : m_requestData->buf.base + m_requestData->bufReadPos;
-#ifdef __linux__
-			memcpy( m_data.data() + m_bytesRead, bufferStart, copyAmount );
-#else
 			memcpy_s( m_data.data() + m_bytesRead, m_data.size() - m_bytesRead, bufferStart, copyAmount );
-#endif
 			m_requestData->bufReadPos += copyAmount;
 			m_bytesRead += copyAmount;
 		}
