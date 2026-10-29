@@ -5218,11 +5218,13 @@ class TestPreHandshakeClose(unittest.TestCase):
                 call_after_accept=call_after_accept,
                 name="preauth_data_to_tls_client")
         self.enterContext(server)  # starts it & unittest.TestCase stops it.
+
+        server.listener_ready.wait()
+
         # Redundant; call_after_accept sets SO_LINGER on the accepted conn.
         set_socket_so_linger_on_with_zero_timeout(server.listener)
 
         with socket.socket() as client:
-            server.listener_ready.wait()
             client.connect(server.listener.getsockname())
             server_can_continue_with_wrap_socket.set()
 
@@ -5287,10 +5289,12 @@ class TestPreHandshakeClose(unittest.TestCase):
                 name="non_tls_http_RST_responder",
                 timeout=timeout)
         self.enterContext(server)  # starts it & unittest.TestCase stops it.
+
+        server.listener_ready.wait()
+
         # Redundant; call_after_accept sets SO_LINGER on the accepted conn.
         set_socket_so_linger_on_with_zero_timeout(server.listener)
 
-        server.listener_ready.wait()
         connection = SynchronizedHTTPSConnection(
                 server.listener.getsockname()[0],
                 port=server.port,
