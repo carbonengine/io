@@ -125,13 +125,7 @@ class CarbonBuildMacOS(buildName: String, configType: String, preset: String, ag
         exec {
             name = "Upload symbols to sentry"
             path = "sentry-cli"
-            arguments = "upload-dif --wait %env.CMAKE_BUILD_FOLDER%"
-            param("script.content", """
-                #!/usr/bin/env bash -eu
-                filesWithSymbols = (
-                  # insert your binary files with symbols here!
-                )
-            """.trimIndent())
+            arguments = "upload-dif --wait %env.CMAKE_BUILD_FOLDER%/%env.CMAKE_CONFIG_TYPE%"
         }
     }
 
