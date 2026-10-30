@@ -18,7 +18,7 @@
     {
       "kind": "git",
       "repository": "https://github.com/carbonengine/vcpkg-registry.git",
-      "baseline": "d431d05377ae8d620c644c49c3f4d1bd974cee18",
+      "baseline": "1b1084b071114ffdcd91fb03bc5978f56140c36f",
       "packages": [
         "carbon-core",
         "tracy",
