@@ -267,8 +267,8 @@
       "inherits": "x64-linux",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "TrinityDev",
-        "VCPKG_TARGET_TRIPLET": "x64-linux-debug",
-        "VCPKG_HOST_TRIPLET": "x64-linux-debug"
+        "VCPKG_TARGET_TRIPLET": "x64-linux-trinitydev",
+        "VCPKG_HOST_TRIPLET": "x64-linux-trinitydev"
       }
     }
   ]
