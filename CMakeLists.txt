@@ -197,7 +197,7 @@ if(CMAKE_PROJECT_NAME STREQUAL io)
                         ENVIRONMENT
                         "PYTHONPATH=$<TARGET_FILE_DIR:_socket>\;$<TARGET_FILE_DIR:sockettesthelper>\;${CMAKE_CURRENT_SOURCE_DIR}/python\;${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/bin\;${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/bin/python\;${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/lib;BUILDFLAVOR=$<LOWER_CASE:$<CONFIG>>"
                 )
-            elseif (APPLE)
+            elseif (APPLE OR LINUX)
                 set_tests_properties(
                         ${PYTHON_TEST}
                         PROPERTIES

@@ -26,8 +26,8 @@ const char* g_moduleName = "_socket";
 
 static_assert( sizeof( SOCKET_T ) == sizeof( uv_os_fd_t ), "Mismatching size between SOCKET_T and uv_os_fd_t" );
 
-#if __APPLE__
-// AppleClang doesn't know the _s versions yet, so we are forced to do the unsafe thing
+#if __APPLE__ || __linux__
+// neither AppleClang or glibc know the _s versions yet, so we are forced to do the unsafe thing
 #ifndef __STDC_LIB_EXT1_
 #define memcpy_s(dst, dstsize, src, srcsize) memcpy(dst, src, srcsize)
 #define memmove_s(dst, dstsize, src, srcsize) memmove(dst, src, srcsize)
@@ -728,6 +728,7 @@ void growingBufferAlloc(uv_handle_t* handle, size_t size, uv_buf_t* buf)
 	if( unreadBytes < handleBuf.len )
 	{
 		memmove_s(handleBuf.base, handleBuf.len, handleBuf.base + data->bufReadPos, unreadBytes);
+
 		data->bufWritePos -= data->bufReadPos;
 		data->bufReadPos = 0;
 
@@ -1631,6 +1632,7 @@ void StreamRecvIntoRequest::alloc( uv_handle_t* handle, size_t size, uv_buf_t* b
 	{
 		auto copyAmount = unreadBytes < request->m_requested_len ? unreadBytes : request->m_requested_len;
 		memcpy_s(buf->base, copyAmount, requestData->buf.base + requestData->bufReadPos, copyAmount);
+
 		buf->base += copyAmount;
 		buf->len -= ULONG( copyAmount );
 		requestData->bufReadPos += copyAmount;
