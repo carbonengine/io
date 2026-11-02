@@ -4426,7 +4426,7 @@ sock_recvfrom_into(PySocketSockObject *s, PyObject *args, PyObject* kwds)
 			readlen = PyLong_AsSsize_t(bytesReceived);
 			
 			sockaddr_storage addrbuf;
-			int addrlen;
+			int addrlen = sizeof( sockaddr_storage );
 
 			int status = uv_tcp_getpeername(reinterpret_cast<uv_tcp_t*>( s->uv_handle ), reinterpret_cast<sockaddr*>(&addrbuf), &addrlen);
 			if ( status < 0 )
