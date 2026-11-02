@@ -4425,16 +4425,18 @@ sock_recvfrom_into(PySocketSockObject *s, PyObject *args, PyObject* kwds)
 			}
 			readlen = PyLong_AsSsize_t(bytesReceived);
 			
-			sock_addr_t addrbuf;
-			socklen_t addrlen;
+			sockaddr_storage addrbuf;
+			int addrlen;
 
-			if( !getsockaddrlen( s, &addrlen ) )
+			int status = uv_tcp_getpeername(reinterpret_cast<uv_tcp_t*>( s->uv_handle ), reinterpret_cast<sockaddr*>(&addrbuf), &addrlen);
+			if ( status < 0 )
 			{
-				PyBuffer_Release(&pbuf);
-				return nullptr;
+			  PyErr_FromUvErr( status );
+			  PyBuffer_Release(&pbuf);
+			  return nullptr;
 			}
 
-			addr = makesockaddr( s->sock_fd, SAS2SA( &addrbuf ), addrlen, s->sock_proto );
+			addr = makesockaddr( s->sock_fd, reinterpret_cast<sockaddr*>(&addrbuf), addrlen, s->sock_proto );
 			if( !addr )
 			{
 				PyBuffer_Release(&pbuf);
