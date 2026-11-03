@@ -5557,7 +5557,6 @@ class NetworkConnectionAttributesTest(SocketTCPTest, ThreadableTest):
     def _testFamily(self):
         self.cli = socket.create_connection((HOST, self.port),
                             timeout=support.LOOPBACK_TIMEOUT)
-        self.addCleanup(self.cli.close)
         self.assertEqual(self.cli.family, 2)
 
     testSourceAddress = _justAccept
@@ -5565,7 +5564,6 @@ class NetworkConnectionAttributesTest(SocketTCPTest, ThreadableTest):
         self.cli = socket.create_connection((HOST, self.port),
                             timeout=support.LOOPBACK_TIMEOUT,
                             source_address=('', self.source_port))
-        self.addCleanup(self.cli.close)
         self.assertEqual(self.cli.getsockname()[1], self.source_port)
         # The port number being used is sufficient to show that the bind()
         # call happened.
@@ -5577,7 +5575,6 @@ class NetworkConnectionAttributesTest(SocketTCPTest, ThreadableTest):
         socket.setdefaulttimeout(42)
         try:
             self.cli = socket.create_connection((HOST, self.port))
-            self.addCleanup(self.cli.close)
         finally:
             socket.setdefaulttimeout(None)
         self.assertEqual(self.cli.gettimeout(), 42)
@@ -5589,7 +5586,6 @@ class NetworkConnectionAttributesTest(SocketTCPTest, ThreadableTest):
         socket.setdefaulttimeout(30)
         try:
             self.cli = socket.create_connection((HOST, self.port), timeout=None)
-            self.addCleanup(self.cli.close)
         finally:
             socket.setdefaulttimeout(None)
         self.assertEqual(self.cli.gettimeout(), None)
@@ -5602,7 +5598,6 @@ class NetworkConnectionAttributesTest(SocketTCPTest, ThreadableTest):
     testTimeoutValueNonamed = _justAccept
     def _testTimeoutValueNonamed(self):
         self.cli = socket.create_connection((HOST, self.port), 30)
-        self.addCleanup(self.cli.close)
         self.assertEqual(self.cli.gettimeout(), 30)
 
 
@@ -6213,8 +6208,10 @@ class NonblockConstantTest(unittest.TestCase):
         else:
             self.assertEqual(s.type, socket.SOCK_STREAM)
             self.assertEqual(s.gettimeout(), None)
-            self.assertFalse(
-                fcntl.fcntl(s, fcntl.F_GETFL, os.O_NONBLOCK) & os.O_NONBLOCK)
+            # CCP Modification
+            # Sockets managed by libuv are always in non-blocking mode,
+            # self.assertFalse(
+            #     fcntl.fcntl(s, fcntl.F_GETFL, os.O_NONBLOCK) & os.O_NONBLOCK)
             self.assertTrue(s.getblocking())
 
     @support.requires_linux_version(2, 6, 28)
