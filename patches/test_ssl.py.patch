@@ -1,5 +1,5 @@
 diff --git a/tests/python/carboniotests/test/test_ssl.py b/tests/python/carboniotests/test/test_ssl.py
-index 95e6b7a..e249e34 100644
+index 95e6b7a..0625dbd 100644
 --- a/tests/python/carboniotests/test/test_ssl.py
 +++ b/tests/python/carboniotests/test/test_ssl.py
 @@ -1,3 +1,8 @@

@@ -1,5 +1,5 @@
 diff --git a/tests/python/carboniotests/test/test_socket.py b/tests/python/carboniotests/test/test_socket.py
-index cc6c2a9..8355dd6 100644
+index cc6c2a9..9eb0c94 100644
 --- a/tests/python/carboniotests/test/test_socket.py
 +++ b/tests/python/carboniotests/test/test_socket.py
 @@ -1,3 +1,5 @@
@@ -232,7 +232,47 @@ index cc6c2a9..8355dd6 100644
  
  class BasicTCPTest2(NetworkConnectionTest, BasicTCPTest):
      """Tests that NetworkConnection does not break existing TCP functionality.
-@@ -5659,6 +5660,7 @@ class TCPTimeoutTest(SocketTCPTest):
+@@ -5556,7 +5557,6 @@ class NetworkConnectionAttributesTest(SocketTCPTest, ThreadableTest):
+     def _testFamily(self):
+         self.cli = socket.create_connection((HOST, self.port),
+                             timeout=support.LOOPBACK_TIMEOUT)
+-        self.addCleanup(self.cli.close)
+         self.assertEqual(self.cli.family, 2)
+ 
+     testSourceAddress = _justAccept
+@@ -5564,7 +5564,6 @@ class NetworkConnectionAttributesTest(SocketTCPTest, ThreadableTest):
+         self.cli = socket.create_connection((HOST, self.port),
+                             timeout=support.LOOPBACK_TIMEOUT,
+                             source_address=('', self.source_port))
+-        self.addCleanup(self.cli.close)
+         self.assertEqual(self.cli.getsockname()[1], self.source_port)
+         # The port number being used is sufficient to show that the bind()
+         # call happened.
+@@ -5576,7 +5575,6 @@ class NetworkConnectionAttributesTest(SocketTCPTest, ThreadableTest):
+         socket.setdefaulttimeout(42)
+         try:
+             self.cli = socket.create_connection((HOST, self.port))
+-            self.addCleanup(self.cli.close)
+         finally:
+             socket.setdefaulttimeout(None)
+         self.assertEqual(self.cli.gettimeout(), 42)
+@@ -5588,7 +5586,6 @@ class NetworkConnectionAttributesTest(SocketTCPTest, ThreadableTest):
+         socket.setdefaulttimeout(30)
+         try:
+             self.cli = socket.create_connection((HOST, self.port), timeout=None)
+-            self.addCleanup(self.cli.close)
+         finally:
+             socket.setdefaulttimeout(None)
+         self.assertEqual(self.cli.gettimeout(), None)
+@@ -5601,7 +5598,6 @@ class NetworkConnectionAttributesTest(SocketTCPTest, ThreadableTest):
+     testTimeoutValueNonamed = _justAccept
+     def _testTimeoutValueNonamed(self):
+         self.cli = socket.create_connection((HOST, self.port), 30)
+-        self.addCleanup(self.cli.close)
+         self.assertEqual(self.cli.gettimeout(), 30)
+ 
+ 
+@@ -5659,6 +5655,7 @@ class TCPTimeoutTest(SocketTCPTest):
          if not ok:
              self.fail("accept() returned success when we did not expect it")
  
@@ -240,7 +280,7 @@ index cc6c2a9..8355dd6 100644
      @unittest.skipUnless(hasattr(signal, 'alarm'),
                           'test needs signal.alarm()')
      def testInterruptedTimeout(self):
-@@ -5763,6 +5765,15 @@ class TestExceptions(unittest.TestCase):
+@@ -5763,6 +5760,15 @@ class TestExceptions(unittest.TestCase):
          with self.assertRaises(OSError):
              sock.setblocking(False)
  
@@ -256,7 +296,20 @@ index cc6c2a9..8355dd6 100644
  
  @unittest.skipUnless(sys.platform == 'linux', 'Linux specific test')
  class TestLinuxAbstractNamespace(unittest.TestCase):
-@@ -6242,6 +6253,7 @@ class NonblockConstantTest(unittest.TestCase):
+@@ -6202,8 +6208,10 @@ class NonblockConstantTest(unittest.TestCase):
+         else:
+             self.assertEqual(s.type, socket.SOCK_STREAM)
+             self.assertEqual(s.gettimeout(), None)
+-            self.assertFalse(
+-                fcntl.fcntl(s, fcntl.F_GETFL, os.O_NONBLOCK) & os.O_NONBLOCK)
++            # CCP Modification
++            # Sockets managed by libuv are always in non-blocking mode,
++            # self.assertFalse(
++            #     fcntl.fcntl(s, fcntl.F_GETFL, os.O_NONBLOCK) & os.O_NONBLOCK)
+             self.assertTrue(s.getblocking())
+ 
+     @support.requires_linux_version(2, 6, 28)
+@@ -6242,6 +6250,7 @@ class NonblockConstantTest(unittest.TestCase):
  
  @unittest.skipUnless(os.name == "nt", "Windows specific")
  @unittest.skipUnless(multiprocessing, "need multiprocessing")
@@ -264,7 +317,7 @@ index cc6c2a9..8355dd6 100644
  class TestSocketSharing(SocketTCPTest):
      # This must be classmethod and not staticmethod or multiprocessing
      # won't be able to bootstrap it.
-@@ -6395,7 +6407,15 @@ class SendfileUsingSendTest(ThreadedTCPSocketTest):
+@@ -6395,7 +6404,15 @@ class SendfileUsingSendTest(ThreadedTCPSocketTest):
      def meth_from_sock(self, sock):
          # Depending on the mixin class being run return either send()
          # or sendfile() method implementation.
@@ -281,7 +334,7 @@ index cc6c2a9..8355dd6 100644
  
      # regular file
  
-@@ -6420,6 +6440,7 @@ class SendfileUsingSendTest(ThreadedTCPSocketTest):
+@@ -6420,6 +6437,7 @@ class SendfileUsingSendTest(ThreadedTCPSocketTest):
          address = self.serv.getsockname()
          file = io.BytesIO(self.FILEDATA)
          with socket.create_connection(address) as sock, file as file:
@@ -289,7 +342,7 @@ index cc6c2a9..8355dd6 100644
              sent = sock.sendfile(file)
              self.assertEqual(sent, self.FILESIZE)
              self.assertEqual(file.tell(), self.FILESIZE)
-@@ -6569,7 +6590,7 @@ class SendfileUsingSendTest(ThreadedTCPSocketTest):
+@@ -6569,7 +6587,7 @@ class SendfileUsingSendTest(ThreadedTCPSocketTest):
          address = self.serv.getsockname()
          with open(os_helper.TESTFN, 'rb') as file:
              with socket.create_connection(address) as sock:
@@ -298,7 +351,7 @@ index cc6c2a9..8355dd6 100644
                  meth = self.meth_from_sock(sock)
                  self.assertRaises(TimeoutError, meth, file)
  
-@@ -6907,26 +6928,41 @@ class CreateServerTest(unittest.TestCase):
+@@ -6907,26 +6925,41 @@ class CreateServerTest(unittest.TestCase):
  class CreateServerFunctionalTest(unittest.TestCase):
      timeout = support.LOOPBACK_TIMEOUT
  
@@ -351,7 +404,7 @@ index cc6c2a9..8355dd6 100644
              sock.settimeout(self.timeout)
              sock.connect(addr)
              sock.sendall(b'foo')
-@@ -6934,17 +6970,14 @@ class CreateServerFunctionalTest(unittest.TestCase):
+@@ -6934,17 +6967,14 @@ class CreateServerFunctionalTest(unittest.TestCase):
  
      def test_tcp4(self):
          port = socket_helper.find_unused_port()
@@ -373,7 +426,7 @@ index cc6c2a9..8355dd6 100644
  
      # --- dual stack tests
  
-@@ -6953,20 +6986,16 @@ class CreateServerFunctionalTest(unittest.TestCase):
+@@ -6953,20 +6983,16 @@ class CreateServerFunctionalTest(unittest.TestCase):
      @unittest.skipUnless(socket_helper.IPV6_ENABLED, 'IPv6 required for this test')
      def test_dual_stack_client_v4(self):
          port = socket_helper.find_unused_port()
@@ -398,7 +451,7 @@ index cc6c2a9..8355dd6 100644
  
  @requireAttrs(socket, "send_fds")
  @requireAttrs(socket, "recv_fds")
-@@ -7009,11 +7038,426 @@ class SendRecvFdsTests(unittest.TestCase):
+@@ -7009,11 +7035,426 @@ class SendRecvFdsTests(unittest.TestCase):
              data = os.read(rfd, 100)
              self.assertEqual(data,  str(index).encode())
  

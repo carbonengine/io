@@ -1,5 +1,5 @@
 diff --git a/src/socketmodule.cpp b/src/socketmodule.cpp
-index 27afd73..fce0f43 100644
+index 27afd73..9c6d7ec 100644
 --- a/src/socketmodule.cpp
 +++ b/src/socketmodule.cpp
 @@ -83,6 +83,7 @@ Local naming conventions:
@@ -51,11 +51,11 @@ index 27afd73..fce0f43 100644
 +
 +bool is_managed_by_libuv( int sock_type, int family )
 +{
-+	if ( sock_type == SOCK_DGRAM ) {
-+		return true;
++	if ( sock_type & SOCK_DGRAM ) {
++		return family == AF_INET || family == AF_INET6;
 +	}
 +
-+	if ( sock_type == SOCK_STREAM ) {
++	if ( sock_type & SOCK_STREAM ) {
 +		return family == AF_INET || family == AF_INET6;
 +	}
 +
@@ -365,7 +365,7 @@ index 27afd73..fce0f43 100644
 +				}
 +			}
 +			
-+			if ( s->sock_type == SOCK_STREAM )
++			if ( s->sock_type & SOCK_STREAM )
 +			{
 +				auto handle = reinterpret_cast<uv_tcp_t *>(s->uv_handle);
 +				if ( ipv6_v6only_flag )
@@ -373,7 +373,7 @@ index 27afd73..fce0f43 100644
 +					bind_flags = UV_TCP_IPV6ONLY;
 +				}
 +				res = uv_tcp_bind(handle, SAS2SA(&addrbuf), bind_flags );
-+			} else if ( s->sock_type == SOCK_DGRAM )
++			} else if ( s->sock_type & SOCK_DGRAM )
 +			{
 +				auto handle = reinterpret_cast<uv_udp_t *>(s->uv_handle);
 +				if ( ipv6_v6only_flag )
@@ -528,7 +528,7 @@ index 27afd73..fce0f43 100644
 -        return NULL;
 +	if( is_managed_by_libuv( s ) )
 +	{
-+		if( s->sock_type != SOCK_STREAM )
++		if( !(s->sock_type & SOCK_STREAM) )
 +		{
 +			PyErr_SetString(PyExc_NotImplementedError, "Unsupported libuv connection type");
 +			return nullptr;
@@ -563,7 +563,7 @@ index 27afd73..fce0f43 100644
 -        return NULL;
 +	if( is_managed_by_libuv( s ) )
 +	{
-+		if( s->sock_type != SOCK_STREAM )
++		if( !(s->sock_type & SOCK_STREAM) )
 +		{
 +			PyErr_SetString(PyExc_NotImplementedError, "Unsupported libuv connection type");
 +			return nullptr;
@@ -731,11 +731,11 @@ index 27afd73..fce0f43 100644
 +	
 +	if ( is_managed_by_libuv( s ))
 +	{
-+		if( s->sock_type == SOCK_STREAM )
++		if( s->sock_type & SOCK_STREAM )
 +		{
 +			return uv_tcp_recv_impl( s, recvlen, flags );
 +		}
-+		else if( s->sock_type == SOCK_DGRAM )
++		else if( s->sock_type & SOCK_DGRAM )
 +		{
 +			auto tup = uv_udp_recv_impl( s, recvlen, flags );
 +			if( !tup )
@@ -806,7 +806,7 @@ index 27afd73..fce0f43 100644
 +	
 +	if( is_managed_by_libuv( s ) )
 +	{
-+		if( s->sock_type == SOCK_STREAM )
++		if( s->sock_type & SOCK_STREAM )
 +		{
 +			auto request = std::make_shared<StreamRecvIntoRequest>(s, buf, recvlen, flags);
 +			PyObject* bytesReceived = request->execute();
@@ -868,7 +868,7 @@ index 27afd73..fce0f43 100644
 +
 +	if( is_managed_by_libuv( s ) )
 +	{
-+		if( s->sock_type == SOCK_STREAM )
++		if( s->sock_type & SOCK_STREAM )
 +		{
 +			sockaddr_storage name;
 +			int namelen = sizeof( sockaddr_storage );
@@ -891,7 +891,7 @@ index 27afd73..fce0f43 100644
 +			}
 +			ret = PyTuple_Pack( 2, buf, addr );
 +		}
-+		else if ( s->sock_type == SOCK_DGRAM )
++		else if ( s->sock_type & SOCK_DGRAM )
 +		{
 +			ret = uv_udp_recv_impl( s, recvlen, flags );
 +		}
@@ -944,14 +944,14 @@ index 27afd73..fce0f43 100644
      buflen = pbuf.len;
  
      if (recvlen < 0) {
-@@ -4030,7 +4412,46 @@ sock_recvfrom_into(PySocketSockObject *s, PyObject *args, PyObject* kwds)
+@@ -4030,7 +4412,48 @@ sock_recvfrom_into(PySocketSockObject *s, PyObject *args, PyObject* kwds)
          return NULL;
      }
  
 -    readlen = sock_recvfrom_guts(s, buf, recvlen, flags, &addr);
 +	if( is_managed_by_libuv( s ) )
 +	{
-+		if( s->sock_type == SOCK_STREAM )
++		if( s->sock_type & SOCK_STREAM )
 +		{
 +			auto request = std::make_shared<StreamRecvIntoRequest>(s, buf, recvlen, flags);
 +			PyObject* bytesReceived = request->execute();
@@ -962,16 +962,18 @@ index 27afd73..fce0f43 100644
 +			}
 +			readlen = PyLong_AsSsize_t(bytesReceived);
 +			
-+			sock_addr_t addrbuf;
-+			socklen_t addrlen;
++			sockaddr_storage addrbuf;
++			int addrlen = sizeof( sockaddr_storage );
 +
-+			if( !getsockaddrlen( s, &addrlen ) )
++			int status = uv_tcp_getpeername(reinterpret_cast<uv_tcp_t*>( s->uv_handle ), reinterpret_cast<sockaddr*>(&addrbuf), &addrlen);
++			if ( status < 0 )
 +			{
-+				PyBuffer_Release(&pbuf);
-+				return nullptr;
++			  PyErr_FromUvErr( status );
++			  PyBuffer_Release(&pbuf);
++			  return nullptr;
 +			}
 +
-+			addr = makesockaddr( s->sock_fd, SAS2SA( &addrbuf ), addrlen, s->sock_proto );
++			addr = makesockaddr( s->sock_fd, reinterpret_cast<sockaddr*>(&addrbuf), addrlen, s->sock_proto );
 +			if( !addr )
 +			{
 +				PyBuffer_Release(&pbuf);
@@ -992,7 +994,7 @@ index 27afd73..fce0f43 100644
      if (readlen < 0) {
          PyBuffer_Release(&pbuf);
          /* Return an error */
-@@ -4062,9 +4483,41 @@ struct sock_recvmsg {
+@@ -4062,9 +4485,41 @@ struct sock_recvmsg {
  static int
  sock_recvmsg_impl(PySocketSockObject *s, void *data)
  {
@@ -1036,7 +1038,7 @@ index 27afd73..fce0f43 100644
      return  (ctx->result >= 0);
  }
  
-@@ -4214,7 +4667,7 @@ err_closefds:
+@@ -4214,7 +4669,7 @@ err_closefds:
  static PyObject *
  makeval_recvmsg(ssize_t received, void *data)
  {
@@ -1045,7 +1047,7 @@ index 27afd73..fce0f43 100644
  
      if (received < PyBytes_GET_SIZE(*buf))
          _PyBytes_Resize(buf, received);
-@@ -4387,7 +4840,7 @@ struct sock_send {
+@@ -4387,7 +4842,7 @@ struct sock_send {
  static int
  sock_send_impl(PySocketSockObject *s, void *data)
  {
@@ -1054,7 +1056,7 @@ index 27afd73..fce0f43 100644
  
  #ifdef MS_WINDOWS
      if (ctx->len > INT_MAX)
-@@ -4399,6 +4852,20 @@ sock_send_impl(PySocketSockObject *s, void *data)
+@@ -4399,6 +4854,20 @@ sock_send_impl(PySocketSockObject *s, void *data)
      return (ctx->result >= 0);
  }
  
@@ -1075,7 +1077,7 @@ index 27afd73..fce0f43 100644
  /* s.send(data [,flags]) method */
  
  static PyObject *
-@@ -4409,13 +4876,38 @@ sock_send(PySocketSockObject *s, PyObject *args)
+@@ -4409,13 +4878,38 @@ sock_send(PySocketSockObject *s, PyObject *args)
      struct sock_send ctx;
  
      if (!PyArg_ParseTuple(args, "y*|i:send", &pbuf, &flags))
@@ -1118,7 +1120,7 @@ index 27afd73..fce0f43 100644
      ctx.len = pbuf.len;
      ctx.flags = flags;
      if (sock_call(s, 1, sock_send_impl, &ctx) < 0) {
-@@ -4452,50 +4944,77 @@ sock_sendall(PySocketSockObject *s, PyObject *args)
+@@ -4452,50 +4946,77 @@ sock_sendall(PySocketSockObject *s, PyObject *args)
      PyObject *res = NULL;
  
      if (!PyArg_ParseTuple(args, "y*|i:sendall", &pbuf, &flags))
@@ -1238,7 +1240,7 @@ index 27afd73..fce0f43 100644
  
      res = Py_NewRef(Py_None);
  
-@@ -4526,7 +5045,7 @@ struct sock_sendto {
+@@ -4526,7 +5047,7 @@ struct sock_sendto {
  static int
  sock_sendto_impl(PySocketSockObject *s, void *data)
  {
@@ -1247,7 +1249,7 @@ index 27afd73..fce0f43 100644
  
  #ifdef MS_WINDOWS
      if (ctx->len > INT_MAX)
-@@ -4540,6 +5059,12 @@ sock_sendto_impl(PySocketSockObject *s, void *data)
+@@ -4540,6 +5061,12 @@ sock_sendto_impl(PySocketSockObject *s, void *data)
      return (ctx->result >= 0);
  }
  
@@ -1260,7 +1262,7 @@ index 27afd73..fce0f43 100644
  /* s.sendto(data, [flags,] sockaddr) method */
  
  static PyObject *
-@@ -4587,15 +5112,62 @@ sock_sendto(PySocketSockObject *s, PyObject *args)
+@@ -4587,15 +5114,62 @@ sock_sendto(PySocketSockObject *s, PyObject *args)
          return NULL;
      }
  
@@ -1276,7 +1278,7 @@ index 27afd73..fce0f43 100644
 -    }
 +	if ( is_managed_by_libuv( s ) )
 +	{
-+		if ( s->sock_type == SOCK_DGRAM )
++		if (s->sock_type & SOCK_DGRAM )
 +		{
 +			auto ret = uv_udp_sendto_impl( s, &ctx );
 +			if( !ret )
@@ -1291,7 +1293,7 @@ index 27afd73..fce0f43 100644
 +				return nullptr;
 +			}
 +		}
-+		else if ( s->sock_type == SOCK_STREAM ) {
++		else if ( s->sock_type & SOCK_STREAM ) {
 +			auto py_status = uv_sendall_impl(s, reinterpret_cast<char*>(pbuf.buf), pbuf.len, flags);
 +			if ( !py_status )
 +			{
@@ -1328,7 +1330,7 @@ index 27afd73..fce0f43 100644
      PyBuffer_Release(&pbuf);
  
      return PyLong_FromSsize_t(ctx.result);
-@@ -4678,7 +5250,7 @@ sock_sendmsg_iovec(PySocketSockObject *s, PyObject *data_arg,
+@@ -4678,7 +5252,7 @@ sock_sendmsg_iovec(PySocketSockObject *s, PyObject *data_arg,
  static int
  sock_sendmsg_impl(PySocketSockObject *s, void *data)
  {
@@ -1337,7 +1339,34 @@ index 27afd73..fce0f43 100644
  
      ctx->result = sendmsg(s->sock_fd, ctx->msg, ctx->flags);
      return (ctx->result >= 0);
-@@ -5167,6 +5739,230 @@ socket.fromshare().");
+@@ -4993,7 +5567,7 @@ sock_sendmsg_afalg(PySocketSockObject *self, PyObject *args, PyObject *kwds)
+     header->cmsg_level = SOL_ALG;
+     header->cmsg_type = ALG_SET_OP;
+     header->cmsg_len = CMSG_LEN(4);
+-    uiptr = (void*)CMSG_DATA(header);
++    uiptr = (unsigned int*)CMSG_DATA(header);
+     *uiptr = (unsigned int)op;
+ 
+     /* set initialization vector */
+@@ -5007,7 +5581,7 @@ sock_sendmsg_afalg(PySocketSockObject *self, PyObject *args, PyObject *kwds)
+         header->cmsg_level = SOL_ALG;
+         header->cmsg_type = ALG_SET_IV;
+         header->cmsg_len = CMSG_SPACE(sizeof(*alg_iv) + iv.len);
+-        alg_iv = (void*)CMSG_DATA(header);
++        alg_iv = (af_alg_iv*)CMSG_DATA(header);
+         alg_iv->ivlen = iv.len;
+         memcpy(alg_iv->iv, iv.buf, iv.len);
+     }
+@@ -5023,7 +5597,7 @@ sock_sendmsg_afalg(PySocketSockObject *self, PyObject *args, PyObject *kwds)
+         header->cmsg_level = SOL_ALG;
+         header->cmsg_type = ALG_SET_AEAD_ASSOCLEN;
+         header->cmsg_len = CMSG_LEN(4);
+-        uiptr = (void*)CMSG_DATA(header);
++        uiptr = (unsigned int*)CMSG_DATA(header);
+         *uiptr = (unsigned int)assoclen;
+     }
+ 
+@@ -5167,6 +5741,230 @@ socket.fromshare().");
  
  #endif
  
@@ -1568,7 +1597,7 @@ index 27afd73..fce0f43 100644
  /* List of methods for socket objects */
  
  static PyMethodDef sock_methods[] = {
-@@ -5258,6 +6054,11 @@ static PyMethodDef sock_methods[] = {
+@@ -5258,6 +6056,11 @@ static PyMethodDef sock_methods[] = {
      {"sendmsg_afalg",     _PyCFunction_CAST(sock_sendmsg_afalg), METH_VARARGS | METH_KEYWORDS,
                        sendmsg_afalg_doc},
  #endif
@@ -1580,7 +1609,7 @@ index 27afd73..fce0f43 100644
      {NULL,                      NULL}           /* sentinel */
  };
  
-@@ -5301,9 +6102,20 @@ sock_finalize(PySocketSockObject *s)
+@@ -5301,9 +6104,20 @@ sock_finalize(PySocketSockObject *s)
          s->sock_fd = INVALID_SOCKET;
  
          /* We do not want to retry upon EINTR: see sock_close() */
@@ -1604,7 +1633,7 @@ index 27afd73..fce0f43 100644
      }
  
      /* Restore the saved exception. */
-@@ -5364,20 +6176,99 @@ sock_repr(PySocketSockObject *s)
+@@ -5364,20 +6178,99 @@ sock_repr(PySocketSockObject *s)
  static PyObject *
  sock_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
  {
@@ -1713,7 +1742,7 @@ index 27afd73..fce0f43 100644
  /*ARGSUSED*/
  
  #ifndef HAVE_SOCKET
-@@ -5403,7 +6294,7 @@ sock_initobj_impl(PySocketSockObject *self, int family, int type, int proto,
+@@ -5403,7 +6296,7 @@ sock_initobj_impl(PySocketSockObject *self, int family, int type, int proto,
                    PyObject *fdobj)
  /*[clinic end generated code: output=d114d026b9a9a810 input=04cfc32953f5cc25]*/
  {
@@ -1722,7 +1751,7 @@ index 27afd73..fce0f43 100644
      SOCKET_T fd = INVALID_SOCKET;
      socket_state *state = find_module_state_by_def(Py_TYPE(self));
  
-@@ -5478,6 +6369,7 @@ sock_initobj_impl(PySocketSockObject *self, int family, int type, int proto,
+@@ -5478,6 +6371,7 @@ sock_initobj_impl(PySocketSockObject *self, int family, int type, int proto,
                  PyErr_SetString(PyExc_ValueError, "negative file descriptor");
                  return -1;
              }
@@ -1730,7 +1759,7 @@ index 27afd73..fce0f43 100644
  
              /* validate that passed file descriptor is valid and a socket. */
              sock_addr_t addrbuf;
-@@ -5509,7 +6401,7 @@ sock_initobj_impl(PySocketSockObject *self, int family, int type, int proto,
+@@ -5509,7 +6403,7 @@ sock_initobj_impl(PySocketSockObject *self, int family, int type, int proto,
                  int tmp;
                  socklen_t slen = sizeof(tmp);
                  if (getsockopt(fd, SOL_SOCKET, SO_TYPE,
@@ -1739,7 +1768,7 @@ index 27afd73..fce0f43 100644
                  {
                      type = tmp;
                  } else {
-@@ -5536,6 +6428,39 @@ sock_initobj_impl(PySocketSockObject *self, int family, int type, int proto,
+@@ -5536,6 +6430,39 @@ sock_initobj_impl(PySocketSockObject *self, int family, int type, int proto,
  #else
              proto = 0;
  #endif
@@ -1756,7 +1785,7 @@ index 27afd73..fce0f43 100644
 +				if( s->uv_handle == nullptr )
 +				{
 +					// No handle found for re-use, must create one.
-+					if( type == SOCK_STREAM )
++					if( type & SOCK_STREAM )
 +					{
 +						auto handle = create_uv_tcp_handle( &fd, family );
 +						if( !handle )
@@ -1765,7 +1794,7 @@ index 27afd73..fce0f43 100644
 +						}
 +						s->uv_handle = reinterpret_cast<uv_handle_t*>( handle );
 +					}
-+					else if( type == SOCK_DGRAM )
++					else if( type & SOCK_DGRAM )
 +					{
 +						auto handle = create_uv_udp_handle( &fd, family );
 +						if( !handle )
@@ -1779,13 +1808,13 @@ index 27afd73..fce0f43 100644
          }
      }
      else {
-@@ -5549,57 +6474,111 @@ sock_initobj_impl(PySocketSockObject *self, int family, int type, int proto,
+@@ -5549,57 +6476,111 @@ sock_initobj_impl(PySocketSockObject *self, int family, int type, int proto,
          if (proto == -1) {
              proto = 0;
          }
 +		if ( is_managed_by_libuv( type, family ))
 +		{
-+			if( type == SOCK_STREAM )
++			if( type & SOCK_STREAM )
 +			{
 +				auto handle = create_uv_tcp_handle( &fd, family );
 +				if( !handle )
@@ -1794,7 +1823,7 @@ index 27afd73..fce0f43 100644
 +				}
 +				s->uv_handle = reinterpret_cast<uv_handle_t*>( handle );
 +			}
-+			else if( type == SOCK_DGRAM )
++			else if( type & SOCK_DGRAM )
 +			{
 +				auto handle = create_uv_udp_handle( &fd, family );
 +				if( !handle )
@@ -1897,7 +1926,7 @@ index 27afd73..fce0f43 100644
 +			s->uv_handle = LookupHandle( fd );
 +			if ( ! s->uv_handle && is_managed_by_libuv( type, family ) )
 +			{
-+				if( type == SOCK_STREAM )
++				if( type & SOCK_STREAM )
 +				{
 +					auto handle = create_uv_tcp_handle(&fd, family);
 +					if( !handle )
@@ -1906,7 +1935,7 @@ index 27afd73..fce0f43 100644
 +					}
 +					s->uv_handle = reinterpret_cast<uv_handle_t*>(handle);
 +				}
-+				else if( type == SOCK_DGRAM )
++				else if( type & SOCK_DGRAM )
 +				{
 +					auto handle = create_uv_udp_handle(&fd, family);
 +					if( !handle )
@@ -1933,7 +1962,7 @@ index 27afd73..fce0f43 100644
      return 0;
  
  }
-@@ -5608,25 +6587,26 @@ sock_initobj_impl(PySocketSockObject *self, int family, int type, int proto,
+@@ -5608,25 +6589,26 @@ sock_initobj_impl(PySocketSockObject *self, int family, int type, int proto,
  /* Type object for socket objects. */
  
  static PyType_Slot sock_slots[] = {
@@ -1971,7 +2000,7 @@ index 27afd73..fce0f43 100644
  };
  
  
-@@ -5729,7 +6709,7 @@ extern int sethostname(const char *, size_t);
+@@ -5729,7 +6711,7 @@ extern int sethostname(const char *, size_t);
  
      res = PyObject_GetBuffer(hnobj, &buf, PyBUF_SIMPLE);
      if (!res) {
@@ -1980,7 +2009,7 @@ index 27afd73..fce0f43 100644
          PyBuffer_Release(&buf);
      }
      if (flag)
-@@ -5750,14 +6730,16 @@ socket_gethostbyname(PyObject *self, PyObject *args)
+@@ -5750,14 +6732,16 @@ socket_gethostbyname(PyObject *self, PyObject *args)
      char *name;
      struct sockaddr_in addrbuf;
      PyObject *ret = NULL;
@@ -1999,7 +2028,7 @@ index 27afd73..fce0f43 100644
                         sizeof(addrbuf), AF_INET);
      if (rc < 0) {
          goto finally;
-@@ -5944,6 +6926,7 @@ socket_gethostbyname_ex(PyObject *self, PyObject *args)
+@@ -5944,6 +6928,7 @@ socket_gethostbyname_ex(PyObject *self, PyObject *args)
      sock_addr_t addr;
      struct sockaddr *sa;
      PyObject *ret = NULL;
@@ -2007,7 +2036,7 @@ index 27afd73..fce0f43 100644
  #ifdef HAVE_GETHOSTBYNAME_R
      struct hostent hp_allocated;
  #ifdef HAVE_GETHOSTBYNAME_R_3_ARG
-@@ -5963,7 +6946,7 @@ socket_gethostbyname_ex(PyObject *self, PyObject *args)
+@@ -5963,7 +6948,7 @@ socket_gethostbyname_ex(PyObject *self, PyObject *args)
      if (PySys_Audit("socket.gethostbyname", "O", args) < 0) {
          goto finally;
      }
@@ -2016,7 +2045,7 @@ index 27afd73..fce0f43 100644
      if (setipaddr(state, name, SAS2SA(&addr), sizeof(addr), AF_INET) < 0) {
          goto finally;
      }
-@@ -6021,6 +7004,7 @@ socket_gethostbyaddr(PyObject *self, PyObject *args)
+@@ -6021,6 +7006,7 @@ socket_gethostbyaddr(PyObject *self, PyObject *args)
      char *ip_num;
      struct hostent *h;
      PyObject *ret = NULL;
@@ -2024,7 +2053,7 @@ index 27afd73..fce0f43 100644
  #ifdef HAVE_GETHOSTBYNAME_R
      struct hostent hp_allocated;
  #ifdef HAVE_GETHOSTBYNAME_R_3_ARG
-@@ -6048,7 +7032,7 @@ socket_gethostbyaddr(PyObject *self, PyObject *args)
+@@ -6048,7 +7034,7 @@ socket_gethostbyaddr(PyObject *self, PyObject *args)
          goto finally;
      }
      af = AF_UNSPEC;
@@ -2033,7 +2062,7 @@ index 27afd73..fce0f43 100644
      if (setipaddr(state, ip_num, sa, sizeof(addr), af) < 0) {
          goto finally;
      }
-@@ -6221,13 +7205,36 @@ socket_close(PyObject *self, PyObject *fdobj)
+@@ -6221,13 +7207,36 @@ socket_close(PyObject *self, PyObject *fdobj)
  {
      SOCKET_T fd;
      int res;
@@ -2073,7 +2102,7 @@ index 27afd73..fce0f43 100644
      /* bpo-30319: The peer can already have closed the connection.
         Python ignores ECONNRESET on close(). */
      if (res < 0 && !CHECK_ERRNO(ECONNRESET)) {
-@@ -6236,13 +7243,106 @@ socket_close(PyObject *self, PyObject *fdobj)
+@@ -6236,13 +7245,106 @@ socket_close(PyObject *self, PyObject *fdobj)
      Py_RETURN_NONE;
  }
  
@@ -2183,7 +2212,7 @@ index 27afd73..fce0f43 100644
  /* dup() function for socket fds */
  
  static PyObject *
-@@ -6282,8 +7382,72 @@ socket_dup(PyObject *self, PyObject *fdobj)
+@@ -6282,8 +7384,72 @@ socket_dup(PyObject *self, PyObject *fdobj)
          return NULL;
      }
  #endif
@@ -2231,7 +2260,7 @@ index 27afd73..fce0f43 100644
 +
 +	if( is_managed_by_libuv( type, family ) )
 +	{
-+		if( type == SOCK_STREAM )
++		if( type & SOCK_STREAM )
 +		{
 +			if (!dup_uv_tcp_handle( newfd ) )
 +			{
@@ -2239,7 +2268,7 @@ index 27afd73..fce0f43 100644
 +				return nullptr;
 +			}
 +		}
-+		else if( type == SOCK_DGRAM )
++		else if( type & SOCK_DGRAM )
 +		{
 +			if ( !dup_uv_udp_handle( newfd ) )
 +			{
@@ -2258,7 +2287,7 @@ index 27afd73..fce0f43 100644
      if (newfdobj == NULL) {
          SOCKETCLOSE(newfd);
      }
-@@ -6298,7 +7462,6 @@ sockets; on some platforms os.dup() won't work for socket file descriptors.");
+@@ -6298,7 +7464,6 @@ sockets; on some platforms os.dup() won't work for socket file descriptors.");
  #endif
  
  
@@ -2266,7 +2295,22 @@ index 27afd73..fce0f43 100644
  /* Create a pair of sockets using the socketpair() function.
     Arguments as for socket() except the default family is AF_UNIX if
     defined on the platform; otherwise, the default is AF_INET. */
-@@ -6346,19 +7509,73 @@ socket_socketpair(PyObject *self, PyObject *args)
+@@ -6329,9 +7494,9 @@ socket_socketpair(PyObject *self, PyObject *args)
+         return NULL;
+ 
+     /* Create a pair of socket fds */
+-    Py_BEGIN_ALLOW_THREADS
+ #ifdef SOCK_CLOEXEC
+     if (state->sock_cloexec_works != 0) {
++    	Py_BEGIN_ALLOW_THREADS
+         ret = socketpair(family, type | SOCK_CLOEXEC, proto, sv);
+         if (state->sock_cloexec_works == -1) {
+             if (ret >= 0) {
+@@ -6343,22 +7508,76 @@ socket_socketpair(PyObject *self, PyObject *args)
+                 ret = socketpair(family, type, proto, sv);
+             }
+         }
++    	Py_END_ALLOW_THREADS
      }
      else
  #endif
@@ -2274,7 +2318,6 @@ index 27afd73..fce0f43 100644
 -        ret = socketpair(family, type, proto, sv);
 -    }
 -    Py_END_ALLOW_THREADS
-+	Py_END_ALLOW_THREADS
 +	if( !is_managed_by_libuv(type, family) )
 +	{
 +#ifdef HAVE_SOCKETPAIR
@@ -2347,7 +2390,7 @@ index 27afd73..fce0f43 100644
      s0 = new_sockobject(state, sv[0], family, type, proto);
      if (s0 == NULL)
          goto finally;
-@@ -6387,8 +7604,6 @@ socketpair() function.\n\
+@@ -6387,8 +7606,6 @@ socketpair() function.\n\
  The arguments are the same as for socket() except the default family is\n\
  AF_UNIX if defined on the platform; otherwise, the default is AF_INET.");
  
@@ -2356,7 +2399,7 @@ index 27afd73..fce0f43 100644
  
  static PyObject *
  socket_ntohs(PyObject *self, PyObject *args)
-@@ -6738,8 +7953,7 @@ socket_inet_ntop(PyObject *self, PyObject *args)
+@@ -6738,8 +7955,7 @@ socket_inet_ntop(PyObject *self, PyObject *args)
  static PyObject *
  socket_getaddrinfo(PyObject *self, PyObject *args, PyObject* kwargs)
  {
@@ -2366,7 +2409,7 @@ index 27afd73..fce0f43 100644
      struct addrinfo hints, *res;
      struct addrinfo *res0 = NULL;
      PyObject *hobj = NULL;
-@@ -6753,9 +7967,8 @@ socket_getaddrinfo(PyObject *self, PyObject *args, PyObject* kwargs)
+@@ -6753,9 +7969,8 @@ socket_getaddrinfo(PyObject *self, PyObject *args, PyObject* kwargs)
  
      socktype = protocol = flags = 0;
      family = AF_UNSPEC;
@@ -2378,7 +2421,7 @@ index 27afd73..fce0f43 100644
          return NULL;
      }
      if (hobj == Py_None) {
-@@ -7234,6 +8447,22 @@ range of values.");
+@@ -7234,6 +8449,22 @@ range of values.");
  #endif    /* CMSG_LEN */
  
  
@@ -2401,7 +2444,7 @@ index 27afd73..fce0f43 100644
  /* List of functions exported by this module. */
  
  static PyMethodDef socket_methods[] = {
-@@ -7275,10 +8504,8 @@ static PyMethodDef socket_methods[] = {
+@@ -7275,10 +8506,8 @@ static PyMethodDef socket_methods[] = {
      {"dup",                     socket_dup,
       METH_O, dup_doc},
  #endif
@@ -2412,7 +2455,7 @@ index 27afd73..fce0f43 100644
      {"ntohs",                   socket_ntohs,
       METH_VARARGS, ntohs_doc},
      {"ntohl",                   socket_ntohl,
-@@ -7327,6 +8554,9 @@ static PyMethodDef socket_methods[] = {
+@@ -7327,6 +8556,9 @@ static PyMethodDef socket_methods[] = {
       METH_VARARGS, CMSG_SPACE_doc},
  #endif
  #endif
@@ -2422,7 +2465,7 @@ index 27afd73..fce0f43 100644
      {NULL,                      NULL}            /* Sentinel */
  };
  
-@@ -7394,13 +8624,13 @@ static void
+@@ -7394,13 +8626,13 @@ static void
  sock_destroy_api(PyObject *capsule)
  {
      void *capi = PyCapsule_GetPointer(capsule, PySocket_CAPSULE_NAME);
@@ -2438,7 +2481,7 @@ index 27afd73..fce0f43 100644
      if (capi == NULL) {
          PyErr_NoMemory();
          return NULL;
-@@ -7409,6 +8639,7 @@ sock_get_api(socket_state *state)
+@@ -7409,6 +8641,7 @@ sock_get_api(socket_state *state)
      capi->Sock_Type = (PyTypeObject *)Py_NewRef(state->sock_type);
      capi->error = Py_NewRef(PyExc_OSError);
      capi->timeout_error = Py_NewRef(PyExc_TimeoutError);
@@ -2446,7 +2489,7 @@ index 27afd73..fce0f43 100644
      return capi;
  }
  
-@@ -7431,11 +8662,16 @@ See the socket module for documentation.");
+@@ -7431,11 +8664,16 @@ See the socket module for documentation.");
  static int
  socket_exec(PyObject *m)
  {
@@ -2464,7 +2507,7 @@ index 27afd73..fce0f43 100644
      state->defaulttimeout = _PYTIME_FROMSECONDS(-1);
  
  #if defined(HAVE_ACCEPT) || defined(HAVE_ACCEPT4)
-@@ -7470,7 +8706,7 @@ socket_exec(PyObject *m)
+@@ -7470,7 +8708,7 @@ socket_exec(PyObject *m)
          goto error;
      }
  
@@ -2473,7 +2516,7 @@ index 27afd73..fce0f43 100644
      if (sock_type == NULL) {
          goto error;
      }
-@@ -7493,18 +8729,23 @@ socket_exec(PyObject *m)
+@@ -7493,18 +8731,23 @@ socket_exec(PyObject *m)
      }
  
      /* Export C API */
@@ -2500,7 +2543,7 @@ index 27afd73..fce0f43 100644
      Py_DECREF(capsule);
      if (rc < 0) {
          goto error;
-@@ -8901,7 +10142,7 @@ socket_exec(PyObject *m)
+@@ -8901,7 +10144,7 @@ socket_exec(PyObject *m)
              if (tmp == NULL) {
                  goto error;
              }
@@ -2509,7 +2552,7 @@ index 27afd73..fce0f43 100644
              Py_DECREF(tmp);
              if (rc < 0) {
                  goto error;
-@@ -8942,7 +10183,7 @@ error:
+@@ -8942,7 +10185,7 @@ error:
  }
  
  static struct PyModuleDef_Slot socket_slots[] = {
@@ -2518,7 +2561,7 @@ index 27afd73..fce0f43 100644
      {Py_mod_multiple_interpreters, Py_MOD_PER_INTERPRETER_GIL_SUPPORTED},
      {0, NULL},
  };
-@@ -8973,20 +10214,27 @@ socket_free(void *mod)
+@@ -8973,20 +10216,27 @@ socket_free(void *mod)
      (void)socket_clear((PyObject *)mod);
  }
  
